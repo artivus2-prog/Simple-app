@@ -1,4 +1,4 @@
-package com.example.simpleapp
+package com.example.fonbetbot
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
