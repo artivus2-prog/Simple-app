@@ -25,13 +25,20 @@ jobs:
         packages: 'platforms;android-34 build-tools;34.0.0'
         accept-android-sdk-licenses: true
 
+    - name: Create gradle wrapper directory
+      run: mkdir -p gradle/wrapper
+
     - name: Download gradle-wrapper.jar
       run: |
-        mkdir -p gradle/wrapper
-        curl -L https://raw.githubusercontent.com/gradle/gradle/master/gradle/wrapper/gradle-wrapper.jar -o gradle/wrapper/gradle-wrapper.jar
+        cd gradle/wrapper
+        curl -L https://raw.githubusercontent.com/gradle/gradle/master/gradle/wrapper/gradle-wrapper.jar -o gradle-wrapper.jar
+        ls -la
+        cd ../..
 
     - name: Grant execute permission for gradlew
-      run: chmod +x gradlew
+      run: |
+        chmod +x gradlew
+        ls -la gradle/wrapper/
 
     - name: Build Debug APK
       run: ./gradlew assembleDebug --stacktrace --no-daemon
