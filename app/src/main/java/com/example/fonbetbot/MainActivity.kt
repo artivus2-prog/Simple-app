@@ -3,6 +3,7 @@ package com.example.fonbetbot
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.SharedPreferences
 import android.os.Bundle
 import android.webkit.CookieManager
 import android.widget.Toast
@@ -26,18 +27,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.*
-import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
-val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "auth_prefs")
-
 class MainActivity : ComponentActivity() {
+    
+    companion object {
+        private const val PREFS_NAME = "auth_prefs"
+        private const val KEY_FSID = "fsid"
+        private const val KEY_DEVICE_ID = "device_id"
+    }
+    
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -59,7 +60,7 @@ data class AuthData(
 @Composable
 fun FonbetBotApp() {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val prefs = remember { context.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE) }
     
     var isLoggedIn by remember { mutableStateOf(false) }
     var currentScreen by remember { mutableStateOf("auth") }
@@ -67,9 +68,8 @@ fun FonbetBotApp() {
     
     // Загружаем сохранённые данные при старте
     LaunchedEffect(Unit) {
-        val prefs = context.dataStore.data.first()
-        val fsid = prefs[stringPreferencesKey("fsid")] ?: ""
-        val deviceId = prefs[stringPreferencesKey("deviceId")] ?: ""
+        val fsid = prefs.getString("fsid", "") ?: ""
+        val deviceId = prefs.getString("device_id", "") ?: ""
         
         if (fsid.isNotEmpty() && deviceId.isNotEmpty()) {
             authData = AuthData(fsid, deviceId)
@@ -78,13 +78,17 @@ fun FonbetBotApp() {
     
     // Функция сохранения данных
     fun saveAuthData(fsid: String, deviceId: String) {
-        scope.launch {
-            context.dataStore.edit { prefs ->
-                prefs[stringPreferencesKey("fsid")] = fsid
-                prefs[stringPreferencesKey("deviceId")] = deviceId
-            }
-        }
+        prefs.edit()
+            .putString("fsid", fsid)
+            .putString("device_id", deviceId)
+            .apply()
         authData = AuthData(fsid, deviceId)
+    }
+    
+    // Функция очистки данных
+    fun clearAuthData() {
+        prefs.edit().clear().apply()
+        authData = null
     }
     
     if (!isLoggedIn) {
@@ -104,10 +108,7 @@ fun FonbetBotApp() {
                 onLogout = { 
                     isLoggedIn = false
                     currentScreen = "auth"
-                    authData = null
-                    scope.launch {
-                        context.dataStore.edit { it.clear() }
-                    }
+                    clearAuthData()
                 }
             )
             "webAuth" -> WebViewAuthScreen(
@@ -221,11 +222,7 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                         leadingIcon = { Icon(Icons.Default.Person, null) },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
-                        isError = errorMessage != null,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outline
-                        )
+                        isError = errorMessage != null
                     )
                     
                     Spacer(modifier = Modifier.height(12.dp))
@@ -297,7 +294,6 @@ fun MainBotScreen(
     onLogout: () -> Unit
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val apiClient = remember { ApiClient() }
     
     var isBotRunning by remember { mutableStateOf(false) }
