@@ -26,10 +26,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.*
+import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
+
+val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "auth_prefs")
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -44,12 +50,42 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+data class AuthData(
+    val fsid: String,
+    val deviceId: String
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FonbetBotApp() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    
     var isLoggedIn by remember { mutableStateOf(false) }
     var currentScreen by remember { mutableStateOf("auth") }
     var authData by remember { mutableStateOf<AuthData?>(null) }
+    
+    // Загружаем сохранённые данные при старте
+    LaunchedEffect(Unit) {
+        val prefs = context.dataStore.data.first()
+        val fsid = prefs[stringPreferencesKey("fsid")] ?: ""
+        val deviceId = prefs[stringPreferencesKey("deviceId")] ?: ""
+        
+        if (fsid.isNotEmpty() && deviceId.isNotEmpty()) {
+            authData = AuthData(fsid, deviceId)
+        }
+    }
+    
+    // Функция сохранения данных
+    fun saveAuthData(fsid: String, deviceId: String) {
+        scope.launch {
+            context.dataStore.edit { prefs ->
+                prefs[stringPreferencesKey("fsid")] = fsid
+                prefs[stringPreferencesKey("deviceId")] = deviceId
+            }
+        }
+        authData = AuthData(fsid, deviceId)
+    }
     
     if (!isLoggedIn) {
         AuthScreen(onLoginSuccess = { 
@@ -69,11 +105,14 @@ fun FonbetBotApp() {
                     isLoggedIn = false
                     currentScreen = "auth"
                     authData = null
+                    scope.launch {
+                        context.dataStore.edit { it.clear() }
+                    }
                 }
             )
             "webAuth" -> WebViewAuthScreen(
                 onAuthSuccess = { fsid, deviceId ->
-                    authData = AuthData(fsid, deviceId)
+                    saveAuthData(fsid, deviceId)
                     currentScreen = "main"
                 },
                 onBack = { currentScreen = "main" }
@@ -91,11 +130,6 @@ fun FonbetBotApp() {
         }
     }
 }
-
-data class AuthData(
-    val fsid: String,
-    val deviceId: String
-)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -270,7 +304,6 @@ fun MainBotScreen(
     var balance by remember { mutableStateOf(10000.0) }
     val logs = remember { mutableStateListOf<String>() }
     var showMenu by remember { mutableStateOf(false) }
-    var showAuthCard by remember { mutableStateOf(authData == null) }
     var isLoadingBalance by remember { mutableStateOf(false) }
     
     // Функция для получения баланса через API
@@ -282,9 +315,8 @@ fun MainBotScreen(
         
         isLoadingBalance = true
         
-        // Получаем куки из WebView (если есть)
         val cookieManager = CookieManager.getInstance()
-        val cookieString = cookieManager.getCookie("https://your-site.com") ?: ""
+        val cookieString = cookieManager.getCookie("https://www.fon.bet") ?: ""
         
         val cookies = cookieString.split("; ").associate { cookie ->
             val parts = cookie.split("=", limit = 2)
@@ -388,39 +420,7 @@ fun MainBotScreen(
                 .padding(paddingValues)
                 .padding(16.dp)
         ) {
-            // Карточка авторизации (если нет данных)
-            if (showAuthCard) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.tertiaryContainer
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            "⚠️ Требуется авторизация на сайте",
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Button(
-                            onClick = onNavigateToWebAuth,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.tertiary
-                            )
-                        ) {
-                            Text("🔐 Авторизоваться")
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-            }
-            
-            // Карточка с данными авторизации
+            // Карточка авторизации
             if (authData != null) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -438,49 +438,70 @@ fun MainBotScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                "✅ Данные получены",
+                                "✅ Данные авторизации получены",
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer
                             )
                             Row {
-                                IconButton(
-                                    onClick = {
-                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                        val clip = ClipData.newPlainText(
-                                            "Auth Data",
-                                            "FSID: ${authData.fsid}\nDeviceID: ${authData.deviceId}"
-                                        )
-                                        clipboard.setPrimaryClip(clip)
-                                        Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
-                                    }
-                                ) {
-                                    Icon(
-                                        Icons.Default.ContentCopy,
-                                        "Копировать",
-                                        modifier = Modifier.size(18.dp)
+                                IconButton(onClick = { 
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    val clip = ClipData.newPlainText(
+                                        "Auth Data",
+                                        "FSID: ${authData.fsid}\nDeviceID: ${authData.deviceId}"
                                     )
+                                    clipboard.setPrimaryClip(clip)
+                                    Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
+                                }) {
+                                    Icon(Icons.Default.ContentCopy, "Копировать", modifier = Modifier.size(18.dp))
                                 }
-                                IconButton(onClick = { fetchBalanceFromApi() }) {
-                                    Icon(
-                                        Icons.Default.Refresh,
-                                        "Обновить баланс",
-                                        modifier = Modifier.size(18.dp)
-                                    )
+                                IconButton(onClick = { 
+                                    onNavigateToWebAuth()
+                                }) {
+                                    Icon(Icons.Default.Refresh, "Обновить", modifier = Modifier.size(18.dp))
                                 }
                             }
                         }
                         Text(
-                            "FSID: ${authData.fsid.take(20)}...",
-                            fontSize = 12.sp,
+                            "FSID: ${authData.fsid.take(25)}...",
+                            fontSize = 11.sp,
                             fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                             color = MaterialTheme.colorScheme.onSecondaryContainer
                         )
                         Text(
-                            "DeviceID: ${authData.deviceId.take(20)}...",
-                            fontSize = 12.sp,
+                            "DeviceID: ${authData.deviceId.take(25)}...",
+                            fontSize = 11.sp,
                             fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                             color = MaterialTheme.colorScheme.onSecondaryContainer
                         )
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            } else {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            "⚠️ Требуется авторизация на сайте Фонбет",
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = onNavigateToWebAuth,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.tertiary
+                            )
+                        ) {
+                            Text("🔐 Авторизоваться")
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(12.dp))
@@ -550,7 +571,6 @@ fun MainBotScreen(
                     val timestamp = getCurrentTime()
                     if (isBotRunning) {
                         logs.add(0, "[$timestamp] 🚀 Бот запущен")
-                        // При запуске обновляем баланс через API
                         if (authData != null) {
                             fetchBalanceFromApi()
                         }
@@ -812,6 +832,7 @@ fun ProfileScreen(
         }
     }
 }
+
 @Composable
 fun ProfileInfoRow(label: String, value: String) {
     Row(
@@ -862,11 +883,42 @@ fun StatsScreen(onBack: () -> Unit) {
                     shape = RoundedCornerShape(16.dp)
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Text("За сегодня", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Text("📈 За сегодня", fontWeight = FontWeight.Bold, fontSize = 18.sp)
                         Spacer(modifier = Modifier.height(8.dp))
                         Text("Профит: +1,250 ₽")
                         Text("Ставок: 15")
+                        Text("Выигрышей: 11")
                         Text("Процент побед: 73.3%")
+                    }
+                }
+            }
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("📅 За неделю", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Профит: +8,420 ₽")
+                        Text("Ставок: 87")
+                        Text("Выигрышей: 58")
+                        Text("Процент побед: 66.7%")
+                    }
+                }
+            }
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("🏆 За всё время", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Профит: +24,850 ₽")
+                        Text("Ставок: 312")
+                        Text("Выигрышей: 218")
+                        Text("Процент побед: 69.9%")
                     }
                 }
             }
@@ -880,7 +932,7 @@ fun HistoryScreen(onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("📜 История") },
+                title = { Text("📜 История ставок") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, "Назад")
@@ -896,23 +948,47 @@ fun HistoryScreen(onBack: () -> Unit) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(16.dp)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            items(10) { index ->
+            items(listOf(
+                Triple("15:30", "Победа", "+500 ₽"),
+                Triple("14:15", "Победа", "+250 ₽"),
+                Triple("13:00", "Поражение", "-100 ₽"),
+                Triple("12:30", "Победа", "+750 ₽"),
+                Triple("11:45", "Победа", "+300 ₽"),
+                Triple("10:20", "Поражение", "-100 ₽"),
+                Triple("09:15", "Победа", "+200 ₽")
+            )) { (time, status, amount) ->
                 Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
+                    modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Ставка #${index + 1}")
-                        Text("+${(100..500).random()} ₽", color = Color(0xFF4CAF50))
+                        Column {
+                            Text(
+                                time,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                status,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                        Text(
+                            amount,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (amount.startsWith("+")) Color(0xFF4CAF50) else Color(0xFFF44336)
+                        )
                     }
                 }
             }
@@ -924,7 +1000,10 @@ fun HistoryScreen(onBack: () -> Unit) {
 @Composable
 fun SettingsScreen(onBack: () -> Unit, onSave: () -> Unit) {
     var betAmount by remember { mutableStateOf("100") }
+    var checkInterval by remember { mutableStateOf("5") }
+    var autoStart by remember { mutableStateOf(true) }
     var notifications by remember { mutableStateOf(true) }
+    var soundEnabled by remember { mutableStateOf(false) }
     
     Scaffold(
         topBar = {
@@ -941,39 +1020,123 @@ fun SettingsScreen(onBack: () -> Unit, onSave: () -> Unit) {
             )
         }
     ) { paddingValues ->
-        Column(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(16.dp)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            OutlinedTextField(
-                value = betAmount,
-                onValueChange = { betAmount = it },
-                label = { Text("Сумма ставки") },
-                modifier = Modifier.fillMaxWidth()
-            )
-            
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("Уведомления")
-                Switch(checked = notifications, onCheckedChange = { notifications = it })
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Text(
+                            "💰 Параметры ставок",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(bottom = 12.dp)
+                        )
+                        
+                        OutlinedTextField(
+                            value = betAmount,
+                            onValueChange = { betAmount = it },
+                            label = { Text("Сумма ставки (₽)") },
+                            leadingIcon = { Icon(Icons.Default.AttachMoney, null) },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        OutlinedTextField(
+                            value = checkInterval,
+                            onValueChange = { checkInterval = it },
+                            label = { Text("Интервал проверки (сек)") },
+                            leadingIcon = { Icon(Icons.Default.Timer, null) },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
             }
             
-            Spacer(modifier = Modifier.height(24.dp))
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Text(
+                            "🔧 Общие настройки",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(bottom = 12.dp)
+                        )
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Автозапуск бота")
+                            Switch(
+                                checked = autoStart,
+                                onCheckedChange = { autoStart = it }
+                            )
+                        }
+                        
+                        Divider(modifier = Modifier.padding(vertical = 8.dp))
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Уведомления")
+                            Switch(
+                                checked = notifications,
+                                onCheckedChange = { notifications = it }
+                            )
+                        }
+                        
+                        Divider(modifier = Modifier.padding(vertical = 8.dp))
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Звуковые сигналы")
+                            Switch(
+                                checked = soundEnabled,
+                                onCheckedChange = { soundEnabled = it }
+                            )
+                        }
+                    }
+                }
+            }
             
-            Button(
-                onClick = onSave,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Сохранить")
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onBack,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Отмена")
+                    }
+                    
+                    Button(
+                        onClick = onSave,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Сохранить")
+                    }
+                }
             }
         }
     }
 }
-// Остальные экраны (StatsScreen, HistoryScreen, SettingsScreen) оставляем без изменений
-// как в исходном файле
