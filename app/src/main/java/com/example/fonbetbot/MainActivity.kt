@@ -11,6 +11,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -34,8 +35,39 @@ import java.util.*
 
 class MainActivity : ComponentActivity() {
     
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val allGranted = permissions.values.all { it }
+        if (!allGranted) {
+            Toast.makeText(this, "Требуются разрешения для работы бота", Toast.LENGTH_LONG).show()
+        }
+    }
+    
+    private fun checkAndRequestPermissions() {
+        val permissions = mutableListOf<String>()
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                permissions.add(android.Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            if (checkSelfPermission(android.Manifest.permission.FOREGROUND_SERVICE_DATA_SYNC) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                permissions.add(android.Manifest.permission.FOREGROUND_SERVICE_DATA_SYNC)
+            }
+        }
+        
+        if (permissions.isNotEmpty()) {
+            requestPermissionLauncher.launch(permissions.toTypedArray())
+        }
+    }
+    
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        checkAndRequestPermissions()
+        
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {

@@ -26,8 +26,6 @@ class ApiClient {
             put("deviceId", deviceId)
         }
         
-        android.util.Log.d("ApiClient", "Request body: $jsonBody")
-        
         val mediaType = "application/json; charset=utf-8".toMediaType()
         val body = jsonBody.toString().toRequestBody(mediaType)
         
