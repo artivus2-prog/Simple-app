@@ -12,9 +12,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -189,8 +190,8 @@ fun WebViewAuthScreen(
                             javaScriptCanOpenWindowsAutomatically = true
                             setSupportMultipleWindows(false)
                             
-                            // Важно для сохранения кук
-                            setAppCacheEnabled(true)
+                            // Исправлено: устаревший метод заменён
+                            // setAppCacheEnabled(true) - удалён
                             cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
                         }
                         
@@ -198,10 +199,6 @@ fun WebViewAuthScreen(
                         val cookieManager = CookieManager.getInstance()
                         cookieManager.setAcceptCookie(true)
                         cookieManager.setAcceptThirdPartyCookies(this, true)
-                        
-                        // Очищаем старые куки (опционально)
-                        // cookieManager.removeAllCookies(null)
-                        // cookieManager.flush()
                         
                         webViewClient = object : WebViewClient() {
                             override fun onPageFinished(view: WebView?, url: String?) {
@@ -339,7 +336,7 @@ fun WebViewAuthScreen(
                                     Column(modifier = Modifier.padding(8.dp)) {
                                         Text(
                                             key,
-                                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                                            fontWeight = FontWeight.Bold,
                                             fontSize = 12.sp
                                         )
                                         Text(
