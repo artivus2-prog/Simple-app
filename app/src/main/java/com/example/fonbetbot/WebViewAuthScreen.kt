@@ -591,172 +591,193 @@ fun WebViewAuthScreen(
             )
         }
         
-        // Диалог с найденными данными
-        if (showCookiesDialog) {
-            AlertDialog(
-                onDismissRequest = { showCookiesDialog = false },
-                title = { 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("📋 Найденные данные")
-                        TextButton(
-                            onClick = {
-                                val allData = foundCookies.entries.joinToString("\n") { "${it.key}: ${it.value}" }
-                                val clip = ClipData.newPlainText("All Data", allData)
-                                clipboardManager.setPrimaryClip(clip)
-                                Toast.makeText(context, "Все данные скопированы", Toast.LENGTH_SHORT).show()
-                            }
-                        ) {
-                            Text("Копировать всё", fontSize = 12.sp)
+      // WebViewAuthScreen.kt - исправленный фрагмент диалога showCookiesDialog
+
+// Диалог с найденными данными
+if (showCookiesDialog) {
+    AlertDialog(
+        onDismissRequest = { showCookiesDialog = false },
+        title = { 
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("📋 Найденные данные")
+                TextButton(
+                    onClick = {
+                        val allData = foundCookies.entries.joinToString("\n") { "${it.key}: ${it.value}" }
+                        val clip = ClipData.newPlainText("All Data", allData)
+                        clipboardManager.setPrimaryClip(clip)
+                        Toast.makeText(context, "Все данные скопированы", Toast.LENGTH_SHORT).show()
+                    }
+                ) {
+                    Text("Копировать всё", fontSize = 12.sp)
+                }
+            }
+        },
+        text = {
+            androidx.compose.foundation.lazy.LazyColumn(
+                modifier = Modifier.heightIn(max = 400.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (foundCookies.isEmpty()) {
+                    item {
+                        Text("Данные не найдены")
+                    }
+                } else {
+                    val cookieData = foundCookies.filter { it.key.startsWith("cookie_") }
+                    val lsData = foundCookies.filter { it.key.startsWith("ls_") }
+                    val ssData = foundCookies.filter { it.key.startsWith("ss_") }
+                    
+                    val potentialFsid = mutableListOf<Pair<String, String>>()
+                    val potentialDeviceId = mutableListOf<Pair<String, String>>()
+                    
+                    foundCookies.forEach { (key, value) ->
+                        val lowerKey = key.lowercase()
+                        if (lowerKey.contains("fsid") || lowerKey.contains("session") || 
+                            lowerKey.contains("spid") || lowerKey.contains("token")) {
+                            potentialFsid.add(key to value)
+                        }
+                        if (lowerKey.contains("device") || lowerKey.contains("devicedl")) {
+                            potentialDeviceId.add(key to value)
                         }
                     }
-                },
-                text = {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 400.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        if (foundCookies.isEmpty()) {
-                            Text("Данные не найдены")
-                        } else {
-                            val cookieData = foundCookies.filter { it.key.startsWith("cookie_") }
-                            val lsData = foundCookies.filter { it.key.startsWith("ls_") }
-                            val ssData = foundCookies.filter { it.key.startsWith("ss_") }
-                            val otherData = foundCookies.filter { 
-                                !it.key.startsWith("cookie_") && 
-                                !it.key.startsWith("ls_") && 
-                                !it.key.startsWith("ss_") 
-                            }
-                            
-                            val potentialFsid = mutableListOf<Pair<String, String>>()
-                            val potentialDeviceId = mutableListOf<Pair<String, String>>()
-                            
-                            foundCookies.forEach { (key, value) ->
-                                val lowerKey = key.lowercase()
-                                if (lowerKey.contains("fsid") || lowerKey.contains("session") || 
-                                    lowerKey.contains("spid") || lowerKey.contains("token")) {
-                                    potentialFsid.add(key to value)
-                                }
-                                if (lowerKey.contains("device") || lowerKey.contains("devicedl")) {
-                                    potentialDeviceId.add(key to value)
-                                }
-                            }
-                            
-                            // Возможные FSID
-                            if (potentialFsid.isNotEmpty()) {
-                                Card(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = MaterialTheme.colorScheme.primaryContainer
-                                    )
-                                ) {
-                                    Column(modifier = Modifier.padding(12.dp)) {
-                                        Text("🔑 Возможные FSID:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        potentialFsid.forEach { (key, value) ->
-                                            DataRowWithCopy(
-                                                key = key,
-                                                value = value,
-                                                onCopy = {
-                                                    val clip = ClipData.newPlainText(key, value)
-                                                    clipboardManager.setPrimaryClip(clip)
-                                                    Toast.makeText(context, "$key скопирован", Toast.LENGTH_SHORT).show()
-                                                }
-                                            )
-                                        }
+                    
+                    // Возможные FSID
+                    if (potentialFsid.isNotEmpty()) {
+                        item {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                                )
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text("🔑 Возможные FSID:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    potentialFsid.forEach { (key, value) ->
+                                        DataRowWithCopy(
+                                            key = key,
+                                            value = value,
+                                            onCopy = {
+                                                val clip = ClipData.newPlainText(key, value)
+                                                clipboardManager.setPrimaryClip(clip)
+                                                Toast.makeText(context, "$key скопирован", Toast.LENGTH_SHORT).show()
+                                            }
+                                        )
                                     }
-                                }
-                                Spacer(modifier = Modifier.height(8.dp))
-                            }
-                            
-                            // Возможные DeviceID
-                            if (potentialDeviceId.isNotEmpty()) {
-                                Card(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = MaterialTheme.colorScheme.secondaryContainer
-                                    )
-                                ) {
-                                    Column(modifier = Modifier.padding(12.dp)) {
-                                        Text("📱 Возможные DeviceID:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        potentialDeviceId.forEach { (key, value) ->
-                                            DataRowWithCopy(
-                                                key = key,
-                                                value = value,
-                                                onCopy = {
-                                                    val clip = ClipData.newPlainText(key, value)
-                                                    clipboardManager.setPrimaryClip(clip)
-                                                    Toast.makeText(context, "$key скопирован", Toast.LENGTH_SHORT).show()
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-                                Spacer(modifier = Modifier.height(8.dp))
-                            }
-                            
-                            // Куки
-                            if (cookieData.isNotEmpty()) {
-                                Text("🍪 Куки:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                cookieData.take(5).forEach { (key, value) ->
-                                    SimpleDataRow(key.removePrefix("cookie_"), value)
-                                }
-                                if (cookieData.size > 5) {
-                                    Text("... и ещё ${cookieData.size - 5}", fontSize = 11.sp)
-                                }
-                                Spacer(modifier = Modifier.height(8.dp))
-                            }
-                            
-                            // LocalStorage
-                            if (lsData.isNotEmpty()) {
-                                Text("💾 LocalStorage:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                lsData.take(5).forEach { (key, value) ->
-                                    SimpleDataRow(key.removePrefix("ls_"), value)
-                                }
-                                if (lsData.size > 5) {
-                                    Text("... и ещё ${lsData.size - 5}", fontSize = 11.sp)
-                                }
-                                Spacer(modifier = Modifier.height(8.dp))
-                            }
-                            
-                            // SessionStorage
-                            if (ssData.isNotEmpty()) {
-                                Text("📦 SessionStorage:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                ssData.take(5).forEach { (key, value) ->
-                                    SimpleDataRow(key.removePrefix("ss_"), value)
-                                }
-                                if (ssData.size > 5) {
-                                    Text("... и ещё ${ssData.size - 5}", fontSize = 11.sp)
                                 }
                             }
                         }
+                        item { Spacer(modifier = Modifier.height(8.dp)) }
                     }
-                },
-                confirmButton = {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        TextButton(onClick = { showCookiesDialog = false }) {
-                            Text("Закрыть")
+                    
+                    // Возможные DeviceID
+                    if (potentialDeviceId.isNotEmpty()) {
+                        item {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.secondaryContainer
+                                )
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text("📱 Возможные DeviceID:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    potentialDeviceId.forEach { (key, value) ->
+                                        DataRowWithCopy(
+                                            key = key,
+                                            value = value,
+                                            onCopy = {
+                                                val clip = ClipData.newPlainText(key, value)
+                                                clipboardManager.setPrimaryClip(clip)
+                                                Toast.makeText(context, "$key скопирован", Toast.LENGTH_SHORT).show()
+                                            }
+                                        )
+                                    }
+                                }
+                            }
                         }
-                        TextButton(onClick = { 
-                            showCookiesDialog = false
-                            showManualDialog = true 
-                        }) {
-                            Text("Ввести вручную")
+                        item { Spacer(modifier = Modifier.height(8.dp)) }
+                    }
+                    
+                    // Куки
+                    if (cookieData.isNotEmpty()) {
+                        item {
+                            Text("🍪 Куки:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        }
+                        val cookieList = cookieData.toList()
+                        cookieList.take(5).forEach { (key, value) ->
+                            item {
+                                SimpleDataRow(key.removePrefix("cookie_"), value)
+                            }
+                        }
+                        if (cookieList.size > 5) {
+                            item {
+                                Text("... и ещё ${cookieList.size - 5}", fontSize = 11.sp)
+                            }
+                        }
+                        item { Spacer(modifier = Modifier.height(8.dp)) }
+                    }
+                    
+                    // LocalStorage
+                    if (lsData.isNotEmpty()) {
+                        item {
+                            Text("💾 LocalStorage:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        }
+                        val lsList = lsData.toList()
+                        lsList.take(5).forEach { (key, value) ->
+                            item {
+                                SimpleDataRow(key.removePrefix("ls_"), value)
+                            }
+                        }
+                        if (lsList.size > 5) {
+                            item {
+                                Text("... и ещё ${lsList.size - 5}", fontSize = 11.sp)
+                            }
+                        }
+                        item { Spacer(modifier = Modifier.height(8.dp)) }
+                    }
+                    
+                    // SessionStorage
+                    if (ssData.isNotEmpty()) {
+                        item {
+                            Text("📦 SessionStorage:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        }
+                        val ssList = ssData.toList()
+                        ssList.take(5).forEach { (key, value) ->
+                            item {
+                                SimpleDataRow(key.removePrefix("ss_"), value)
+                            }
+                        }
+                        if (ssList.size > 5) {
+                            item {
+                                Text("... и ещё ${ssList.size - 5}", fontSize = 11.sp)
+                            }
                         }
                     }
                 }
-            )
+            }
+        },
+        confirmButton = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                TextButton(onClick = { showCookiesDialog = false }) {
+                    Text("Закрыть")
+                }
+                TextButton(onClick = { 
+                    showCookiesDialog = false
+                    showManualDialog = true 
+                }) {
+                    Text("Ввести вручную")
+                }
+            }
         }
-        
+    )
+}
         // Диалог ручного ввода
         if (showManualDialog) {
             LaunchedEffect(Unit) {
