@@ -15,6 +15,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -37,14 +38,114 @@ fun WebViewAuthScreen(
     var manualDeviceId by remember { mutableStateOf("") }
     var showManualDialog by remember { mutableStateOf(false) }
     var isChecking by remember { mutableStateOf(false) }
+    var capturedRequest by remember { mutableStateOf<Map<String, String>?>(null) }
+    var showRequestDialog by remember { mutableStateOf(false) }
     
     val context = LocalContext.current
     val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     
-    // Функция для извлечения данных
+    // Устанавливаем перехват запросов для захвата ВСЕХ данных из тела запроса
+    fun injectInterceptor() {
+        webViewRef?.evaluateJavascript("""
+            (function() {
+                // Перехватываем fetch
+                var originalFetch = window.fetch;
+                window.fetch = function() {
+                    var url = arguments[0];
+                    var options = arguments[1] || {};
+                    
+                    if (url && url.includes('session/info')) {
+                        try {
+                            var body = JSON.parse(options.body);
+                            window._capturedRequest = JSON.stringify(body);
+                            window._capturedFsid = body.fsid;
+                            window._capturedDeviceId = body.deviceId;
+                            window._capturedClientId = body.clientId;
+                            window._capturedSysId = body.sysId;
+                            console.log('Captured request:', body);
+                        } catch(e) {}
+                    }
+                    
+                    return originalFetch.apply(this, arguments);
+                };
+                
+                // Перехватываем XMLHttpRequest
+                var originalXHROpen = XMLHttpRequest.prototype.open;
+                var originalXHRSend = XMLHttpRequest.prototype.send;
+                
+                XMLHttpRequest.prototype.open = function(method, url) {
+                    this._url = url;
+                    return originalXHROpen.apply(this, arguments);
+                };
+                
+                XMLHttpRequest.prototype.send = function(body) {
+                    if (this._url && this._url.includes('session/info')) {
+                        try {
+                            var jsonBody = JSON.parse(body);
+                            window._capturedRequest = JSON.stringify(jsonBody);
+                            window._capturedFsid = jsonBody.fsid;
+                            window._capturedDeviceId = jsonBody.deviceId;
+                            window._capturedClientId = jsonBody.clientId;
+                            window._capturedSysId = jsonBody.sysId;
+                            console.log('Captured XHR request:', jsonBody);
+                        } catch(e) {}
+                    }
+                    return originalXHRSend.apply(this, arguments);
+                };
+                
+                console.log('Interceptor installed - waiting for session/info request');
+            })();
+        """.trimIndent()) { }
+    }
+    
+    // Функция для получения захваченного запроса
+    fun getCapturedRequest() {
+        webViewRef?.evaluateJavascript("""
+            (function() {
+                var result = {};
+                result.fsid = window._capturedFsid || '';
+                result.deviceId = window._capturedDeviceId || '';
+                result.clientId = window._capturedClientId || '';
+                result.sysId = window._capturedSysId || '';
+                result.fullRequest = window._capturedRequest || '';
+                return JSON.stringify(result);
+            })();
+        """.trimIndent()) { result ->
+            try {
+                if (result != "null" && result.isNotEmpty()) {
+                    val json = JSONObject(result.trim('"'))
+                    val fsid = json.optString("fsid", "")
+                    val deviceId = json.optString("deviceId", "")
+                    val clientId = json.optString("clientId", "")
+                    val sysId = json.optString("sysId", "")
+                    
+                    if (fsid.isNotEmpty() || deviceId.isNotEmpty()) {
+                        capturedRequest = mapOf(
+                            "fsid" to fsid,
+                            "deviceId" to deviceId,
+                            "clientId" to clientId,
+                            "sysId" to sysId
+                        )
+                        foundFsid = fsid
+                        foundDeviceId = deviceId
+                        manualFsid = fsid
+                        manualDeviceId = deviceId
+                    }
+                }
+            } catch (e: Exception) {
+                // Игнорируем
+            }
+        }
+    }
+    
+    // Функция для извлечения всех данных
     fun extractAllData() {
         isChecking = true
         
+        // Сначала получаем захваченный запрос
+        getCapturedRequest()
+        
+        // Затем ищем в куках и storage
         webViewRef?.evaluateJavascript("""
             (function() {
                 var result = {};
@@ -73,8 +174,9 @@ fun WebViewAuthScreen(
                     }
                 } catch(e) {}
                 
-                // Захваченный FSID из перехватчика
-                if (window._capturedFsid) result['headerApi_FSID'] = window._capturedFsid;
+                // Захваченные данные
+                if (window._capturedFsid) result['captured_fsid'] = window._capturedFsid;
+                if (window._capturedDeviceId) result['captured_deviceId'] = window._capturedDeviceId;
                 
                 return JSON.stringify(result);
             })();
@@ -83,15 +185,18 @@ fun WebViewAuthScreen(
                 if (result != "null" && result.isNotEmpty()) {
                     val jsonObject = JSONObject(result.trim('"'))
                     
-                    var fsid = ""
-                    var deviceId = ""
+                    var fsid = foundFsid
+                    var deviceId = foundDeviceId
                     
-                    // Приоритет: headerApi_FSID
-                    if (jsonObject.has("headerApi_FSID")) {
-                        fsid = jsonObject.getString("headerApi_FSID")
+                    // Приоритет: захваченные из запроса
+                    if (fsid.isEmpty() && jsonObject.has("captured_fsid")) {
+                        fsid = jsonObject.getString("captured_fsid")
+                    }
+                    if (deviceId.isEmpty() && jsonObject.has("captured_deviceId")) {
+                        deviceId = jsonObject.getString("captured_deviceId")
                     }
                     
-                    // Если нет headerApi_FSID, ищем другие
+                    // Если нет - ищем в других местах
                     if (fsid.isEmpty()) {
                         val keys = jsonObject.keys()
                         while (keys.hasNext()) {
@@ -107,21 +212,20 @@ fun WebViewAuthScreen(
                         }
                     }
                     
-                    // Ищем DeviceID - приоритет ls_deviceld
-                    if (jsonObject.has("ls_deviceld")) {
-                        deviceId = jsonObject.getString("ls_deviceld")
-                    } else if (jsonObject.has("local.deviceld")) {
-                        deviceId = jsonObject.getString("local.deviceld")
-                    } else {
-                        val keys = jsonObject.keys()
-                        while (keys.hasNext()) {
-                            val key = keys.next()
-                            val lowerKey = key.lowercase()
-                            if (lowerKey.contains("device")) {
-                                val value = jsonObject.getString(key)
-                                if (value.length in 20..100) {
-                                    deviceId = value
-                                    break
+                    if (deviceId.isEmpty()) {
+                        if (jsonObject.has("ls_deviceld")) {
+                            deviceId = jsonObject.getString("ls_deviceld")
+                        } else {
+                            val keys = jsonObject.keys()
+                            while (keys.hasNext()) {
+                                val key = keys.next()
+                                val lowerKey = key.lowercase()
+                                if (lowerKey.contains("device")) {
+                                    val value = jsonObject.getString(key)
+                                    if (value.length in 20..100) {
+                                        deviceId = value
+                                        break
+                                    }
                                 }
                             }
                         }
@@ -132,69 +236,16 @@ fun WebViewAuthScreen(
                     manualFsid = fsid
                     manualDeviceId = deviceId
                     
-                    // Если нашли оба - авторизуемся автоматически
-                    if (fsid.isNotEmpty() && deviceId.isNotEmpty()) {
-                        onAuthSuccess(fsid, deviceId)
-                    } else {
-                        // Показываем диалог ручного ввода
-                        showManualDialog = true
-                    }
+                    // Показываем диалог с найденными данными
+                    showManualDialog = true
                 } else {
-                    foundFsid = ""
-                    foundDeviceId = ""
                     showManualDialog = true
                 }
             } catch (e: Exception) {
-                foundFsid = ""
-                foundDeviceId = ""
                 showManualDialog = true
             }
             isChecking = false
         }
-    }
-    
-    // Устанавливаем перехват запросов для захвата FSID
-    fun injectInterceptor() {
-        webViewRef?.evaluateJavascript("""
-            (function() {
-                var originalFetch = window.fetch;
-                window.fetch = function() {
-                    var url = arguments[0];
-                    var options = arguments[1] || {};
-                    
-                    if (url && url.includes('session/info')) {
-                        try {
-                            var body = JSON.parse(options.body);
-                            if (body.fsid) {
-                                window._capturedFsid = body.fsid;
-                            }
-                        } catch(e) {}
-                    }
-                    
-                    return originalFetch.apply(this, arguments);
-                };
-                
-                var originalXHROpen = XMLHttpRequest.prototype.open;
-                var originalXHRSend = XMLHttpRequest.prototype.send;
-                
-                XMLHttpRequest.prototype.open = function(method, url) {
-                    this._url = url;
-                    return originalXHROpen.apply(this, arguments);
-                };
-                
-                XMLHttpRequest.prototype.send = function(body) {
-                    if (this._url && this._url.includes('session/info')) {
-                        try {
-                            var jsonBody = JSON.parse(body);
-                            if (jsonBody.fsid) {
-                                window._capturedFsid = jsonBody.fsid;
-                            }
-                        } catch(e) {}
-                    }
-                    return originalXHRSend.apply(this, arguments);
-                };
-            })();
-        """.trimIndent()) { }
     }
     
     Scaffold(
@@ -211,6 +262,11 @@ fun WebViewAuthScreen(
                         showManualDialog = true
                     }) {
                         Icon(Icons.Default.Edit, "Ввести вручную")
+                    }
+                    IconButton(onClick = { 
+                        showRequestDialog = true
+                    }) {
+                        Icon(Icons.Default.Info, "Запрос")
                     }
                     IconButton(onClick = { 
                         injectInterceptor()
@@ -301,7 +357,7 @@ fun WebViewAuthScreen(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            "1. Войдите в аккаунт Фонбет\n2. Нажмите ✓ для проверки",
+                            "1. Войдите в аккаунт Фонбет\n2. Дождитесь загрузки баланса\n3. Нажмите ✓",
                             fontSize = 14.sp
                         )
                         
@@ -327,10 +383,19 @@ fun WebViewAuthScreen(
                         
                         Spacer(modifier = Modifier.height(8.dp))
                         
-                        TextButton(
-                            onClick = { showManualDialog = true }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly
                         ) {
-                            Text("✏️ Ввести данные вручную")
+                            TextButton(onClick = { showManualDialog = true }) {
+                                Text("✏️ Вручную")
+                            }
+                            TextButton(onClick = { 
+                                getCapturedRequest()
+                                showRequestDialog = true 
+                            }) {
+                                Text("📡 Запрос")
+                            }
                         }
                     }
                 }
@@ -353,10 +418,115 @@ fun WebViewAuthScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                        Text("Поиск данных авторизации...")
+                        Text("Анализ запроса session/info...")
                     }
                 }
             }
+        }
+        
+        // Диалог с захваченным запросом
+        if (showRequestDialog) {
+            AlertDialog(
+                onDismissRequest = { showRequestDialog = false },
+                title = { 
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("📡 Запрос session/info")
+                        if (capturedRequest != null) {
+                            TextButton(
+                                onClick = {
+                                    val data = capturedRequest!!.entries.joinToString("\n") { "${it.key}: ${it.value}" }
+                                    val clip = ClipData.newPlainText("Request", data)
+                                    clipboardManager.setPrimaryClip(clip)
+                                    Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
+                                }
+                            ) {
+                                Text("Копировать")
+                            }
+                        }
+                    }
+                },
+                text = {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (capturedRequest == null || capturedRequest!!.isEmpty()) {
+                            Text("Запрос ещё не перехвачен.")
+                            Text(
+                                "Войдите в аккаунт и дождитесь загрузки баланса, затем нажмите 'Проверить'.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            capturedRequest!!.forEach { (key, value) ->
+                                if (value.isNotEmpty()) {
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = when (key) {
+                                                "fsid" -> MaterialTheme.colorScheme.primaryContainer
+                                                "deviceId" -> MaterialTheme.colorScheme.secondaryContainer
+                                                else -> MaterialTheme.colorScheme.surfaceVariant
+                                            }
+                                        )
+                                    ) {
+                                        Column(modifier = Modifier.padding(12.dp)) {
+                                            Text(
+                                                key,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 12.sp
+                                            )
+                                            Text(
+                                                value,
+                                                fontSize = 11.sp,
+                                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            Spacer(modifier = Modifier.height(8.dp))
+                            
+                            Button(
+                                onClick = {
+                                    capturedRequest?.let {
+                                        manualFsid = it["fsid"] ?: ""
+                                        manualDeviceId = it["deviceId"] ?: ""
+                                    }
+                                    showRequestDialog = false
+                                    showManualDialog = true
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("✅ Использовать эти данные")
+                            }
+                        }
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        Button(
+                            onClick = {
+                                getCapturedRequest()
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.secondary
+                            )
+                        ) {
+                            Text("🔄 Обновить")
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showRequestDialog = false }) {
+                        Text("Закрыть")
+                    }
+                }
+            )
         }
         
         // Диалог ручного ввода
@@ -369,6 +539,28 @@ fun WebViewAuthScreen(
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
+                        // Информация о источнике данных
+                        if (capturedRequest != null && capturedRequest!!.isNotEmpty()) {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                                )
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text(
+                                        "✅ Данные из запроса session/info",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp
+                                    )
+                                    Text(
+                                        "FSID и DeviceID получены из тела запроса к API",
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                        }
+                        
                         // FSID
                         Column {
                             Text(
@@ -396,7 +588,7 @@ fun WebViewAuthScreen(
                                     }
                                 },
                                 colors = OutlinedTextFieldDefaults.colors(
-                                    focusedContainerColor = if (foundFsid.isNotEmpty() && manualFsid == foundFsid) 
+                                    focusedContainerColor = if (foundFsid.isNotEmpty()) 
                                         MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
                                     else 
                                         MaterialTheme.colorScheme.surface
@@ -404,7 +596,7 @@ fun WebViewAuthScreen(
                             )
                             if (foundFsid.isNotEmpty()) {
                                 Text(
-                                    "Найдено: ${foundFsid.take(30)}...",
+                                    "Найдено: ${foundFsid.take(40)}...",
                                     fontSize = 11.sp,
                                     color = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.padding(top = 4.dp)
@@ -439,7 +631,7 @@ fun WebViewAuthScreen(
                                     }
                                 },
                                 colors = OutlinedTextFieldDefaults.colors(
-                                    focusedContainerColor = if (foundDeviceId.isNotEmpty() && manualDeviceId == foundDeviceId) 
+                                    focusedContainerColor = if (foundDeviceId.isNotEmpty()) 
                                         MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
                                     else 
                                         MaterialTheme.colorScheme.surface
@@ -447,33 +639,10 @@ fun WebViewAuthScreen(
                             )
                             if (foundDeviceId.isNotEmpty()) {
                                 Text(
-                                    "Найдено: ${foundDeviceId.take(30)}...",
+                                    "Найдено: ${foundDeviceId.take(40)}...",
                                     fontSize = 11.sp,
                                     color = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.padding(top = 4.dp)
-                                )
-                            }
-                        }
-                        
-                        // Статус
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            Column {
-                                Text("FSID:", fontSize = 12.sp)
-                                Text(
-                                    if (foundFsid.isNotEmpty()) "✅ Найден" else "❌ Не найден",
-                                    fontSize = 12.sp,
-                                    color = if (foundFsid.isNotEmpty()) Color(0xFF4CAF50) else Color(0xFFF44336)
-                                )
-                            }
-                            Column {
-                                Text("DeviceID:", fontSize = 12.sp)
-                                Text(
-                                    if (foundDeviceId.isNotEmpty()) "✅ Найден" else "❌ Не найден",
-                                    fontSize = 12.sp,
-                                    color = if (foundDeviceId.isNotEmpty()) Color(0xFF4CAF50) else Color(0xFFF44336)
                                 )
                             }
                         }
@@ -497,7 +666,8 @@ fun WebViewAuthScreen(
                         Divider()
                         
                         Text(
-                            "Введите FSID и Device ID, полученные после авторизации на сайте Фонбет.",
+                            "Эти данные берутся из запроса к session/info.\n" +
+                            "Если поля пустые, нажмите 'Запрос' чтобы увидеть перехваченные данные.",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
