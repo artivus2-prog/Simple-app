@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import org.json.JSONObject
+import androidx.compose.foundation.clickable
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -576,4 +577,3 @@ fun WebViewAuthScreen(
 }
 
 // Вспомогательная функция для clickable
-import androidx.compose.foundation.clickable
