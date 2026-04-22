@@ -3,6 +3,8 @@ package com.example.fonbetbot
 import okhttp3.*
 import org.json.JSONObject
 import java.io.IOException
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 
 class ApiClient {
     private val client = OkHttpClient()
