@@ -21,7 +21,7 @@ fun WebViewAuthScreen(
     onAuthSuccess: (fsid: String, deviceId: String) -> Unit,
     onBack: () -> Unit
 ) {
-    val authUrl = "https://your-site.com/login" // ЗАМЕНИТЕ НА РЕАЛЬНЫЙ URL
+    val authUrl = "https://fon.bet/" // ЗАМЕНИТЕ НА РЕАЛЬНЫЙ URL
     var isLoading by remember { mutableStateOf(true) }
     var currentUrl by remember { mutableStateOf(authUrl) }
     
@@ -69,8 +69,8 @@ fun WebViewAuthScreen(
                                 isLoading = false
                                 currentUrl = url ?: authUrl
                                 
-                                if (url?.contains("/profile") == true || 
-                                    url?.contains("/dashboard") == true) {
+                                if (url?.contains("/live") == true || 
+                                    url?.contains("/profile") == true) {
                                     
                                     val cookieString = cookieManager.getCookie(url)
                                     if (cookieString != null && cookieString.isNotEmpty()) {
