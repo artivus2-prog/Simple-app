@@ -16,6 +16,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import org.json.JSONObject
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,11 +54,13 @@ fun WebViewAuthScreen(
         // Расширенный список возможных названий для FSID
         val fsidKeys = listOf(
             "fsid", "FSID", "_fsid", "fonbet_fsid", 
-            "fonbet_session", "session_id", "sid", "SessionId"
+            "fonbet_session", "session_id", "sid", "SessionId",
+            "spid", "spsc", "PHPSESSID", "connect.sid"
         )
         
         // Расширенный список для DeviceID
         val deviceIdKeys = listOf(
+            "local.devicedl",
             "deviceid", "deviceId", "device_id", "_deviceId", 
             "d_id", "device", "DeviceId", "deviceUID", "uid"
         )
@@ -73,6 +76,108 @@ fun WebViewAuthScreen(
         return Pair(fsid, deviceId)
     }
     
+    // Функция для извлечения через JavaScript
+    fun extractViaJavaScript() {
+        webViewRef?.evaluateJavascript("""
+            (function() {
+                var result = {};
+                
+                // 1. Куки
+                document.cookie.split(';').forEach(function(cookie) {
+                    var parts = cookie.trim().split('=');
+                    if (parts.length >= 2) {
+                        result['cookie_' + parts[0]] = decodeURIComponent(parts.slice(1).join('='));
+                    }
+                });
+                
+                // 2. localStorage
+                try {
+                    for (var i = 0; i < localStorage.length; i++) {
+                        var key = localStorage.key(i);
+                        result['ls_' + key] = localStorage.getItem(key);
+                    }
+                } catch(e) {}
+                
+                // 3. sessionStorage
+                try {
+                    for (var i = 0; i < sessionStorage.length; i++) {
+                        var key = sessionStorage.key(i);
+                        result['ss_' + key] = sessionStorage.getItem(key);
+                    }
+                } catch(e) {}
+                
+                // 4. Поиск в window объекте
+                try {
+                    if (window.fsid) result['window_fsid'] = window.fsid;
+                    if (window.FSID) result['window_FSID'] = window.FSID;
+                    if (window.user && window.user.fsid) result['window_user_fsid'] = window.user.fsid;
+                    if (window.__INITIAL_STATE__) {
+                        result['__INITIAL_STATE__'] = JSON.stringify(window.__INITIAL_STATE__);
+                    }
+                } catch(e) {}
+                
+                return JSON.stringify(result);
+            })();
+        """.trimIndent()) { result ->
+            try {
+                if (result != "null" && result.isNotEmpty()) {
+                    val jsonObject = JSONObject(result)
+                    val allData = mutableMapOf<String, String>()
+                    
+                    val keys = jsonObject.keys()
+                    while (keys.hasNext()) {
+                        val key = keys.next()
+                        val value = jsonObject.optString(key, "")
+                        if (value.isNotEmpty() && value != "null") {
+                            allData[key] = value
+                        }
+                    }
+                    
+                    foundCookies = allData
+                    
+                    // Поиск fsid
+                    var fsid = ""
+                    var deviceId = ""
+                    
+                    // Ищем fsid по ключевым словам
+                    val fsidPatterns = listOf("fsid", "FSID", "session", "token", "auth", "spid")
+                    for ((key, value) in allData) {
+                        val lowerKey = key.lowercase()
+                        
+                        // Поиск fsid
+                        if (fsid.isEmpty()) {
+                            for (pattern in fsidPatterns) {
+                                if (lowerKey.contains(pattern) && value.length in 20..200) {
+                                    fsid = value
+                                    break
+                                }
+                            }
+                        }
+                        
+                        // Поиск deviceId
+                        if (deviceId.isEmpty() && lowerKey.contains("device")) {
+                            deviceId = value
+                        }
+                    }
+                    
+                    // Если нашли - авторизуемся
+                    if (fsid.isNotEmpty() && deviceId.isNotEmpty()) {
+                        onAuthSuccess(fsid, deviceId)
+                    } else if (fsid.isNotEmpty()) {
+                        // Есть fsid, но нет deviceId - пробуем получить из кук
+                        val cookies = getAllCookies(webViewRef?.url ?: "")
+                        val devId = extractAuthData(cookies).second
+                        if (devId.isNotEmpty()) {
+                            onAuthSuccess(fsid, devId)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                // Игнорируем
+            }
+        }
+    }
+    
     // Функция проверки авторизации
     fun checkAuth() {
         isCheckingAuth = true
@@ -85,57 +190,11 @@ fun WebViewAuthScreen(
             if (fsid.isNotEmpty() && deviceId.isNotEmpty()) {
                 onAuthSuccess(fsid, deviceId)
             } else {
-                // Показываем диалог с найденными куками для отладки
-                showCookiesDialog = true
+                // Запускаем JavaScript извлечение
+                extractViaJavaScript()
             }
         }
         isCheckingAuth = false
-    }
-    
-    // Функция для извлечения через JavaScript
-    fun extractViaJavaScript() {
-        webViewRef?.evaluateJavascript("""
-            (function() {
-                var cookies = document.cookie;
-                var result = {};
-                cookies.split(';').forEach(function(cookie) {
-                    var parts = cookie.trim().split('=');
-                    if (parts.length >= 2) {
-                        result[parts[0]] = decodeURIComponent(parts.slice(1).join('='));
-                    }
-                });
-                
-                // Также пробуем получить из localStorage
-                try {
-                    result['_localStorage_fsid'] = localStorage.getItem('fsid');
-                    result['_localStorage_deviceId'] = localStorage.getItem('deviceId');
-                } catch(e) {}
-                
-                return JSON.stringify(result);
-            })();
-        """.trimIndent()) { result ->
-            try {
-                if (result != "null" && result.isNotEmpty()) {
-                    val jsonObject = org.json.JSONObject(result)
-                    val jsCookies = mutableMapOf<String, String>()
-                    
-                    val keys = jsonObject.keys()
-                    while (keys.hasNext()) {
-                        val key = keys.next()
-                        jsCookies[key] = jsonObject.getString(key)
-                    }
-                    
-                    foundCookies = jsCookies
-                    val (fsid, deviceId) = extractAuthData(jsCookies)
-                    
-                    if (fsid.isNotEmpty() && deviceId.isNotEmpty()) {
-                        onAuthSuccess(fsid, deviceId)
-                    }
-                }
-            } catch (e: Exception) {
-                // Игнорируем
-            }
-        }
     }
     
     Scaffold(
@@ -189,9 +248,6 @@ fun WebViewAuthScreen(
                             useWideViewPort = true
                             javaScriptCanOpenWindowsAutomatically = true
                             setSupportMultipleWindows(false)
-                            
-                            // Исправлено: устаревший метод заменён
-                            // setAppCacheEnabled(true) - удалён
                             cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
                         }
                         
@@ -216,12 +272,24 @@ fun WebViewAuthScreen(
                                             // Автоматический успех при обнаружении
                                             onAuthSuccess(fsid, deviceId)
                                         }
-                                    }, 1500)
+                                        
+                                        // Запускаем JavaScript извлечение
+                                        extractViaJavaScript()
+                                    }, 2000)
                                 }
                             }
                             
+                            override fun onLoadResource(view: WebView?, url: String?) {
+                                // Логируем все загружаемые ресурсы для отладки
+                                url?.let {
+                                    if (it.contains("session") || it.contains("auth") || it.contains("token")) {
+                                        android.util.Log.d("WebViewAuth", "Loading: $it")
+                                    }
+                                }
+                                super.onLoadResource(view, url)
+                            }
+                            
                             override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-                                // Отслеживаем редиректы
                                 url?.let {
                                     view?.loadUrl(it)
                                 }
@@ -302,7 +370,7 @@ fun WebViewAuthScreen(
         if (showCookiesDialog) {
             AlertDialog(
                 onDismissRequest = { showCookiesDialog = false },
-                title = { Text("Найденные куки") },
+                title = { Text("Найденные данные") },
                 text = {
                     Column(
                         modifier = Modifier
@@ -311,40 +379,46 @@ fun WebViewAuthScreen(
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         if (foundCookies.isEmpty()) {
-                            Text("Куки не найдены")
+                            Text("Данные не найдены")
                         } else {
-                            foundCookies.forEach { (key, value) ->
-                                val displayValue = if (value.length > 30) 
-                                    value.take(30) + "..." 
-                                else 
-                                    value
-                                
-                                val isFsid = key.lowercase().contains("fsid") || 
-                                            key.lowercase().contains("session")
-                                val isDeviceId = key.lowercase().contains("device")
-                                
-                                Card(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = when {
-                                            isFsid -> MaterialTheme.colorScheme.primaryContainer
-                                            isDeviceId -> MaterialTheme.colorScheme.secondaryContainer
-                                            else -> MaterialTheme.colorScheme.surfaceVariant
-                                        }
-                                    )
-                                ) {
-                                    Column(modifier = Modifier.padding(8.dp)) {
-                                        Text(
-                                            key,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 12.sp
-                                        )
-                                        Text(
-                                            displayValue,
-                                            fontSize = 10.sp,
-                                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-                                        )
-                                    }
+                            // Группируем по источнику
+                            val cookieData = foundCookies.filter { it.key.startsWith("cookie_") }
+                            val lsData = foundCookies.filter { it.key.startsWith("ls_") }
+                            val ssData = foundCookies.filter { it.key.startsWith("ss_") }
+                            val otherData = foundCookies.filter { 
+                                !it.key.startsWith("cookie_") && 
+                                !it.key.startsWith("ls_") && 
+                                !it.key.startsWith("ss_") 
+                            }
+                            
+                            if (cookieData.isNotEmpty()) {
+                                Text("🍪 Куки:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                cookieData.forEach { (key, value) ->
+                                    DataRow(key.removePrefix("cookie_"), value)
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
+                            
+                            if (lsData.isNotEmpty()) {
+                                Text("💾 LocalStorage:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                lsData.forEach { (key, value) ->
+                                    DataRow(key.removePrefix("ls_"), value)
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
+                            
+                            if (ssData.isNotEmpty()) {
+                                Text("📦 SessionStorage:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                ssData.forEach { (key, value) ->
+                                    DataRow(key.removePrefix("ss_"), value)
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
+                            
+                            if (otherData.isNotEmpty()) {
+                                Text("🔧 Другие:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                otherData.forEach { (key, value) ->
+                                    DataRow(key, value)
                                 }
                             }
                         }
@@ -380,8 +454,15 @@ fun WebViewAuthScreen(
                             singleLine = true
                         )
                         Text(
-                            "Найдите эти значения в куках сайта fon.bet после авторизации",
-                            fontSize = 12.sp,
+                            "Как найти fsid:\n" +
+                            "1. Откройте инструменты разработчика (F12)\n" +
+                            "2. Перейдите на вкладку Network\n" +
+                            "3. Найдите запрос к /session/info\n" +
+                            "4. В теле запроса будет поле fsid\n\n" +
+                            "Или попробуйте значения:\n" +
+                            "- spid из кук\n" +
+                            "- значение из localStorage с ключом fsid",
+                            fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -403,6 +484,43 @@ fun WebViewAuthScreen(
                         Text("Отмена")
                     }
                 }
+            )
+        }
+    }
+}
+
+@Composable
+fun DataRow(key: String, value: String) {
+    val displayValue = if (value.length > 40) 
+        value.take(40) + "..." 
+    else 
+        value
+    
+    val isFsid = key.lowercase().contains("fsid") || 
+                key.lowercase().contains("session") ||
+                key.lowercase().contains("spid")
+    val isDeviceId = key.lowercase().contains("device")
+    
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = when {
+                isFsid -> MaterialTheme.colorScheme.primaryContainer
+                isDeviceId -> MaterialTheme.colorScheme.secondaryContainer
+                else -> MaterialTheme.colorScheme.surfaceVariant
+            }
+        )
+    ) {
+        Column(modifier = Modifier.padding(8.dp)) {
+            Text(
+                key,
+                fontWeight = FontWeight.Bold,
+                fontSize = 11.sp
+            )
+            Text(
+                displayValue,
+                fontSize = 10.sp,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
             )
         }
     }
