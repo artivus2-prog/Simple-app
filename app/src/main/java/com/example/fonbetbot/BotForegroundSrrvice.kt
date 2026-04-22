@@ -7,10 +7,12 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.webkit.CookieManager
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import kotlinx.coroutines.*
 
 class BotForegroundService : Service() {
@@ -52,7 +54,19 @@ class BotForegroundService : Service() {
         if (isRunning) return
         
         isRunning = true
-        startForeground(NOTIFICATION_ID, createNotification("Бот запущен", "Баланс: загрузка..."))
+        
+        // Запускаем foreground service с правильным типом
+        val notification = createNotification("Бот запущен", "Баланс: загрузка...")
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            // Android 14+
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Android 10+
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
         
         onLogUpdate?.invoke("[${getCurrentTime()}] 🚀 Бот запущен в фоновом режиме")
         
@@ -114,7 +128,7 @@ class BotForegroundService : Service() {
     private fun stopBot() {
         isRunning = false
         onLogUpdate?.invoke("[${getCurrentTime()}] ⏹ Бот остановлен")
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
     }
     
     private fun createNotificationChannel() {

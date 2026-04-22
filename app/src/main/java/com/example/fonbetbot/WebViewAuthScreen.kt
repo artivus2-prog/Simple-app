@@ -1,6 +1,7 @@
 // WebViewAuthScreen.kt
 package com.example.fonbetbot
 
+import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -33,189 +34,18 @@ fun WebViewAuthScreen(
 ) {
     val authUrl = "https://www.fon.bet/"
     var isLoading by remember { mutableStateOf(true) }
-    var isCheckingAuth by remember { mutableStateOf(false) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
-    var foundCookies by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
-    var showCookiesDialog by remember { mutableStateOf(false) }
-    var manualFsid by remember { mutableStateOf("") }
-    var manualDeviceId by remember { mutableStateOf("") }
-    var showManualDialog by remember { mutableStateOf(false) }
-    var apiResponse by remember { mutableStateOf("") }
-    var showApiResponseDialog by remember { mutableStateOf(false) }
+    var foundData by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     
     val context = LocalContext.current
-    val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     
-    // Функция для извлечения ВСЕХ кук
-    fun getAllCookies(url: String): Map<String, String> {
-        val cookieManager = CookieManager.getInstance()
-        val cookieString = cookieManager.getCookie(url) ?: ""
-        
-        return if (cookieString.isNotEmpty()) {
-            cookieString.split("; ").associate { cookie ->
-                val parts = cookie.split("=", limit = 2)
-                parts[0] to (parts.getOrNull(1) ?: "")
-            }
-        } else {
-            emptyMap()
-        }
-    }
-    
-    // Функция для поиска FSID и DeviceID
-    fun extractAuthData(cookies: Map<String, String>): Pair<String, String> {
-        val fsidKeys = listOf(
-            "fsid", "FSID", "_fsid", "fonbet_fsid", 
-            "fonbet_session", "session_id", "sid", "SessionId",
-            "spid", "spsc", "PHPSESSID", "connect.sid"
-        )
-        
-        val deviceIdKeys = listOf(
-            "local.devicedl",
-            "deviceid", "deviceId", "device_id", "_deviceId", 
-            "d_id", "device", "DeviceId", "deviceUID", "uid"
-        )
-        
-        val fsid = fsidKeys.firstNotNullOfOrNull { key ->
-            cookies[key]
-        } ?: ""
-        
-        val deviceId = deviceIdKeys.firstNotNullOfOrNull { key ->
-            cookies[key]
-        } ?: ""
-        
-        return Pair(fsid, deviceId)
-    }
-    
-    // Функция для проверки ответа API
-    fun checkApiResponse() {
+    // Функция для извлечения данных
+    fun extractAllData() {
         webViewRef?.evaluateJavascript("""
             (function() {
                 var result = {};
                 
-                // Перехватываем fetch запросы
-                var originalFetch = window.fetch;
-                window.fetch = function() {
-                    return originalFetch.apply(this, arguments)
-                        .then(function(response) {
-                            var clonedResponse = response.clone();
-                            if (arguments[0] && arguments[0].includes('session/info')) {
-                                clonedResponse.text().then(function(body) {
-                                    result['fetch_response'] = body;
-                                    window._apiResponse = body;
-                                    console.log('Fetch response:', body);
-                                });
-                            }
-                            return response;
-                        });
-                };
-                
-                // Перехватываем XMLHttpRequest
-                var originalXHROpen = XMLHttpRequest.prototype.open;
-                var originalXHRSend = XMLHttpRequest.prototype.send;
-                
-                XMLHttpRequest.prototype.open = function() {
-                    this._url = arguments[1];
-                    return originalXHROpen.apply(this, arguments);
-                };
-                
-                XMLHttpRequest.prototype.send = function() {
-                    if (this._url && this._url.includes('session/info')) {
-                        this.addEventListener('load', function() {
-                            result['xhr_response'] = this.responseText;
-                            window._apiResponse = this.responseText;
-                            console.log('XHR response:', this.responseText);
-                        });
-                    }
-                    return originalXHRSend.apply(this, arguments);
-                };
-                
-                return JSON.stringify(result);
-            })();
-        """.trimIndent()) { jsResult ->
-            android.util.Log.d("WebViewAuth", "JS interceptor installed: $jsResult")
-        }
-    }
-    
-    // Функция для прямого запроса к API
-    fun makeDirectApiCall() {
-        webViewRef?.evaluateJavascript("""
-            (function() {
-                var fsid = '';
-                var deviceId = '';
-                
-                // Ищем fsid и deviceId в куках и localStorage
-                var cookies = document.cookie;
-                cookies.split(';').forEach(function(cookie) {
-                    var parts = cookie.trim().split('=');
-                    if (parts[0] === 'spid' || parts[0] === 'fsid') {
-                        fsid = decodeURIComponent(parts.slice(1).join('='));
-                    }
-                });
-                
-                try {
-                    deviceId = localStorage.getItem('devicedl') || '';
-                } catch(e) {}
-                
-                // Формируем тело запроса
-                var body = JSON.stringify({
-                    clientId: 18845703,
-                    fsid: fsid,
-                    sysId: 21,
-                    deviceId: deviceId
-                });
-                
-                console.log('API Request body:', body);
-                
-                fetch('https://clientsapi-lb51-w.bk6bba-resources.com/session/info', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    credentials: 'include',
-                    body: body
-                })
-                .then(r => r.text())
-                .then(d => {
-                    console.log('Direct API call response:', d);
-                    window._apiResponse = d;
-                })
-                .catch(e => {
-                    console.error('Error:', e);
-                    window._apiResponse = 'Error: ' + e.message;
-                });
-                
-                return 'Request sent with fsid: ' + fsid + ', deviceId: ' + deviceId;
-            })();
-        """.trimIndent()) { result ->
-            Toast.makeText(context, "Запрос отправлен: $result", Toast.LENGTH_LONG).show()
-            
-            // Ждём и получаем ответ
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                webViewRef?.evaluateJavascript("window._apiResponse || ''") { response ->
-                    if (response != "null" && response.isNotEmpty() && response != "undefined") {
-                        try {
-                            // Убираем кавычки в начале и конце если есть
-                            val cleanResponse = response.trim('"')
-                            val json = JSONObject(cleanResponse)
-                            apiResponse = json.toString(2)
-                        } catch (e: Exception) {
-                            apiResponse = response.trim('"')
-                        }
-                    } else {
-                        apiResponse = "Ответ не получен. Проверьте консоль."
-                    }
-                }
-            }, 3000)
-        }
-    }
-    
-    // Функция для извлечения через JavaScript
-    fun extractViaJavaScript() {
-        webViewRef?.evaluateJavascript("""
-            (function() {
-                var result = {};
-                
-                // 1. Куки
+                // Куки
                 document.cookie.split(';').forEach(function(cookie) {
                     var parts = cookie.trim().split('=');
                     if (parts.length >= 2) {
@@ -223,7 +53,7 @@ fun WebViewAuthScreen(
                     }
                 });
                 
-                // 2. localStorage
+                // localStorage
                 try {
                     for (var i = 0; i < localStorage.length; i++) {
                         var key = localStorage.key(i);
@@ -231,7 +61,7 @@ fun WebViewAuthScreen(
                     }
                 } catch(e) {}
                 
-                // 3. sessionStorage
+                // sessionStorage
                 try {
                     for (var i = 0; i < sessionStorage.length; i++) {
                         var key = sessionStorage.key(i);
@@ -239,22 +69,15 @@ fun WebViewAuthScreen(
                     }
                 } catch(e) {}
                 
-                // 4. Поиск в window объекте
-                try {
-                    if (window.fsid) result['window_fsid'] = window.fsid;
-                    if (window.FSID) result['window_FSID'] = window.FSID;
-                    if (window.user && window.user.fsid) result['window_user_fsid'] = window.user.fsid;
-                    if (window.__INITIAL_STATE__) {
-                        result['__INITIAL_STATE__'] = JSON.stringify(window.__INITIAL_STATE__);
-                    }
-                } catch(e) {}
+                // Ищем FSID в заголовках через перехват
+                if (window._capturedFsid) result['headerApi_FSID'] = window._capturedFsid;
                 
                 return JSON.stringify(result);
             })();
         """.trimIndent()) { result ->
             try {
                 if (result != "null" && result.isNotEmpty()) {
-                    val jsonObject = JSONObject(result)
+                    val jsonObject = JSONObject(result.trim('"'))
                     val allData = mutableMapOf<String, String>()
                     
                     val keys = jsonObject.keys()
@@ -266,37 +89,46 @@ fun WebViewAuthScreen(
                         }
                     }
                     
-                    foundCookies = allData
+                    foundData = allData
                     
+                    // Автоматически ищем правильные значения
                     var fsid = ""
                     var deviceId = ""
                     
-                    val fsidPatterns = listOf("fsid", "FSID", "session", "token", "auth", "spid")
-                    for ((key, value) in allData) {
-                        val lowerKey = key.lowercase()
-                        
-                        if (fsid.isEmpty()) {
-                            for (pattern in fsidPatterns) {
-                                if (lowerKey.contains(pattern) && value.length in 20..200) {
-                                    fsid = value
-                                    break
-                                }
+                    // Приоритет: headerApi_FSID
+                    if (allData.containsKey("headerApi_FSID")) {
+                        fsid = allData["headerApi_FSID"] ?: ""
+                    }
+                    
+                    // Если нет headerApi_FSID, ищем другие
+                    if (fsid.isEmpty()) {
+                        for ((key, value) in allData) {
+                            val lowerKey = key.lowercase()
+                            if (lowerKey.contains("fsid") && value.length in 20..100) {
+                                fsid = value
+                                break
                             }
-                        }
-                        
-                        if (deviceId.isEmpty() && lowerKey.contains("device")) {
-                            deviceId = value
                         }
                     }
                     
+                    // Ищем DeviceID - приоритет local.deviceld
+                    if (allData.containsKey("ls_deviceld")) {
+                        deviceId = allData["ls_deviceld"] ?: ""
+                    } else if (allData.containsKey("local.deviceld")) {
+                        deviceId = allData["local.deviceld"] ?: ""
+                    } else {
+                        for ((key, value) in allData) {
+                            val lowerKey = key.lowercase()
+                            if (lowerKey.contains("device") && value.length in 20..100) {
+                                deviceId = value
+                                break
+                            }
+                        }
+                    }
+                    
+                    // Если нашли оба - авторизуемся автоматически
                     if (fsid.isNotEmpty() && deviceId.isNotEmpty()) {
                         onAuthSuccess(fsid, deviceId)
-                    } else if (fsid.isNotEmpty()) {
-                        val cookies = getAllCookies(webViewRef?.url ?: "")
-                        val devId = extractAuthData(cookies).second
-                        if (devId.isNotEmpty()) {
-                            onAuthSuccess(fsid, devId)
-                        }
                     }
                 }
             } catch (e: Exception) {
@@ -305,22 +137,61 @@ fun WebViewAuthScreen(
         }
     }
     
-    // Функция проверки авторизации
-    fun checkAuth() {
-        isCheckingAuth = true
-        webViewRef?.url?.let { url ->
-            val cookies = getAllCookies(url)
-            foundCookies = cookies
-            
-            val (fsid, deviceId) = extractAuthData(cookies)
-            
-            if (fsid.isNotEmpty() && deviceId.isNotEmpty()) {
-                onAuthSuccess(fsid, deviceId)
-            } else {
-                extractViaJavaScript()
-            }
-        }
-        isCheckingAuth = false
+    // Устанавливаем перехват запросов для захвата FSID
+    fun injectInterceptor() {
+        webViewRef?.evaluateJavascript("""
+            (function() {
+                // Перехватываем fetch
+                var originalFetch = window.fetch;
+                window.fetch = function() {
+                    var url = arguments[0];
+                    var options = arguments[1] || {};
+                    
+                    if (url && url.includes('session/info')) {
+                        try {
+                            var body = JSON.parse(options.body);
+                            if (body.fsid) {
+                                window._capturedFsid = body.fsid;
+                                console.log('Captured FSID:', body.fsid);
+                            }
+                        } catch(e) {}
+                    }
+                    
+                    return originalFetch.apply(this, arguments);
+                };
+                
+                // Перехватываем XMLHttpRequest
+                var originalXHROpen = XMLHttpRequest.prototype.open;
+                var originalXHRSend = XMLHttpRequest.prototype.send;
+                var originalXHRSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
+                
+                XMLHttpRequest.prototype.open = function(method, url) {
+                    this._url = url;
+                    this._headers = {};
+                    return originalXHROpen.apply(this, arguments);
+                };
+                
+                XMLHttpRequest.prototype.setRequestHeader = function(name, value) {
+                    this._headers[name] = value;
+                    return originalXHRSetRequestHeader.apply(this, arguments);
+                };
+                
+                XMLHttpRequest.prototype.send = function(body) {
+                    if (this._url && this._url.includes('session/info')) {
+                        try {
+                            var jsonBody = JSON.parse(body);
+                            if (jsonBody.fsid) {
+                                window._capturedFsid = jsonBody.fsid;
+                                console.log('Captured FSID from XHR:', jsonBody.fsid);
+                            }
+                        } catch(e) {}
+                    }
+                    return originalXHRSend.apply(this, arguments);
+                };
+                
+                console.log('Interceptor installed');
+            })();
+        """.trimIndent()) { }
     }
     
     Scaffold(
@@ -333,24 +204,12 @@ fun WebViewAuthScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { showManualDialog = true }) {
-                        Icon(Icons.Default.Edit, "Ввести вручную")
-                    }
                     IconButton(onClick = { 
-                        checkAuth()
-                        extractViaJavaScript()
-                        checkApiResponse()
+                        injectInterceptor()
+                        extractAllData()
+                        Toast.makeText(context, "Проверка авторизации...", Toast.LENGTH_SHORT).show()
                     }) {
                         Icon(Icons.Default.Check, "Проверить")
-                    }
-                    IconButton(onClick = { 
-                        checkApiResponse()
-                        showApiResponseDialog = true 
-                    }) {
-                        Icon(Icons.Default.Build, "API ответ")
-                    }
-                    IconButton(onClick = { showCookiesDialog = true }) {
-                        Icon(Icons.Default.Info, "Куки")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -389,49 +248,18 @@ fun WebViewAuthScreen(
                         cookieManager.setAcceptThirdPartyCookies(this, true)
                         
                         webViewClient = object : WebViewClient() {
-                            
-                            override fun shouldInterceptRequest(
-                                view: WebView?,
-                                request: WebResourceRequest?
-                            ): WebResourceResponse? {
-                                request?.url?.toString()?.let { url ->
-                                    if (url.contains("session/info")) {
-                                        android.util.Log.d("WebViewAuth", "Intercepted request: $url")
-                                        request.requestHeaders?.forEach { (key, value) ->
-                                            android.util.Log.d("WebViewAuth", "Request Header: $key: $value")
-                                        }
-                                    }
-                                }
-                                return super.shouldInterceptRequest(view, request)
-                            }
-                            
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
                                 isLoading = false
                                 
+                                // Устанавливаем перехватчик
+                                injectInterceptor()
+                                
                                 url?.let { currentUrl ->
                                     android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                                        val cookies = getAllCookies(currentUrl)
-                                        foundCookies = cookies
-                                        
-                                        val (fsid, deviceId) = extractAuthData(cookies)
-                                        if (fsid.isNotEmpty() && deviceId.isNotEmpty()) {
-                                            onAuthSuccess(fsid, deviceId)
-                                        }
-                                        
-                                        extractViaJavaScript()
-                                        checkApiResponse()
+                                        extractAllData()
                                     }, 2000)
                                 }
-                            }
-                            
-                            override fun onLoadResource(view: WebView?, url: String?) {
-                                url?.let {
-                                    if (it.contains("session") || it.contains("auth") || it.contains("token") || it.contains("info")) {
-                                        android.util.Log.d("WebViewAuth", "Loading resource: $it")
-                                    }
-                                }
-                                super.onLoadResource(view, url)
                             }
                             
                             override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
@@ -457,7 +285,7 @@ fun WebViewAuthScreen(
                 )
             }
             
-            // Кнопка проверки внизу
+            // Подсказка внизу
             if (!isLoading) {
                 Card(
                     modifier = Modifier
@@ -474,7 +302,7 @@ fun WebViewAuthScreen(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            "Войдите в аккаунт Фонбет, затем нажмите кнопку ниже",
+                            "1. Войдите в аккаунт Фонбет\n2. Нажмите ✓ для авторизации",
                             fontSize = 14.sp
                         )
                         
@@ -482,483 +310,48 @@ fun WebViewAuthScreen(
                         
                         Button(
                             onClick = {
-                                checkAuth()
-                                extractViaJavaScript()
-                                checkApiResponse()
+                                extractAllData()
                             },
-                            modifier = Modifier.fillMaxWidth(),
-                            enabled = !isCheckingAuth
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            if (isCheckingAuth) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(20.dp),
-                                    color = MaterialTheme.colorScheme.onPrimary
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                            }
-                            Text(if (isCheckingAuth) "ПРОВЕРКА..." else "🔍 ПРОВЕРИТЬ АВТОРИЗАЦИЮ")
+                            Text("🔍 ПРОВЕРИТЬ АВТОРИЗАЦИЮ")
                         }
                         
-                        if (foundCookies.isNotEmpty()) {
+                        if (foundData.isNotEmpty()) {
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                "Найдено данных: ${foundCookies.size}",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Диалог с ответом API
-        if (showApiResponseDialog) {
-            AlertDialog(
-                onDismissRequest = { showApiResponseDialog = false },
-                title = { 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("📡 Ответ session/info")
-                        Row {
-                            TextButton(
-                                onClick = {
-                                    if (apiResponse.isNotEmpty()) {
-                                        val clip = ClipData.newPlainText("API Response", apiResponse)
-                                        clipboardManager.setPrimaryClip(clip)
-                                        Toast.makeText(context, "Ответ скопирован", Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                            ) {
-                                Text("Копировать")
-                            }
-                            TextButton(
-                                onClick = {
-                                    makeDirectApiCall()
-                                }
-                            ) {
-                                Text("🔄")
-                            }
-                        }
-                    }
-                },
-                text = {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 400.dp)
-                    ) {
-                        if (apiResponse.isEmpty()) {
-                            Text("Ответ API не получен")
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Button(
-                                onClick = {
-                                    makeDirectApiCall()
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("🚀 Выполнить запрос к API")
-                            }
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                "Нажмите кнопку чтобы отправить запрос к session/info",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        } else {
-                            androidx.compose.foundation.lazy.LazyColumn(
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                item {
-                                    Text(
-                                        apiResponse,
-                                        fontSize = 11.sp,
-                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-                                    )
-                                }
-                            }
-                        }
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = { showApiResponseDialog = false }) {
-                        Text("Закрыть")
-                    }
-                }
-            )
-        }
-        
-      // WebViewAuthScreen.kt - исправленный фрагмент диалога showCookiesDialog
-
-// Диалог с найденными данными
-if (showCookiesDialog) {
-    AlertDialog(
-        onDismissRequest = { showCookiesDialog = false },
-        title = { 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("📋 Найденные данные")
-                TextButton(
-                    onClick = {
-                        val allData = foundCookies.entries.joinToString("\n") { "${it.key}: ${it.value}" }
-                        val clip = ClipData.newPlainText("All Data", allData)
-                        clipboardManager.setPrimaryClip(clip)
-                        Toast.makeText(context, "Все данные скопированы", Toast.LENGTH_SHORT).show()
-                    }
-                ) {
-                    Text("Копировать всё", fontSize = 12.sp)
-                }
-            }
-        },
-        text = {
-            androidx.compose.foundation.lazy.LazyColumn(
-                modifier = Modifier.heightIn(max = 400.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                if (foundCookies.isEmpty()) {
-                    item {
-                        Text("Данные не найдены")
-                    }
-                } else {
-                    val cookieData = foundCookies.filter { it.key.startsWith("cookie_") }
-                    val lsData = foundCookies.filter { it.key.startsWith("ls_") }
-                    val ssData = foundCookies.filter { it.key.startsWith("ss_") }
-                    
-                    val potentialFsid = mutableListOf<Pair<String, String>>()
-                    val potentialDeviceId = mutableListOf<Pair<String, String>>()
-                    
-                    foundCookies.forEach { (key, value) ->
-                        val lowerKey = key.lowercase()
-                        if (lowerKey.contains("fsid") || lowerKey.contains("session") || 
-                            lowerKey.contains("spid") || lowerKey.contains("token")) {
-                            potentialFsid.add(key to value)
-                        }
-                        if (lowerKey.contains("device") || lowerKey.contains("devicedl")) {
-                            potentialDeviceId.add(key to value)
-                        }
-                    }
-                    
-                    // Возможные FSID
-                    if (potentialFsid.isNotEmpty()) {
-                        item {
-                            Card(
+                            
+                            // Показываем статус
+                            val hasFsid = foundData.containsKey("headerApi_FSID") || 
+                                         foundData.keys.any { it.lowercase().contains("fsid") }
+                            val hasDeviceId = foundData.containsKey("ls_deviceld") || 
+                                             foundData.keys.any { it.lowercase().contains("device") }
+                            
+                            Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                                )
+                                horizontalArrangement = Arrangement.SpaceEvenly
                             ) {
-                                Column(modifier = Modifier.padding(12.dp)) {
-                                    Text("🔑 Возможные FSID:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    potentialFsid.forEach { (key, value) ->
-                                        DataRowWithCopy(
-                                            key = key,
-                                            value = value,
-                                            onCopy = {
-                                                val clip = ClipData.newPlainText(key, value)
-                                                clipboardManager.setPrimaryClip(clip)
-                                                Toast.makeText(context, "$key скопирован", Toast.LENGTH_SHORT).show()
-                                            }
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                        item { Spacer(modifier = Modifier.height(8.dp)) }
-                    }
-                    
-                    // Возможные DeviceID
-                    if (potentialDeviceId.isNotEmpty()) {
-                        item {
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.secondaryContainer
+                                Text(
+                                    "FSID: ${if (hasFsid) "✅" else "❌"}",
+                                    fontSize = 12.sp
                                 )
-                            ) {
-                                Column(modifier = Modifier.padding(12.dp)) {
-                                    Text("📱 Возможные DeviceID:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    potentialDeviceId.forEach { (key, value) ->
-                                        DataRowWithCopy(
-                                            key = key,
-                                            value = value,
-                                            onCopy = {
-                                                val clip = ClipData.newPlainText(key, value)
-                                                clipboardManager.setPrimaryClip(clip)
-                                                Toast.makeText(context, "$key скопирован", Toast.LENGTH_SHORT).show()
-                                            }
-                                        )
-                                    }
-                                }
+                                Text(
+                                    "DeviceID: ${if (hasDeviceId) "✅" else "❌"}",
+                                    fontSize = 12.sp
+                                )
                             }
-                        }
-                        item { Spacer(modifier = Modifier.height(8.dp)) }
-                    }
-                    
-                    // Куки
-                    if (cookieData.isNotEmpty()) {
-                        item {
-                            Text("🍪 Куки:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        }
-                        val cookieList = cookieData.toList()
-                        cookieList.take(5).forEach { (key, value) ->
-                            item {
-                                SimpleDataRow(key.removePrefix("cookie_"), value)
-                            }
-                        }
-                        if (cookieList.size > 5) {
-                            item {
-                                Text("... и ещё ${cookieList.size - 5}", fontSize = 11.sp)
-                            }
-                        }
-                        item { Spacer(modifier = Modifier.height(8.dp)) }
-                    }
-                    
-                    // LocalStorage
-                    if (lsData.isNotEmpty()) {
-                        item {
-                            Text("💾 LocalStorage:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        }
-                        val lsList = lsData.toList()
-                        lsList.take(5).forEach { (key, value) ->
-                            item {
-                                SimpleDataRow(key.removePrefix("ls_"), value)
-                            }
-                        }
-                        if (lsList.size > 5) {
-                            item {
-                                Text("... и ещё ${lsList.size - 5}", fontSize = 11.sp)
-                            }
-                        }
-                        item { Spacer(modifier = Modifier.height(8.dp)) }
-                    }
-                    
-                    // SessionStorage
-                    if (ssData.isNotEmpty()) {
-                        item {
-                            Text("📦 SessionStorage:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        }
-                        val ssList = ssData.toList()
-                        ssList.take(5).forEach { (key, value) ->
-                            item {
-                                SimpleDataRow(key.removePrefix("ss_"), value)
-                            }
-                        }
-                        if (ssList.size > 5) {
-                            item {
-                                Text("... и ещё ${ssList.size - 5}", fontSize = 11.sp)
+                            
+                            if (hasFsid && hasDeviceId) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    "✅ Данные найдены! Авторизация...",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
                             }
                         }
                     }
-                }
-            }
-        },
-        confirmButton = {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                TextButton(onClick = { showCookiesDialog = false }) {
-                    Text("Закрыть")
-                }
-                TextButton(onClick = { 
-                    showCookiesDialog = false
-                    showManualDialog = true 
-                }) {
-                    Text("Ввести вручную")
                 }
             }
         }
-    )
-}
-        // Диалог ручного ввода
-        if (showManualDialog) {
-            LaunchedEffect(Unit) {
-                if (manualFsid.isEmpty() && manualDeviceId.isEmpty()) {
-                    var foundFsid = ""
-                    var foundDeviceId = ""
-                    
-                    foundCookies.forEach { (key, value) ->
-                        val lowerKey = key.lowercase()
-                        if (foundFsid.isEmpty() && 
-                            (lowerKey.contains("fsid") || lowerKey.contains("spid") || lowerKey.contains("session"))) {
-                            foundFsid = value
-                        }
-                        if (foundDeviceId.isEmpty() && 
-                            (lowerKey.contains("device") || lowerKey.contains("devicedl"))) {
-                            foundDeviceId = value
-                        }
-                    }
-                    
-                    manualFsid = foundFsid
-                    manualDeviceId = foundDeviceId
-                }
-            }
-            
-            AlertDialog(
-                onDismissRequest = { showManualDialog = false },
-                title = { Text("📝 Ввод данных вручную") },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        OutlinedTextField(
-                            value = manualFsid,
-                            onValueChange = { manualFsid = it },
-                            label = { Text("FSID") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            trailingIcon = {
-                                if (manualFsid.isNotEmpty()) {
-                                    IconButton(onClick = {
-                                        val clip = ClipData.newPlainText("FSID", manualFsid)
-                                        clipboardManager.setPrimaryClip(clip)
-                                        Toast.makeText(context, "FSID скопирован", Toast.LENGTH_SHORT).show()
-                                    }) {
-                                        Icon(Icons.Default.ContentCopy, "Копировать")
-                                    }
-                                }
-                            }
-                        )
-                        
-                        OutlinedTextField(
-                            value = manualDeviceId,
-                            onValueChange = { manualDeviceId = it },
-                            label = { Text("Device ID") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            trailingIcon = {
-                                if (manualDeviceId.isNotEmpty()) {
-                                    IconButton(onClick = {
-                                        val clip = ClipData.newPlainText("DeviceID", manualDeviceId)
-                                        clipboardManager.setPrimaryClip(clip)
-                                        Toast.makeText(context, "Device ID скопирован", Toast.LENGTH_SHORT).show()
-                                    }) {
-                                        Icon(Icons.Default.ContentCopy, "Копировать")
-                                    }
-                                }
-                            }
-                        )
-                        
-                        Text(
-                            "Нажмите на поле чтобы редактировать.\n" +
-                            "Значения автоматически подставлены из найденных данных.",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            if (manualFsid.isNotBlank() && manualDeviceId.isNotBlank()) {
-                                onAuthSuccess(manualFsid, manualDeviceId)
-                                showManualDialog = false
-                            } else {
-                                Toast.makeText(context, "Заполните оба поля", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    ) {
-                        Text("Сохранить")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showManualDialog = false }) {
-                        Text("Отмена")
-                    }
-                }
-            )
-        }
     }
-}
-
-@Composable
-fun DataRowWithCopy(
-    key: String,
-    value: String,
-    onCopy: () -> Unit
-) {
-    val displayValue = if (value.length > 50) 
-        value.take(50) + "..." 
-    else 
-        value
-    
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onCopy() },
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        )
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    key,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 11.sp
-                )
-                Text(
-                    displayValue,
-                    fontSize = 10.sp,
-                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-                )
-            }
-            IconButton(
-                onClick = onCopy,
-                modifier = Modifier.size(32.dp)
-            ) {
-                Icon(
-                    Icons.Default.ContentCopy,
-                    "Копировать",
-                    modifier = Modifier.size(16.dp)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun SimpleDataRow(key: String, value: String) {
-    val displayValue = if (value.length > 30) 
-        value.take(30) + "..." 
-    else 
-        value
-    
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 2.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(
-            key,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Medium
-        )
-        Text(
-            displayValue,
-            fontSize = 10.sp,
-            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-        )
-    }
-}
-
-private inline fun <T, R> Iterable<T>.firstNotNullOfOrNull(transform: (T) -> R?): R? {
-    for (element in this) {
-        val result = transform(element)
-        if (result != null) return result
-    }
-    return null
 }
