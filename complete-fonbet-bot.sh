@@ -1,11 +1,14 @@
+#!/data/data/com.termux/files/usr/bin/bash
+
+cd ~/simple-app
+git checkout dev
+
+echo "📝 ДОБАВЛЯЕМ ЗАГЛУШКУ АВТОРИЗАЦИИ И ДОДЕЛЫВАЕМ МЕНЮ..."
+
+cat > app/src/main/java/com/example/fonbetbot/MainActivity.kt << 'KOTLIN_EOF'
 package com.example.fonbetbot
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import android.os.Bundle
-import android.webkit.CookieManager
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -21,13 +24,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -49,7 +50,6 @@ class MainActivity : ComponentActivity() {
 fun FonbetBotApp() {
     var isLoggedIn by remember { mutableStateOf(false) }
     var currentScreen by remember { mutableStateOf("auth") }
-    var authData by remember { mutableStateOf<AuthData?>(null) }
     
     if (!isLoggedIn) {
         AuthScreen(onLoginSuccess = { 
@@ -59,24 +59,14 @@ fun FonbetBotApp() {
     } else {
         when (currentScreen) {
             "main" -> MainBotScreen(
-                authData = authData,
                 onNavigateToStats = { currentScreen = "stats" },
                 onNavigateToSettings = { currentScreen = "settings" },
                 onNavigateToHistory = { currentScreen = "history" },
                 onNavigateToProfile = { currentScreen = "profile" },
-                onNavigateToWebAuth = { currentScreen = "webAuth" },
                 onLogout = { 
                     isLoggedIn = false
                     currentScreen = "auth"
-                    authData = null
                 }
-            )
-            "webAuth" -> WebViewAuthScreen(
-                onAuthSuccess = { fsid, deviceId ->
-                    authData = AuthData(fsid, deviceId)
-                    currentScreen = "main"
-                },
-                onBack = { currentScreen = "main" }
             )
             "stats" -> StatsScreen(onBack = { currentScreen = "main" })
             "settings" -> SettingsScreen(
@@ -84,18 +74,10 @@ fun FonbetBotApp() {
                 onSave = { currentScreen = "main" }
             )
             "history" -> HistoryScreen(onBack = { currentScreen = "main" })
-            "profile" -> ProfileScreen(
-                authData = authData,
-                onBack = { currentScreen = "main" }
-            )
+            "profile" -> ProfileScreen(onBack = { currentScreen = "main" })
         }
     }
 }
-
-data class AuthData(
-    val fsid: String,
-    val deviceId: String
-)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -105,6 +87,7 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     
+    // Заглушка авторизации
     val validLogin = "admin"
     val validPassword = "admin"
     
@@ -112,7 +95,7 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
         topBar = {
             CenterAlignedTopAppBar(
                 title = { 
-                    Text("🔐 Фонбет Бот", fontWeight = FontWeight.Bold)
+                    Text("🔐 Fonbet Bot", fontWeight = FontWeight.Bold)
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer
@@ -153,6 +136,7 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                     
                     Spacer(modifier = Modifier.height(32.dp))
                     
+                    // Подсказка для теста
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(8.dp),
@@ -223,6 +207,7 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                             isLoading = true
                             errorMessage = null
                             
+                            // Проверка логина и пароля
                             if (login == validLogin && password == validPassword) {
                                 onLoginSuccess()
                             } else {
@@ -254,66 +239,22 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainBotScreen(
-    authData: AuthData?,
     onNavigateToStats: () -> Unit,
     onNavigateToSettings: () -> Unit,
     onNavigateToHistory: () -> Unit,
     onNavigateToProfile: () -> Unit,
-    onNavigateToWebAuth: () -> Unit,
     onLogout: () -> Unit
 ) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val apiClient = remember { ApiClient() }
-    
     var isBotRunning by remember { mutableStateOf(false) }
     var balance by remember { mutableStateOf(10000.0) }
     val logs = remember { mutableStateListOf<String>() }
     var showMenu by remember { mutableStateOf(false) }
-    var showAuthCard by remember { mutableStateOf(authData == null) }
-    var isLoadingBalance by remember { mutableStateOf(false) }
-    
-    // Функция для получения баланса через API
-    fun fetchBalanceFromApi() {
-        if (authData == null) {
-            logs.add(0, "[${getCurrentTime()}] ❌ Нет данных авторизации")
-            return
-        }
-        
-        isLoadingBalance = true
-        
-        // Получаем куки из WebView (если есть)
-        val cookieManager = CookieManager.getInstance()
-        val cookieString = cookieManager.getCookie("https://your-site.com") ?: ""
-        
-        val cookies = cookieString.split("; ").associate { cookie ->
-            val parts = cookie.split("=", limit = 2)
-            parts[0] to (parts.getOrNull(1) ?: "")
-        }
-        
-        apiClient.getSaldo(
-            cookies = cookies,
-            fsid = authData.fsid,
-            deviceId = authData.deviceId,
-            onSuccess = { saldo ->
-                isLoadingBalance = false
-                if (saldo != null) {
-                    balance = saldo
-                    logs.add(0, "[${getCurrentTime()}] 💰 Баланс обновлён: $saldo ₽")
-                }
-            },
-            onError = { error ->
-                isLoadingBalance = false
-                logs.add(0, "[${getCurrentTime()}] ❌ Ошибка API: $error")
-            }
-        )
-    }
     
     // Симуляция работы бота
     LaunchedEffect(isBotRunning) {
         while (isBotRunning) {
             delay(5000)
-            val timestamp = getCurrentTime()
+            val timestamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
             val profit = (10..500).random().toDouble()
             balance += profit
             logs.add(0, "[$timestamp] 💰 Профит: +$profit ₽")
@@ -388,104 +329,6 @@ fun MainBotScreen(
                 .padding(paddingValues)
                 .padding(16.dp)
         ) {
-            // Карточка авторизации (если нет данных)
-            if (showAuthCard) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.tertiaryContainer
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            "⚠️ Требуется авторизация на сайте",
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Button(
-                            onClick = onNavigateToWebAuth,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.tertiary
-                            )
-                        ) {
-                            Text("🔐 Авторизоваться")
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-            }
-            
-            // Карточка с данными авторизации
-            if (authData != null) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                "✅ Данные получены",
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
-                            )
-                            Row {
-                                IconButton(
-                                    onClick = {
-                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                        val clip = ClipData.newPlainText(
-                                            "Auth Data",
-                                            "FSID: ${authData.fsid}\nDeviceID: ${authData.deviceId}"
-                                        )
-                                        clipboard.setPrimaryClip(clip)
-                                        Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
-                                    }
-                                ) {
-                                    Icon(
-                                        Icons.Default.ContentCopy,
-                                        "Копировать",
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                                IconButton(onClick = { fetchBalanceFromApi() }) {
-                                    Icon(
-                                        Icons.Default.Refresh,
-                                        "Обновить баланс",
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-                        }
-                        Text(
-                            "FSID: ${authData.fsid.take(20)}...",
-                            fontSize = 12.sp,
-                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-                        Text(
-                            "DeviceID: ${authData.deviceId.take(20)}...",
-                            fontSize = 12.sp,
-                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-            }
-            
             // Карточка баланса и статуса
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -524,20 +367,15 @@ fun MainBotScreen(
                         fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    
-                    if (isLoadingBalance) {
-                        CircularProgressIndicator(modifier = Modifier.size(32.dp))
-                    } else {
-                        Text(
-                            String.format("%.2f ₽", balance),
-                            fontSize = 42.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (balance >= 10000) 
-                                Color(0xFF4CAF50) 
-                            else 
-                                MaterialTheme.colorScheme.onSurface
-                        )
-                    }
+                    Text(
+                        String.format("%.2f ₽", balance),
+                        fontSize = 42.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (balance >= 10000) 
+                            Color(0xFF4CAF50) 
+                        else 
+                            MaterialTheme.colorScheme.onSurface
+                    )
                 }
             }
             
@@ -547,13 +385,9 @@ fun MainBotScreen(
             Button(
                 onClick = {
                     isBotRunning = !isBotRunning
-                    val timestamp = getCurrentTime()
+                    val timestamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
                     if (isBotRunning) {
                         logs.add(0, "[$timestamp] 🚀 Бот запущен")
-                        // При запуске обновляем баланс через API
-                        if (authData != null) {
-                            fetchBalanceFromApi()
-                        }
                     } else {
                         logs.add(0, "[$timestamp] ⏹ Бот остановлен")
                     }
@@ -654,10 +488,6 @@ fun MainBotScreen(
     }
 }
 
-private fun getCurrentTime(): String {
-    return SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-}
-
 @Composable
 fun QuickActionButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -686,12 +516,194 @@ fun QuickActionButton(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ProfileScreen(
-    authData: AuthData?,
-    onBack: () -> Unit
-) {
-    val context = LocalContext.current
+fun StatsScreen(onBack: () -> Unit) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("📊 Статистика") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, "Назад")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                )
+            )
+        }
+    ) { paddingValues ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item {
+                StatCard(
+                    title = "За сегодня",
+                    items = listOf(
+                        StatItem("Профит", "+1,250 ₽", Color(0xFF4CAF50)),
+                        StatItem("Ставок", "15", Color(0xFF2196F3)),
+                        StatItem("Выигрышей", "11", Color(0xFF4CAF50)),
+                        StatItem("Процент", "73.3%", Color(0xFFFF9800))
+                    )
+                )
+            }
+            
+            item {
+                StatCard(
+                    title = "За неделю",
+                    items = listOf(
+                        StatItem("Профит", "+8,420 ₽", Color(0xFF4CAF50)),
+                        StatItem("Ставок", "87", Color(0xFF2196F3)),
+                        StatItem("Выигрышей", "58", Color(0xFF4CAF50)),
+                        StatItem("Процент", "66.7%", Color(0xFFFF9800))
+                    )
+                )
+            }
+            
+            item {
+                StatCard(
+                    title = "За всё время",
+                    items = listOf(
+                        StatItem("Профит", "+24,850 ₽", Color(0xFF4CAF50)),
+                        StatItem("Ставок", "312", Color(0xFF2196F3)),
+                        StatItem("Выигрышей", "218", Color(0xFF4CAF50)),
+                        StatItem("Проигрышей", "94", Color(0xFFF44336)),
+                        StatItem("Процент", "69.9%", Color(0xFFFF9800)),
+                        StatItem("Лучший день", "+3,200 ₽", Color(0xFF9C27B0))
+                    )
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun StatCard(title: String, items: List<StatItem>) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                title,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+            
+            items.forEach { item ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        item.label,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        item.value,
+                        fontWeight = FontWeight.Bold,
+                        color = item.color
+                    )
+                }
+                if (item != items.last()) {
+                    Divider(modifier = Modifier.padding(vertical = 4.dp))
+                }
+            }
+        }
+    }
+}
+
+data class StatItem(val label: String, val value: String, val color: Color)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun HistoryScreen(onBack: () -> Unit) {
+    val historyItems = listOf(
+        HistoryItem("15:30", "Победа", "+500 ₽", Color(0xFF4CAF50)),
+        HistoryItem("14:15", "Победа", "+250 ₽", Color(0xFF4CAF50)),
+        HistoryItem("13:00", "Поражение", "-100 ₽", Color(0xFFF44336)),
+        HistoryItem("12:30", "Победа", "+750 ₽", Color(0xFF4CAF50)),
+        HistoryItem("11:45", "Победа", "+300 ₽", Color(0xFF4CAF50)),
+        HistoryItem("10:20", "Поражение", "-100 ₽", Color(0xFFF44336)),
+        HistoryItem("09:15", "Победа", "+200 ₽", Color(0xFF4CAF50))
+    )
     
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("📜 История ставок") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, "Назад")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                )
+            )
+        }
+    ) { paddingValues ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(historyItems) { item ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                item.time,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                item.status,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                        Text(
+                            item.amount,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = item.color
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+data class HistoryItem(
+    val time: String,
+    val status: String,
+    val amount: String,
+    val color: Color
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ProfileScreen(onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -761,43 +773,7 @@ fun ProfileScreen(
                     ProfileInfoRow("Статус", "Активен")
                     ProfileInfoRow("Дата регистрации", "01.01.2024")
                     ProfileInfoRow("Тариф", "Premium")
-                    
-                    if (authData != null) {
-                        Divider(modifier = Modifier.padding(vertical = 12.dp))
-                        Text(
-                            "Данные авторизации:",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        )
-                        Text(
-                            "FSID: ${authData.fsid}",
-                            fontSize = 11.sp,
-                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-                        )
-                        Text(
-                            "DeviceID: ${authData.deviceId}",
-                            fontSize = 11.sp,
-                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-                        )
-                        
-                        Spacer(modifier = Modifier.height(12.dp))
-                        
-                        Button(
-                            onClick = {
-                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                val clip = ClipData.newPlainText(
-                                    "Auth Data",
-                                    "FSID: ${authData.fsid}\nDeviceID: ${authData.deviceId}"
-                                )
-                                clipboard.setPrimaryClip(clip)
-                                Toast.makeText(context, "Данные скопированы", Toast.LENGTH_SHORT).show()
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("📋 Скопировать данные")
-                        }
-                    }
+                    ProfileInfoRow("Баланс", "10,000 ₽")
                 }
             }
             
@@ -813,5 +789,199 @@ fun ProfileScreen(
     }
 }
 
-// Остальные экраны (StatsScreen, HistoryScreen, SettingsScreen) оставляем без изменений
-// как в исходном файле
+@Composable
+fun ProfileInfoRow(label: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            label,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            value,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsScreen(onBack: () -> Unit, onSave: () -> Unit) {
+    var betAmount by remember { mutableStateOf("100") }
+    var checkInterval by remember { mutableStateOf("5") }
+    var autoStart by remember { mutableStateOf(true) }
+    var notifications by remember { mutableStateOf(true) }
+    var soundEnabled by remember { mutableStateOf(false) }
+    
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("⚙️ Настройки") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, "Назад")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                )
+            )
+        }
+    ) { paddingValues ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Text(
+                            "💰 Параметры ставок",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(bottom = 12.dp)
+                        )
+                        
+                        OutlinedTextField(
+                            value = betAmount,
+                            onValueChange = { betAmount = it },
+                            label = { Text("Сумма ставки (₽)") },
+                            leadingIcon = { Icon(Icons.Default.AttachMoney, null) },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        OutlinedTextField(
+                            value = checkInterval,
+                            onValueChange = { checkInterval = it },
+                            label = { Text("Интервал проверки (сек)") },
+                            leadingIcon = { Icon(Icons.Default.Timer, null) },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            }
+            
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Text(
+                            "🔧 Общие настройки",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(bottom = 12.dp)
+                        )
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Автозапуск бота")
+                            Switch(
+                                checked = autoStart,
+                                onCheckedChange = { autoStart = it }
+                            )
+                        }
+                        
+                        Divider(modifier = Modifier.padding(vertical = 8.dp))
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Уведомления")
+                            Switch(
+                                checked = notifications,
+                                onCheckedChange = { notifications = it }
+                            )
+                        }
+                        
+                        Divider(modifier = Modifier.padding(vertical = 8.dp))
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Звуковые сигналы")
+                            Switch(
+                                checked = soundEnabled,
+                                onCheckedChange = { soundEnabled = it }
+                            )
+                        }
+                    }
+                }
+            }
+            
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onBack,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Отмена")
+                    }
+                    
+                    Button(
+                        onClick = onSave,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Сохранить")
+                    }
+                }
+            }
+        }
+    }
+}
+KOTLIN_EOF
+
+echo "✅ Код обновлён!"
+echo ""
+echo "📦 КОММИТИМ И ПУШИМ..."
+
+git add app/src/main/java/com/example/fonbetbot/MainActivity.kt
+git commit -m "Complete Fonbet Bot: auth stub (admin/admin), all menus, improved UI"
+git push origin dev
+
+echo ""
+echo "════════════════════════════════════════════════════"
+echo "✅ FONBET BOT ПОЛНОСТЬЮ ГОТОВ!"
+echo "════════════════════════════════════════════════════"
+echo ""
+echo "🔐 ДАННЫЕ ДЛЯ ВХОДА:"
+echo "   Логин: admin"
+echo "   Пароль: admin"
+echo ""
+echo "📱 ЧТО ДОБАВЛЕНО:"
+echo "   ✅ Заглушка авторизации admin/admin"
+echo "   ✅ Главный экран с балансом и логами"
+echo "   ✅ Статистика (день/неделя/всё время)"
+echo "   ✅ История ставок"
+echo "   ✅ Профиль пользователя"
+echo "   ✅ Настройки с переключателями"
+echo "   ✅ Улучшенный дизайн всех экранов"
+echo "   ✅ Симуляция работы бота"
+echo ""
+echo "🔍 СБОРКА ЗАПУЩЕНА АВТОМАТИЧЕСКИ"
+echo "   https://github.com/artivus2-prog/simple-app/actions"
+echo ""
+

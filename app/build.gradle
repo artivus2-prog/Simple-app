@@ -51,4 +51,14 @@ dependencies {
     implementation 'androidx.compose.ui:ui-tooling-preview'
     implementation 'androidx.compose.material3:material3'
     implementation 'androidx.compose.material:material-icons-extended'
+    
+    // WebView для авторизации
+    implementation 'androidx.webkit:webkit:1.10.0'
+    
+    // Сетевые запросы и JSON
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'org.json:json:20240303'
+    
+    // Compose WebView (для встраивания WebView в Compose)
+    implementation 'com.google.accompanist:accompanist-webview:0.34.0'
 }
