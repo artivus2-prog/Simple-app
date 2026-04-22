@@ -1,17 +1,13 @@
 // WebViewAuthScreen.kt
 package com.example.fonbetbot
 
-import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.webkit.CookieManager
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -35,12 +31,20 @@ fun WebViewAuthScreen(
     val authUrl = "https://www.fon.bet/"
     var isLoading by remember { mutableStateOf(true) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
-    var foundData by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var foundFsid by remember { mutableStateOf("") }
+    var foundDeviceId by remember { mutableStateOf("") }
+    var manualFsid by remember { mutableStateOf("") }
+    var manualDeviceId by remember { mutableStateOf("") }
+    var showManualDialog by remember { mutableStateOf(false) }
+    var isChecking by remember { mutableStateOf(false) }
     
     val context = LocalContext.current
+    val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     
     // Функция для извлечения данных
     fun extractAllData() {
+        isChecking = true
+        
         webViewRef?.evaluateJavascript("""
             (function() {
                 var result = {};
@@ -69,7 +73,7 @@ fun WebViewAuthScreen(
                     }
                 } catch(e) {}
                 
-                // Ищем FSID в заголовках через перехват
+                // Захваченный FSID из перехватчика
                 if (window._capturedFsid) result['headerApi_FSID'] = window._capturedFsid;
                 
                 return JSON.stringify(result);
@@ -78,62 +82,74 @@ fun WebViewAuthScreen(
             try {
                 if (result != "null" && result.isNotEmpty()) {
                     val jsonObject = JSONObject(result.trim('"'))
-                    val allData = mutableMapOf<String, String>()
                     
-                    val keys = jsonObject.keys()
-                    while (keys.hasNext()) {
-                        val key = keys.next()
-                        val value = jsonObject.optString(key, "")
-                        if (value.isNotEmpty() && value != "null") {
-                            allData[key] = value
-                        }
-                    }
-                    
-                    foundData = allData
-                    
-                    // Автоматически ищем правильные значения
                     var fsid = ""
                     var deviceId = ""
                     
                     // Приоритет: headerApi_FSID
-                    if (allData.containsKey("headerApi_FSID")) {
-                        fsid = allData["headerApi_FSID"] ?: ""
+                    if (jsonObject.has("headerApi_FSID")) {
+                        fsid = jsonObject.getString("headerApi_FSID")
                     }
                     
                     // Если нет headerApi_FSID, ищем другие
                     if (fsid.isEmpty()) {
-                        for ((key, value) in allData) {
+                        val keys = jsonObject.keys()
+                        while (keys.hasNext()) {
+                            val key = keys.next()
                             val lowerKey = key.lowercase()
-                            if (lowerKey.contains("fsid") && value.length in 20..100) {
-                                fsid = value
-                                break
+                            if (lowerKey.contains("fsid") || lowerKey.contains("spid")) {
+                                val value = jsonObject.getString(key)
+                                if (value.length in 20..100) {
+                                    fsid = value
+                                    break
+                                }
                             }
                         }
                     }
                     
-                    // Ищем DeviceID - приоритет local.deviceld
-                    if (allData.containsKey("ls_deviceld")) {
-                        deviceId = allData["ls_deviceld"] ?: ""
-                    } else if (allData.containsKey("local.deviceld")) {
-                        deviceId = allData["local.deviceld"] ?: ""
+                    // Ищем DeviceID - приоритет ls_deviceld
+                    if (jsonObject.has("ls_deviceld")) {
+                        deviceId = jsonObject.getString("ls_deviceld")
+                    } else if (jsonObject.has("local.deviceld")) {
+                        deviceId = jsonObject.getString("local.deviceld")
                     } else {
-                        for ((key, value) in allData) {
+                        val keys = jsonObject.keys()
+                        while (keys.hasNext()) {
+                            val key = keys.next()
                             val lowerKey = key.lowercase()
-                            if (lowerKey.contains("device") && value.length in 20..100) {
-                                deviceId = value
-                                break
+                            if (lowerKey.contains("device")) {
+                                val value = jsonObject.getString(key)
+                                if (value.length in 20..100) {
+                                    deviceId = value
+                                    break
+                                }
                             }
                         }
                     }
+                    
+                    foundFsid = fsid
+                    foundDeviceId = deviceId
+                    manualFsid = fsid
+                    manualDeviceId = deviceId
                     
                     // Если нашли оба - авторизуемся автоматически
                     if (fsid.isNotEmpty() && deviceId.isNotEmpty()) {
                         onAuthSuccess(fsid, deviceId)
+                    } else {
+                        // Показываем диалог ручного ввода
+                        showManualDialog = true
                     }
+                } else {
+                    foundFsid = ""
+                    foundDeviceId = ""
+                    showManualDialog = true
                 }
             } catch (e: Exception) {
-                // Игнорируем
+                foundFsid = ""
+                foundDeviceId = ""
+                showManualDialog = true
             }
+            isChecking = false
         }
     }
     
@@ -141,7 +157,6 @@ fun WebViewAuthScreen(
     fun injectInterceptor() {
         webViewRef?.evaluateJavascript("""
             (function() {
-                // Перехватываем fetch
                 var originalFetch = window.fetch;
                 window.fetch = function() {
                     var url = arguments[0];
@@ -152,7 +167,6 @@ fun WebViewAuthScreen(
                             var body = JSON.parse(options.body);
                             if (body.fsid) {
                                 window._capturedFsid = body.fsid;
-                                console.log('Captured FSID:', body.fsid);
                             }
                         } catch(e) {}
                     }
@@ -160,20 +174,12 @@ fun WebViewAuthScreen(
                     return originalFetch.apply(this, arguments);
                 };
                 
-                // Перехватываем XMLHttpRequest
                 var originalXHROpen = XMLHttpRequest.prototype.open;
                 var originalXHRSend = XMLHttpRequest.prototype.send;
-                var originalXHRSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
                 
                 XMLHttpRequest.prototype.open = function(method, url) {
                     this._url = url;
-                    this._headers = {};
                     return originalXHROpen.apply(this, arguments);
-                };
-                
-                XMLHttpRequest.prototype.setRequestHeader = function(name, value) {
-                    this._headers[name] = value;
-                    return originalXHRSetRequestHeader.apply(this, arguments);
                 };
                 
                 XMLHttpRequest.prototype.send = function(body) {
@@ -182,14 +188,11 @@ fun WebViewAuthScreen(
                             var jsonBody = JSON.parse(body);
                             if (jsonBody.fsid) {
                                 window._capturedFsid = jsonBody.fsid;
-                                console.log('Captured FSID from XHR:', jsonBody.fsid);
                             }
                         } catch(e) {}
                     }
                     return originalXHRSend.apply(this, arguments);
                 };
-                
-                console.log('Interceptor installed');
             })();
         """.trimIndent()) { }
     }
@@ -205,9 +208,13 @@ fun WebViewAuthScreen(
                 },
                 actions = {
                     IconButton(onClick = { 
+                        showManualDialog = true
+                    }) {
+                        Icon(Icons.Default.Edit, "Ввести вручную")
+                    }
+                    IconButton(onClick = { 
                         injectInterceptor()
                         extractAllData()
-                        Toast.makeText(context, "Проверка авторизации...", Toast.LENGTH_SHORT).show()
                     }) {
                         Icon(Icons.Default.Check, "Проверить")
                     }
@@ -251,15 +258,7 @@ fun WebViewAuthScreen(
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
                                 isLoading = false
-                                
-                                // Устанавливаем перехватчик
                                 injectInterceptor()
-                                
-                                url?.let { currentUrl ->
-                                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                                        extractAllData()
-                                    }, 2000)
-                                }
                             }
                             
                             override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
@@ -285,7 +284,7 @@ fun WebViewAuthScreen(
                 )
             }
             
-            // Подсказка внизу
+            // Кнопка проверки внизу
             if (!isLoading) {
                 Card(
                     modifier = Modifier
@@ -302,7 +301,7 @@ fun WebViewAuthScreen(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            "1. Войдите в аккаунт Фонбет\n2. Нажмите ✓ для авторизации",
+                            "1. Войдите в аккаунт Фонбет\n2. Нажмите ✓ для проверки",
                             fontSize = 14.sp
                         )
                         
@@ -310,48 +309,220 @@ fun WebViewAuthScreen(
                         
                         Button(
                             onClick = {
+                                injectInterceptor()
                                 extractAllData()
                             },
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !isChecking
                         ) {
-                            Text("🔍 ПРОВЕРИТЬ АВТОРИЗАЦИЮ")
+                            if (isChecking) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                            }
+                            Text(if (isChecking) "ПРОВЕРКА..." else "🔍 ПРОВЕРИТЬ АВТОРИЗАЦИЮ")
                         }
                         
-                        if (foundData.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            
-                            // Показываем статус
-                            val hasFsid = foundData.containsKey("headerApi_FSID") || 
-                                         foundData.keys.any { it.lowercase().contains("fsid") }
-                            val hasDeviceId = foundData.containsKey("ls_deviceld") || 
-                                             foundData.keys.any { it.lowercase().contains("device") }
-                            
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceEvenly
-                            ) {
-                                Text(
-                                    "FSID: ${if (hasFsid) "✅" else "❌"}",
-                                    fontSize = 12.sp
-                                )
-                                Text(
-                                    "DeviceID: ${if (hasDeviceId) "✅" else "❌"}",
-                                    fontSize = 12.sp
-                                )
-                            }
-                            
-                            if (hasFsid && hasDeviceId) {
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    "✅ Данные найдены! Авторизация...",
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        TextButton(
+                            onClick = { showManualDialog = true }
+                        ) {
+                            Text("✏️ Ввести данные вручную")
                         }
                     }
                 }
             }
+            
+            // Индикатор проверки
+            if (isChecking) {
+                Card(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(32.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    ),
+                    elevation = CardDefaults.cardElevation(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                        Text("Поиск данных авторизации...")
+                    }
+                }
+            }
+        }
+        
+        // Диалог ручного ввода
+        if (showManualDialog) {
+            AlertDialog(
+                onDismissRequest = { showManualDialog = false },
+                title = { Text("📝 Данные авторизации") },
+                text = {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        // FSID
+                        Column {
+                            Text(
+                                "FSID:",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            OutlinedTextField(
+                                value = manualFsid,
+                                onValueChange = { manualFsid = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = false,
+                                minLines = 2,
+                                maxLines = 3,
+                                trailingIcon = {
+                                    if (manualFsid.isNotEmpty()) {
+                                        IconButton(onClick = {
+                                            val clip = ClipData.newPlainText("FSID", manualFsid)
+                                            clipboardManager.setPrimaryClip(clip)
+                                            Toast.makeText(context, "FSID скопирован", Toast.LENGTH_SHORT).show()
+                                        }) {
+                                            Icon(Icons.Default.ContentCopy, "Копировать")
+                                        }
+                                    }
+                                },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedContainerColor = if (foundFsid.isNotEmpty() && manualFsid == foundFsid) 
+                                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                                    else 
+                                        MaterialTheme.colorScheme.surface
+                                )
+                            )
+                            if (foundFsid.isNotEmpty()) {
+                                Text(
+                                    "Найдено: ${foundFsid.take(30)}...",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                            }
+                        }
+                        
+                        // DeviceID
+                        Column {
+                            Text(
+                                "Device ID:",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            OutlinedTextField(
+                                value = manualDeviceId,
+                                onValueChange = { manualDeviceId = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = false,
+                                minLines = 2,
+                                maxLines = 3,
+                                trailingIcon = {
+                                    if (manualDeviceId.isNotEmpty()) {
+                                        IconButton(onClick = {
+                                            val clip = ClipData.newPlainText("DeviceID", manualDeviceId)
+                                            clipboardManager.setPrimaryClip(clip)
+                                            Toast.makeText(context, "Device ID скопирован", Toast.LENGTH_SHORT).show()
+                                        }) {
+                                            Icon(Icons.Default.ContentCopy, "Копировать")
+                                        }
+                                    }
+                                },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedContainerColor = if (foundDeviceId.isNotEmpty() && manualDeviceId == foundDeviceId) 
+                                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                                    else 
+                                        MaterialTheme.colorScheme.surface
+                                )
+                            )
+                            if (foundDeviceId.isNotEmpty()) {
+                                Text(
+                                    "Найдено: ${foundDeviceId.take(30)}...",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                            }
+                        }
+                        
+                        // Статус
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Column {
+                                Text("FSID:", fontSize = 12.sp)
+                                Text(
+                                    if (foundFsid.isNotEmpty()) "✅ Найден" else "❌ Не найден",
+                                    fontSize = 12.sp,
+                                    color = if (foundFsid.isNotEmpty()) Color(0xFF4CAF50) else Color(0xFFF44336)
+                                )
+                            }
+                            Column {
+                                Text("DeviceID:", fontSize = 12.sp)
+                                Text(
+                                    if (foundDeviceId.isNotEmpty()) "✅ Найден" else "❌ Не найден",
+                                    fontSize = 12.sp,
+                                    color = if (foundDeviceId.isNotEmpty()) Color(0xFF4CAF50) else Color(0xFFF44336)
+                                )
+                            }
+                        }
+                        
+                        // Кнопка "Использовать найденные"
+                        if (foundFsid.isNotEmpty() && foundDeviceId.isNotEmpty()) {
+                            Button(
+                                onClick = {
+                                    manualFsid = foundFsid
+                                    manualDeviceId = foundDeviceId
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.secondary
+                                )
+                            ) {
+                                Text("📋 Использовать найденные значения")
+                            }
+                        }
+                        
+                        Divider()
+                        
+                        Text(
+                            "Введите FSID и Device ID, полученные после авторизации на сайте Фонбет.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            if (manualFsid.isNotBlank() && manualDeviceId.isNotBlank()) {
+                                onAuthSuccess(manualFsid, manualDeviceId)
+                                showManualDialog = false
+                            } else {
+                                Toast.makeText(context, "Заполните оба поля", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    ) {
+                        Text("Сохранить")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showManualDialog = false }) {
+                        Text("Отмена")
+                    }
+                }
+            )
         }
     }
 }
