@@ -1,13 +1,15 @@
+// MainActivity.kt
 package com.example.fonbetbot
 
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.SharedPreferences
+import android.content.Intent
+import android.os.Build
 import android.os.Bundle
-import android.webkit.CookieManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -24,20 +26,13 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.delay
+import androidx.core.content.ContextCompat
 import java.text.SimpleDateFormat
 import java.util.*
 
 class MainActivity : ComponentActivity() {
-    
-    companion object {
-        private const val PREFS_NAME = "auth_prefs"
-        private const val KEY_FSID = "fsid"
-        private const val KEY_DEVICE_ID = "device_id"
-    }
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -62,8 +57,7 @@ fun FonbetBotApp() {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE) }
     
-    var isLoggedIn by remember { mutableStateOf(false) }
-    var currentScreen by remember { mutableStateOf("auth") }
+    var currentScreen by remember { mutableStateOf("main") }
     var authData by remember { mutableStateOf<AuthData?>(null) }
     
     // Загружаем сохранённые данные при старте
@@ -91,194 +85,36 @@ fun FonbetBotApp() {
         authData = null
     }
     
-    if (!isLoggedIn) {
-        AuthScreen(onLoginSuccess = { 
-            isLoggedIn = true
-            currentScreen = "main"
-        })
-    } else {
-        when (currentScreen) {
-            "main" -> MainBotScreen(
-                authData = authData,
-                onNavigateToStats = { currentScreen = "stats" },
-                onNavigateToSettings = { currentScreen = "settings" },
-                onNavigateToHistory = { currentScreen = "history" },
-                onNavigateToProfile = { currentScreen = "profile" },
-                onNavigateToWebAuth = { currentScreen = "webAuth" },
-                onLogout = { 
-                    isLoggedIn = false
-                    currentScreen = "auth"
-                    clearAuthData()
-                }
-            )
-            "webAuth" -> WebViewAuthScreen(
-                onAuthSuccess = { fsid, deviceId ->
-                    saveAuthData(fsid, deviceId)
-                    currentScreen = "main"
-                },
-                onBack = { currentScreen = "main" }
-            )
-            "stats" -> StatsScreen(onBack = { currentScreen = "main" })
-            "settings" -> SettingsScreen(
-                onBack = { currentScreen = "main" },
-                onSave = { currentScreen = "main" }
-            )
-            "history" -> HistoryScreen(onBack = { currentScreen = "main" })
-            "profile" -> ProfileScreen(
-                authData = authData,
-                onBack = { currentScreen = "main" }
-            )
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun AuthScreen(onLoginSuccess: () -> Unit) {
-    var login by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var isLoading by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    
-    val validLogin = "admin"
-    val validPassword = "admin"
-    
-    Scaffold(
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = { 
-                    Text("🔐 Фонбет Бот", fontWeight = FontWeight.Bold)
-                },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                )
-            )
-        }
-    ) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
-            ) {
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text("🤖", fontSize = 64.sp)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        "Добро пожаловать!",
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Text(
-                        "Войдите в аккаунт",
-                        fontSize = 16.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    
-                    Spacer(modifier = Modifier.height(32.dp))
-                    
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer
-                        )
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text(
-                                "💡 Тестовый доступ",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
-                            )
-                            Text(
-                                "Логин: admin | Пароль: admin",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
-                            )
-                        }
-                    }
-                    
-                    Spacer(modifier = Modifier.height(16.dp))
-                    
-                    OutlinedTextField(
-                        value = login,
-                        onValueChange = { login = it },
-                        label = { Text("Логин") },
-                        leadingIcon = { Icon(Icons.Default.Person, null) },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        isError = errorMessage != null
-                    )
-                    
-                    Spacer(modifier = Modifier.height(12.dp))
-                    
-                    OutlinedTextField(
-                        value = password,
-                        onValueChange = { password = it },
-                        label = { Text("Пароль") },
-                        leadingIcon = { Icon(Icons.Default.Lock, null) },
-                        visualTransformation = PasswordVisualTransformation(),
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        isError = errorMessage != null
-                    )
-                    
-                    if (errorMessage != null) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            errorMessage!!,
-                            color = MaterialTheme.colorScheme.error,
-                            fontSize = 12.sp
-                        )
-                    }
-                    
-                    Spacer(modifier = Modifier.height(24.dp))
-                    
-                    Button(
-                        onClick = {
-                            isLoading = true
-                            errorMessage = null
-                            
-                            if (login == validLogin && password == validPassword) {
-                                onLoginSuccess()
-                            } else {
-                                isLoading = false
-                                errorMessage = "Неверный логин или пароль"
-                            }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(50.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        enabled = !isLoading
-                    ) {
-                        if (isLoading) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(24.dp),
-                                color = Color.White
-                            )
-                        } else {
-                            Text("ВОЙТИ", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
+    when (currentScreen) {
+        "main" -> MainBotScreen(
+            authData = authData,
+            onNavigateToStats = { currentScreen = "stats" },
+            onNavigateToSettings = { currentScreen = "settings" },
+            onNavigateToHistory = { currentScreen = "history" },
+            onNavigateToProfile = { currentScreen = "profile" },
+            onNavigateToWebAuth = { currentScreen = "webAuth" },
+            onLogout = {
+                currentScreen = "main"
+                clearAuthData()
             }
-        }
+        )
+        "webAuth" -> WebViewAuthScreen(
+            onAuthSuccess = { fsid, deviceId ->
+                saveAuthData(fsid, deviceId)
+                currentScreen = "main"
+            },
+            onBack = { currentScreen = "main" }
+        )
+        "stats" -> StatsScreen(onBack = { currentScreen = "main" })
+        "settings" -> SettingsScreen(
+            onBack = { currentScreen = "main" },
+            onSave = { currentScreen = "main" }
+        )
+        "history" -> HistoryScreen(onBack = { currentScreen = "main" })
+        "profile" -> ProfileScreen(
+            authData = authData,
+            onBack = { currentScreen = "main" }
+        )
     }
 }
 
@@ -294,59 +130,68 @@ fun MainBotScreen(
     onLogout: () -> Unit
 ) {
     val context = LocalContext.current
-    val apiClient = remember { ApiClient() }
     
-    var isBotRunning by remember { mutableStateOf(false) }
+    var isBotRunning by remember { 
+        mutableStateOf(BotForegroundService.isRunning) 
+    }
     var balance by remember { mutableStateOf(10000.0) }
     val logs = remember { mutableStateListOf<String>() }
     var showMenu by remember { mutableStateOf(false) }
-    var isLoadingBalance by remember { mutableStateOf(false) }
     
-    // Функция для получения баланса через API
-    fun fetchBalanceFromApi() {
+    // Подписываемся на обновления из сервиса
+    DisposableEffect(Unit) {
+        BotForegroundService.onBalanceUpdate = { newBalance ->
+            balance = newBalance
+        }
+        BotForegroundService.onLogUpdate = { log ->
+            logs.add(0, log)
+            if (logs.size > 20) logs.removeLast()
+        }
+        BotForegroundService.authData = authData
+        
+        onDispose { }
+    }
+    
+    // Функция запуска бота
+    fun startBot() {
         if (authData == null) {
             logs.add(0, "[${getCurrentTime()}] ❌ Нет данных авторизации")
             return
         }
         
-        isLoadingBalance = true
+        BotForegroundService.authData = authData
         
-        val cookieManager = CookieManager.getInstance()
-        val cookieString = cookieManager.getCookie("https://www.fon.bet") ?: ""
+        val serviceIntent = Intent(context, BotForegroundService::class.java)
         
-        val cookies = cookieString.split("; ").associate { cookie ->
-            val parts = cookie.split("=", limit = 2)
-            parts[0] to (parts.getOrNull(1) ?: "")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            ContextCompat.startForegroundService(context, serviceIntent)
+        } else {
+            context.startService(serviceIntent)
         }
         
-        apiClient.getSaldo(
-            cookies = cookies,
-            fsid = authData.fsid,
-            deviceId = authData.deviceId,
-            onSuccess = { saldo ->
-                isLoadingBalance = false
-                if (saldo != null) {
-                    balance = saldo
-                    logs.add(0, "[${getCurrentTime()}] 💰 Баланс обновлён: $saldo ₽")
-                }
-            },
-            onError = { error ->
-                isLoadingBalance = false
-                logs.add(0, "[${getCurrentTime()}] ❌ Ошибка API: $error")
-            }
-        )
+        isBotRunning = true
+        logs.add(0, "[${getCurrentTime()}] 🚀 Бот запущен в фоне")
     }
     
-    // Симуляция работы бота
-    LaunchedEffect(isBotRunning) {
-        while (isBotRunning) {
-            delay(5000)
-            val timestamp = getCurrentTime()
-            val profit = (10..500).random().toDouble()
-            balance += profit
-            logs.add(0, "[$timestamp] 💰 Профит: +$profit ₽")
-            if (logs.size > 20) logs.removeLast()
+    // Функция остановки бота
+    fun stopBot() {
+        val stopIntent = Intent(context, BotForegroundService::class.java).apply {
+            action = BotForegroundService.ACTION_STOP
         }
+        context.startService(stopIntent)
+        
+        isBotRunning = false
+        logs.add(0, "[${getCurrentTime()}] ⏹ Бот остановлен")
+    }
+    
+    // Проверяем статус сервиса при запуске
+    LaunchedEffect(Unit) {
+        isBotRunning = BotForegroundService.isRunning
+    }
+    
+    // Блокируем кнопку "Назад" если бот запущен
+    BackHandler(enabled = isBotRunning) {
+        // Ничего не делаем - блокируем выход
     }
     
     Scaffold(
@@ -359,6 +204,12 @@ fun MainBotScreen(
                     }
                 },
                 actions = {
+                    if (isBotRunning) {
+                        IconButton(onClick = { stopBot() }) {
+                            Icon(Icons.Default.Stop, "Остановить бота")
+                        }
+                    }
+                    
                     IconButton(onClick = { showMenu = !showMenu }) {
                         Icon(Icons.Default.MoreVert, "Меню")
                     }
@@ -371,36 +222,43 @@ fun MainBotScreen(
                             onClick = {
                                 showMenu = false
                                 onNavigateToProfile()
-                            }
+                            },
+                            enabled = !isBotRunning
                         )
                         DropdownMenuItem(
                             text = { Text("📊 Статистика") },
                             onClick = {
                                 showMenu = false
                                 onNavigateToStats()
-                            }
+                            },
+                            enabled = !isBotRunning
                         )
                         DropdownMenuItem(
                             text = { Text("📜 История") },
                             onClick = {
                                 showMenu = false
                                 onNavigateToHistory()
-                            }
+                            },
+                            enabled = !isBotRunning
                         )
                         DropdownMenuItem(
                             text = { Text("⚙️ Настройки") },
                             onClick = {
                                 showMenu = false
                                 onNavigateToSettings()
-                            }
+                            },
+                            enabled = !isBotRunning
                         )
                         Divider()
                         DropdownMenuItem(
                             text = { Text("🚪 Выйти") },
                             onClick = {
-                                showMenu = false
-                                onLogout()
-                            }
+                                if (!isBotRunning) {
+                                    showMenu = false
+                                    onLogout()
+                                }
+                            },
+                            enabled = !isBotRunning
                         )
                     }
                 },
@@ -416,6 +274,39 @@ fun MainBotScreen(
                 .padding(paddingValues)
                 .padding(16.dp)
         ) {
+            // Предупреждение о работе в фоне
+            if (isBotRunning) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("🔔", fontSize = 20.sp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                "Бот работает в фоновом режиме",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                            Text(
+                                "Вы можете свернуть приложение. Для выхода остановите бота.",
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+            
             // Карточка авторизации
             if (authData != null) {
                 Card(
@@ -450,10 +341,10 @@ fun MainBotScreen(
                                 }) {
                                     Icon(Icons.Default.ContentCopy, "Копировать", modifier = Modifier.size(18.dp))
                                 }
-                                IconButton(onClick = { 
-                                    onNavigateToWebAuth()
-                                }) {
-                                    Icon(Icons.Default.Refresh, "Обновить", modifier = Modifier.size(18.dp))
+                                if (!isBotRunning) {
+                                    IconButton(onClick = { onNavigateToWebAuth() }) {
+                                        Icon(Icons.Default.Refresh, "Обновить", modifier = Modifier.size(18.dp))
+                                    }
                                 }
                             }
                         }
@@ -542,19 +433,15 @@ fun MainBotScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     
-                    if (isLoadingBalance) {
-                        CircularProgressIndicator(modifier = Modifier.size(32.dp))
-                    } else {
-                        Text(
-                            String.format("%.2f ₽", balance),
-                            fontSize = 42.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (balance >= 10000) 
-                                Color(0xFF4CAF50) 
-                            else 
-                                MaterialTheme.colorScheme.onSurface
-                        )
-                    }
+                    Text(
+                        String.format("%.2f ₽", balance),
+                        fontSize = 42.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (balance >= 10000) 
+                            Color(0xFF4CAF50) 
+                        else 
+                            MaterialTheme.colorScheme.onSurface
+                    )
                 }
             }
             
@@ -563,15 +450,10 @@ fun MainBotScreen(
             // Кнопка запуска/остановки
             Button(
                 onClick = {
-                    isBotRunning = !isBotRunning
-                    val timestamp = getCurrentTime()
                     if (isBotRunning) {
-                        logs.add(0, "[$timestamp] 🚀 Бот запущен")
-                        if (authData != null) {
-                            fetchBalanceFromApi()
-                        }
+                        stopBot()
                     } else {
-                        logs.add(0, "[$timestamp] ⏹ Бот остановлен")
+                        startBot()
                     }
                 },
                 modifier = Modifier
@@ -583,7 +465,8 @@ fun MainBotScreen(
                         MaterialTheme.colorScheme.error 
                     else 
                         MaterialTheme.colorScheme.primary
-                )
+                ),
+                enabled = authData != null || isBotRunning
             ) {
                 Text(
                     if (isBotRunning) "🛑 ОСТАНОВИТЬ БОТА" else "▶ ЗАПУСТИТЬ БОТА",
@@ -592,31 +475,33 @@ fun MainBotScreen(
                 )
             }
             
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            // Быстрые действия
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                QuickActionButton(
-                    icon = Icons.Default.BarChart,
-                    text = "Статистика",
-                    onClick = onNavigateToStats,
-                    modifier = Modifier.weight(1f)
-                )
-                QuickActionButton(
-                    icon = Icons.Default.History,
-                    text = "История",
-                    onClick = onNavigateToHistory,
-                    modifier = Modifier.weight(1f)
-                )
-                QuickActionButton(
-                    icon = Icons.Default.Settings,
-                    text = "Настройки",
-                    onClick = onNavigateToSettings,
-                    modifier = Modifier.weight(1f)
-                )
+            // Навигация доступна только если бот остановлен
+            if (!isBotRunning) {
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    QuickActionButton(
+                        icon = Icons.Default.BarChart,
+                        text = "Статистика",
+                        onClick = onNavigateToStats,
+                        modifier = Modifier.weight(1f)
+                    )
+                    QuickActionButton(
+                        icon = Icons.Default.History,
+                        text = "История",
+                        onClick = onNavigateToHistory,
+                        modifier = Modifier.weight(1f)
+                    )
+                    QuickActionButton(
+                        icon = Icons.Default.Settings,
+                        text = "Настройки",
+                        onClick = onNavigateToSettings,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
             
             Spacer(modifier = Modifier.height(16.dp))
@@ -758,13 +643,13 @@ fun ProfileScreen(
                     Spacer(modifier = Modifier.height(16.dp))
                     
                     Text(
-                        "Administrator",
+                        "Пользователь",
                         fontSize = 24.sp,
                         fontWeight = FontWeight.Bold
                     )
                     
                     Text(
-                        "admin@fonbet-bot.com",
+                        "user@fonbet-bot.com",
                         fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -775,7 +660,6 @@ fun ProfileScreen(
                     
                     ProfileInfoRow("ID пользователя", "12345")
                     ProfileInfoRow("Статус", "Активен")
-                    ProfileInfoRow("Дата регистрации", "01.01.2024")
                     ProfileInfoRow("Тариф", "Premium")
                     
                     if (authData != null) {

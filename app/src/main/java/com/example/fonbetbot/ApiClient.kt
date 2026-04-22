@@ -1,3 +1,4 @@
+// ApiClient.kt
 package com.example.fonbetbot
 
 import okhttp3.*
@@ -25,6 +26,8 @@ class ApiClient {
             put("deviceId", deviceId)
         }
         
+        android.util.Log.d("ApiClient", "Request body: $jsonBody")
+        
         val mediaType = "application/json; charset=utf-8".toMediaType()
         val body = jsonBody.toString().toRequestBody(mediaType)
         
@@ -32,6 +35,7 @@ class ApiClient {
             .url("https://clientsapi-lb51-w.bk6bba-resources.com/session/info")
             .post(body)
             .addHeader("Content-Type", "application/json")
+            .addHeader("Accept", "application/json")
         
         val cookieHeader = cookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
         if (cookieHeader.isNotEmpty()) {
@@ -47,15 +51,31 @@ class ApiClient {
             
             override fun onResponse(call: Call, response: Response) {
                 response.use {
+                    val bodyString = response.body?.string() ?: ""
+                    
                     if (!response.isSuccessful) {
-                        onError("Ошибка ${response.code}: ${response.message}")
+                        onError("Ошибка ${response.code}")
                         return
                     }
                     
-                    val bodyString = response.body?.string() ?: ""
                     try {
                         val json = JSONObject(bodyString)
-                        val saldo = if (json.has("saldo")) json.getDouble("saldo") else null
+                        
+                        val saldo = when {
+                            json.has("saldo") -> json.getDouble("saldo")
+                            json.has("balance") -> json.getDouble("balance")
+                            json.has("amount") -> json.getDouble("amount")
+                            json.has("data") -> {
+                                val data = json.getJSONObject("data")
+                                when {
+                                    data.has("saldo") -> data.getDouble("saldo")
+                                    data.has("balance") -> data.getDouble("balance")
+                                    else -> null
+                                }
+                            }
+                            else -> null
+                        }
+                        
                         onSuccess(saldo)
                     } catch (e: Exception) {
                         onError("Ошибка парсинга: ${e.message}")
