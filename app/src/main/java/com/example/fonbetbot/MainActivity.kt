@@ -1,4 +1,4 @@
-// MainActivity.kt - ПОЛНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ (ЧАСТЬ 1/2)
+// MainActivity.kt - ПОЛНАЯ ВЕРСИЯ С ТАБЛИЦАМИ
 package com.example.fonbetbot
 
 import android.content.ClipData
@@ -144,6 +144,8 @@ fun FonbetBotApp(dbHelper: DatabaseHelper) {
             onNavigateToHistory = { currentScreen = "history" },
             onNavigateToProfile = { currentScreen = "profile" },
             onNavigateToWebAuth = { currentScreen = "webAuth" },
+            onNavigateToMatches = { currentScreen = "matches" },
+            onNavigateToExpresses = { currentScreen = "expresses" },
             onLogout = {
                 currentScreen = "main"
                 clearAuthData()
@@ -177,6 +179,14 @@ fun FonbetBotApp(dbHelper: DatabaseHelper) {
             onBack = { currentScreen = "main" },
             dbHelper = dbHelper
         )
+        "matches" -> MatchesScreen(
+            onBack = { currentScreen = "main" },
+            dbHelper = dbHelper
+        )
+        "expresses" -> ExpressesScreen(
+            onBack = { currentScreen = "main" },
+            dbHelper = dbHelper
+        )
     }
 }
 
@@ -189,6 +199,8 @@ fun MainBotScreen(
     onNavigateToHistory: () -> Unit,
     onNavigateToProfile: () -> Unit,
     onNavigateToWebAuth: () -> Unit,
+    onNavigateToMatches: () -> Unit,
+    onNavigateToExpresses: () -> Unit,
     onLogout: () -> Unit,
     dbHelper: DatabaseHelper
 ) {
@@ -425,6 +437,22 @@ fun MainBotScreen(
                             enabled = !isBotRunning
                         )
                         DropdownMenuItem(
+                            text = { Text("📋 Таблица матчей") },
+                            onClick = {
+                                showMenu = false
+                                onNavigateToMatches()
+                            },
+                            enabled = !isBotRunning
+                        )
+                        DropdownMenuItem(
+                            text = { Text("🎯 Таблица экспрессов") },
+                            onClick = {
+                                showMenu = false
+                                onNavigateToExpresses()
+                            },
+                            enabled = !isBotRunning
+                        )
+                        DropdownMenuItem(
                             text = { Text("⚙️ Настройки") },
                             onClick = {
                                 showMenu = false
@@ -614,22 +642,15 @@ fun MainBotScreen(
                     if (isLoadingBalance) {
                         CircularProgressIndicator(modifier = Modifier.size(32.dp))
                     } else {
-
-                       /* val balanceText = if (balance > 0) String.format("%.2f ₽", balance) else "—"
+                        val balanceText = if (balance > 0) String.format("%.2f ₽", balance) else "—"
                         val balanceColor = if (balance >= 10000) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurface
-                        */
-Text(
-                        text = "%.2f ₽".format(balance),
-                        fontSize = 42.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF4CAF50)
-                         )                        
-/*Text(
+                        
+                        Text(
                             text = balanceText,
                             fontSize = 42.sp,
                             fontWeight = FontWeight.Bold,
                             color = balanceColor
-                        )*/
+                        )
                     }
                     
                     if (authData != null && !isLoadingBalance) {
@@ -700,6 +721,26 @@ Text(
                         modifier = Modifier.weight(1f)
                     )
                 }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    QuickActionButton(
+                        icon = Icons.Default.List,
+                        text = "Матчи",
+                        onClick = onNavigateToMatches,
+                        modifier = Modifier.weight(1f)
+                    )
+                    QuickActionButton(
+                        icon = Icons.Default.ViewList,
+                        text = "Экспрессы",
+                        onClick = onNavigateToExpresses,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
             
             Spacer(modifier = Modifier.height(16.dp))
@@ -750,7 +791,6 @@ Text(
             }
         }
         
-        // Диалог подтверждения остановки бота
         if (showExitDialog) {
             AlertDialog(
                 onDismissRequest = { showExitDialog = false },
@@ -808,7 +848,6 @@ fun QuickActionButton(
         }
     }
 }
-// MainActivity.kt - ПОЛНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ (ЧАСТЬ 2/2)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1205,7 +1244,6 @@ fun SettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // LEVEL Настройки
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -1264,7 +1302,6 @@ fun SettingsScreen(
                 }
             }
             
-            // Тип 924
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -1350,7 +1387,6 @@ fun SettingsScreen(
                 }
             }
             
-            // Тип 927
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -1436,7 +1472,6 @@ fun SettingsScreen(
                 }
             }
             
-            // Тип 928
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -1522,7 +1557,6 @@ fun SettingsScreen(
                 }
             }
             
-            // Общие настройки
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -1578,7 +1612,6 @@ fun SettingsScreen(
                 }
             }
             
-            // Управление данными
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -1639,7 +1672,6 @@ fun SettingsScreen(
                 }
             }
             
-            // Кнопки Отмена/Сохранить
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1684,7 +1716,6 @@ fun SettingsScreen(
             }
         }
         
-        // Диалог подтверждения очистки
         if (showClearDialog) {
             AlertDialog(
                 onDismissRequest = { showClearDialog = false },
@@ -1743,7 +1774,6 @@ fun SettingsScreen(
             )
         }
         
-        // Диалог статистики БД
         if (showStatsDialog) {
             val stats = remember { dbHelper.getTableStats() }
             
@@ -1783,4 +1813,383 @@ fun SettingsScreen(
             )
         }
     }
+}
+
+// НОВЫЕ ЭКРАНЫ
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MatchesScreen(
+    onBack: () -> Unit,
+    dbHelper: DatabaseHelper
+) {
+    var matches by remember { mutableStateOf<List<MatchInfo>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    
+    LaunchedEffect(Unit) {
+        isLoading = true
+        matches = dbHelper.getAllMatches()
+        isLoading = false
+    }
+    
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("📋 Таблица матчей") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, "Назад")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                )
+            )
+        }
+    ) { paddingValues ->
+        if (isLoading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator()
+            }
+        } else if (matches.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("Нет матчей в базе данных")
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(matches) { match ->
+                    MatchCard(match = match)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MatchCard(match: MatchInfo) {
+    var expanded by remember { mutableStateOf(false) }
+    
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { expanded = !expanded },
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = when (match.status) {
+                1 -> MaterialTheme.colorScheme.surfaceVariant
+                2 -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                else -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+            }
+        )
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "ID: ${match.mId}",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                )
+                Row {
+                    val statusText = when (match.status) {
+                        1 -> "🔄 Активен"
+                        2 -> "✅ Зашёл"
+                        else -> "❌ Не зашёл"
+                    }
+                    Text(statusText, fontSize = 12.sp)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(
+                        if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        null,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(4.dp))
+            
+            Text("${match.homeTeam} vs ${match.awayTeam}", fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text("Лига: ${match.leagueName.ifEmpty { "—" }}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Счет: ${match.homeScore} - ${match.awayScore}", fontSize = 13.sp)
+                Text("Кэф: ${"%.2f".format(match.startOdds)}", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
+            
+            Text("Тип ставки: ${getTypeName(match.betType)}", fontSize = 12.sp)
+            
+            if (expanded) {
+                Divider(modifier = Modifier.padding(vertical = 8.dp))
+                
+                DetailRow("ID матча", match.mId.toString())
+                DetailRow("ID лиги", match.idLiga?.toString() ?: "—")
+                DetailRow("ID экспресса", match.idExp.toString())
+                DetailRow("Текущий кэф", "%.2f".format(match.currentOdds ?: match.startOdds))
+                DetailRow("Время матча", "${match.matchTime} мин")
+                DetailRow("URL", match.matchUrl.ifEmpty { "—" })
+                DetailRow("Создан", formatTimestamp(match.createdAt))
+                DetailRow("Обновлен", formatTimestamp(match.updatedAt))
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ExpressesScreen(
+    onBack: () -> Unit,
+    dbHelper: DatabaseHelper
+) {
+    var expresses by remember { mutableStateOf<List<ExpressInfo>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    
+    LaunchedEffect(Unit) {
+        isLoading = true
+        expresses = dbHelper.getAllExpresses()
+        isLoading = false
+    }
+    
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("🎯 Таблица экспрессов") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, "Назад")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                )
+            )
+        }
+    ) { paddingValues ->
+        if (isLoading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator()
+            }
+        } else if (expresses.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("Нет экспрессов в базе данных")
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(expresses) { express ->
+                    ExpressCard(
+                        express = express,
+                        matches = dbHelper.getMatchesByExpressId(express.id)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ExpressCard(express: ExpressInfo, matches: List<MatchInfo>) {
+    var expanded by remember { mutableStateOf(false) }
+    
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { expanded = !expanded },
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = when (express.stsAll) {
+                1 -> MaterialTheme.colorScheme.surfaceVariant
+                2 -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                else -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
+            }
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "🎯 Экспресс #${express.idExp}",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    val (statusText, statusColor) = when (express.stsAll) {
+                        1 -> Pair("🔄 Активен", Color(0xFFFF9800))
+                        2 -> Pair("🏆 Выиграл", Color(0xFF4CAF50))
+                        -1 -> Pair("🔄 Заменён", Color(0xFF2196F3))
+                        else -> Pair("❌ Проиграл", Color(0xFFF44336))
+                    }
+                    Text(
+                        statusText,
+                        fontSize = 12.sp,
+                        color = statusColor,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Icon(
+                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    null,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Матчей: ${express.eventsCount}", fontSize = 13.sp)
+                Text("Общий кэф: ${"%.2f".format(express.kfall)}", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            }
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Ставка: ${express.sumbet.toInt()} ₽", fontSize = 13.sp)
+                Text(
+                    "Выигрыш: ${"%.2f".format(express.potentialWin)} ₽",
+                    fontSize = 13.sp,
+                    color = Color(0xFF4CAF50)
+                )
+            }
+            
+            if (express.stsAll != 1) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Результат:", fontSize = 13.sp)
+                    Text(
+                        "${if (express.profLoss >= 0) "+" else ""}${"%.2f".format(express.profLoss)} ₽",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (express.profLoss >= 0) Color(0xFF4CAF50) else Color(0xFFF44336)
+                    )
+                }
+            }
+            
+            Text("Стратегия: ${express.strategy}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Создан: ${formatTimestamp(express.ct)}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            
+            if (expanded && matches.isNotEmpty()) {
+                Divider(modifier = Modifier.padding(vertical = 12.dp))
+                
+                Text(
+                    "📋 Матчи в экспрессе:",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                
+                matches.forEach { match ->
+                    MatchInExpressCard(match = match)
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MatchInExpressCard(match: MatchInfo) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Text(
+                "${match.homeTeam} vs ${match.awayTeam}",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium
+            )
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Счет: ${match.homeScore} - ${match.awayScore}", fontSize = 12.sp)
+                
+                val matchStatus = when (match.status) {
+                    1 -> "🔄"
+                    2 -> "✅"
+                    else -> "❌"
+                }
+                Text("$matchStatus ${getTypeName(match.betType)}", fontSize = 12.sp)
+                Text("Кэф: ${"%.2f".format(match.startOdds)}", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+fun DetailRow(label: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, fontSize = 11.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+    }
+}
+
+fun getTypeName(type: Int): String {
+    return when (type) {
+        924 -> "1X"
+        927 -> "Ф1(+1.5)"
+        928 -> "Ф2(+1.5)"
+        else -> "Тип $type"
+    }
+}
+
+fun formatTimestamp(timestamp: Long): String {
+    if (timestamp == 0L) return "—"
+    return SimpleDateFormat("dd.MM.yy HH:mm", Locale.getDefault()).format(Date(timestamp * 1000))
 }

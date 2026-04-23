@@ -1,4 +1,4 @@
-// DatabaseHelper.kt
+// DatabaseHelper.kt - ОБНОВЛЕННАЯ ВЕРСИЯ С МЕТОДАМИ ДЛЯ ТАБЛИЦ
 package com.example.fonbetbot
 
 import android.content.ContentValues
@@ -6,6 +6,7 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import android.util.Log
+import android.widget.Toast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -14,7 +15,7 @@ class DatabaseHelper(context: Context) :
     
     companion object {
         private const val DATABASE_NAME = "fonbet_bot.db"
-        private const val DATABASE_VERSION = 2
+        private const val DATABASE_VERSION = 1
         private const val TAG = "DatabaseHelper"
     }
     
@@ -88,8 +89,8 @@ class DatabaseHelper(context: Context) :
             db.execSQL("""
                 CREATE TABLE IF NOT EXISTS express_bets (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
                     id_exp INTEGER NOT NULL,
+                    user_id INTEGER,
                     kfall REAL,
                     profloss REAL DEFAULT 0,
                     balans REAL,
@@ -160,11 +161,7 @@ class DatabaseHelper(context: Context) :
     
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         Log.d(TAG, "Upgrading database from $oldVersion to $newVersion")
-        if (oldVersion < 2) {
-            // Добавляем новые поля при обновлении
-            db.execSQL("ALTER TABLE express_events ADD COLUMN home_score INTEGER DEFAULT 0")
-            db.execSQL("ALTER TABLE express_events ADD COLUMN away_score INTEGER DEFAULT 0")
-        }
+        // При обновлении версии можно добавить миграции
     }
     
     // Сохранение пользователя
@@ -206,11 +203,39 @@ class DatabaseHelper(context: Context) :
         return null
     }
     
+    // Получение активного пользователя
+    fun getActiveUser(): User? {
+        val db = readableDatabase
+        val cursor = db.query(
+            "users",
+            null,
+            "is_active = 1",
+            null, null, null,
+            "last_login DESC",
+            "1"
+        )
+        
+        cursor.use {
+            if (it.moveToFirst()) {
+                return User(
+                    id = it.getLong(it.getColumnIndexOrThrow("id")),
+                    fsid = it.getString(it.getColumnIndexOrThrow("fsid")),
+                    deviceId = it.getString(it.getColumnIndexOrThrow("device_id")),
+                    clientId = it.getLong(it.getColumnIndexOrThrow("client_id")),
+                    sysId = it.getInt(it.getColumnIndexOrThrow("sys_id")),
+                    isActive = true
+                )
+            }
+        }
+        return null
+    }
+    
     // Сохранение баланса
     fun saveBalance(userId: Long, balance: Double, status: String = "success", 
                     errorMessage: String? = null, rawResponse: String? = null): Long {
         val db = writableDatabase
         
+        // Получаем предыдущий баланс
         var previousBalance: Double? = null
         val cursor = db.query(
             "balance_history",
@@ -238,6 +263,8 @@ class DatabaseHelper(context: Context) :
         }
         
         val id = db.insert("balance_history", null, values)
+        
+        // Обновляем активную сессию
         updateActiveSession(userId, balance)
         
         return id
@@ -344,6 +371,7 @@ class DatabaseHelper(context: Context) :
         val db = readableDatabase
         val stats = BalanceStats()
         
+        // Текущий баланс
         val cursor = db.query(
             "balance_history",
             arrayOf("balance", "check_time"),
@@ -360,6 +388,8 @@ class DatabaseHelper(context: Context) :
             }
         }
         
+        // Статистика за сегодня
+        val todayStart = System.currentTimeMillis() / 1000
         val todayCursor = db.rawQuery("""
             SELECT 
                 MIN(balance) as min_balance,
@@ -394,17 +424,19 @@ class DatabaseHelper(context: Context) :
         return@withContext try {
             val db = writableDatabase
             
+            // Очищаем все таблицы
             db.execSQL("DELETE FROM express_events")
             db.execSQL("DELETE FROM express_bets")
             db.execSQL("DELETE FROM bot_logs")
             db.execSQL("DELETE FROM bot_sessions")
             db.execSQL("DELETE FROM balance_history")
             db.execSQL("DELETE FROM users")
+            
+            // Сбрасываем автоинкремент
             db.execSQL("DELETE FROM sqlite_sequence")
             
+            // Очищаем SharedPreferences
             context.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
-                .edit().clear().apply()
-            context.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE)
                 .edit().clear().apply()
             
             Log.d(TAG, "All data cleared successfully")
@@ -446,18 +478,165 @@ class DatabaseHelper(context: Context) :
         
         return stats
     }
+
+    // ==================== НОВЫЕ МЕТОДЫ ДЛЯ ТАБЛИЦ ====================
     
-    // Обновить статус экспресса
-    fun updateExpressStatus(expressId: Long, status: Int, profitLoss: Double? = null) {
-        val db = writableDatabase
-        val values = ContentValues().apply {
-            put("sts_all", status)
-            profitLoss?.let { put("profloss", it) }
-            put("updated_at", System.currentTimeMillis() / 1000)
+    // Получить все матчи
+    fun getAllMatches(): List<MatchInfo> {
+        val db = readableDatabase
+        val matches = mutableListOf<MatchInfo>()
+        
+        val cursor = db.rawQuery("""
+            SELECT 
+                e.id, e.express_id, e.id_exp, e.m_id, e.id_liga, 
+                COALESCE(e.league_name, '') as league_name,
+                COALESCE(e.home_team, '') as home_team, 
+                COALESCE(e.away_team, '') as away_team,
+                e.id_home, e.id_away, 
+                e.start_odds, e.current_odds, e.match_time,
+                e.home_score, e.away_score, e.bet_type, e.status,
+                COALESCE(e.match_url, '') as match_url,
+                COALESCE(e.uzh, '') as uzh,
+                e.total_type, e.created_at, e.updated_at
+            FROM express_events e
+            ORDER BY e.created_at DESC
+        """, null)
+        
+        while (cursor.moveToNext()) {
+            matches.add(MatchInfo(
+                id = cursor.getLong(0),
+                expressId = cursor.getLong(1),
+                idExp = cursor.getInt(2),
+                mId = cursor.getInt(3),
+                idLiga = if (cursor.isNull(4)) null else cursor.getInt(4),
+                leagueName = cursor.getString(5),
+                homeTeam = cursor.getString(6),
+                awayTeam = cursor.getString(7),
+                idHome = if (cursor.isNull(8)) null else cursor.getInt(8),
+                idAway = if (cursor.isNull(9)) null else cursor.getInt(9),
+                startOdds = cursor.getDouble(10),
+                currentOdds = if (cursor.isNull(11)) null else cursor.getDouble(11),
+                matchTime = cursor.getInt(12),
+                homeScore = cursor.getInt(13),
+                awayScore = cursor.getInt(14),
+                betType = cursor.getInt(15),
+                status = cursor.getInt(16),
+                matchUrl = cursor.getString(17),
+                uzh = cursor.getString(18),
+                totalType = if (cursor.isNull(19)) null else cursor.getInt(19),
+                createdAt = cursor.getLong(20),
+                updatedAt = cursor.getLong(21)
+            ))
         }
-        db.update("express_bets", values, "id = ?", arrayOf(expressId.toString()))
+        cursor.close()
+        
+        return matches
+    }
+    
+    // Получить все экспрессы
+    fun getAllExpresses(): List<ExpressInfo> {
+        val db = readableDatabase
+        val expresses = mutableListOf<ExpressInfo>()
+        
+        val cursor = db.rawQuery("""
+            SELECT 
+                id, id_exp, user_id, COALESCE(kfall, 1.0) as kfall,
+                COALESCE(profloss, 0.0) as profloss,
+                COALESCE(balans, 0.0) as balans,
+                COALESCE(sumbet, 0.0) as sumbet,
+                sts_all, ct,
+                COALESCE(strategy, '') as strategy,
+                COALESCE(id_exp_replace, 0) as id_exp_replace,
+                COALESCE(events_count, 0) as events_count,
+                COALESCE(total_odds, 1.0) as total_odds,
+                COALESCE(bet_amount, 0.0) as bet_amount,
+                COALESCE(potential_win, 0.0) as potential_win,
+                created_at, updated_at
+            FROM express_bets
+            ORDER BY ct DESC
+        """, null)
+        
+        while (cursor.moveToNext()) {
+            expresses.add(ExpressInfo(
+                id = cursor.getLong(0),
+                idExp = cursor.getInt(1),
+                userId = cursor.getLong(2),
+                kfall = cursor.getDouble(3),
+                profLoss = cursor.getDouble(4),
+                balans = cursor.getDouble(5),
+                sumbet = cursor.getDouble(6),
+                stsAll = cursor.getInt(7),
+                ct = cursor.getLong(8),
+                strategy = cursor.getString(9),
+                idExpReplace = cursor.getInt(10),
+                eventsCount = cursor.getInt(11),
+                totalOdds = cursor.getDouble(12),
+                betAmount = cursor.getDouble(13),
+                potentialWin = cursor.getDouble(14),
+                createdAt = cursor.getLong(15),
+                updatedAt = cursor.getLong(16)
+            ))
+        }
+        cursor.close()
+        
+        return expresses
+    }
+    
+    // Получить матчи по ID экспресса
+    fun getMatchesByExpressId(expressId: Long): List<MatchInfo> {
+        val db = readableDatabase
+        val matches = mutableListOf<MatchInfo>()
+        
+        val cursor = db.rawQuery("""
+            SELECT 
+                e.id, e.express_id, e.id_exp, e.m_id, e.id_liga, 
+                COALESCE(e.league_name, '') as league_name,
+                COALESCE(e.home_team, '') as home_team, 
+                COALESCE(e.away_team, '') as away_team,
+                e.id_home, e.id_away, 
+                e.start_odds, e.current_odds, e.match_time,
+                e.home_score, e.away_score, e.bet_type, e.status,
+                COALESCE(e.match_url, '') as match_url,
+                COALESCE(e.uzh, '') as uzh,
+                e.total_type, e.created_at, e.updated_at
+            FROM express_events e
+            WHERE e.express_id = ?
+            ORDER BY e.id ASC
+        """, arrayOf(expressId.toString()))
+        
+        while (cursor.moveToNext()) {
+            matches.add(MatchInfo(
+                id = cursor.getLong(0),
+                expressId = cursor.getLong(1),
+                idExp = cursor.getInt(2),
+                mId = cursor.getInt(3),
+                idLiga = if (cursor.isNull(4)) null else cursor.getInt(4),
+                leagueName = cursor.getString(5),
+                homeTeam = cursor.getString(6),
+                awayTeam = cursor.getString(7),
+                idHome = if (cursor.isNull(8)) null else cursor.getInt(8),
+                idAway = if (cursor.isNull(9)) null else cursor.getInt(9),
+                startOdds = cursor.getDouble(10),
+                currentOdds = if (cursor.isNull(11)) null else cursor.getDouble(11),
+                matchTime = cursor.getInt(12),
+                homeScore = cursor.getInt(13),
+                awayScore = cursor.getInt(14),
+                betType = cursor.getInt(15),
+                status = cursor.getInt(16),
+                matchUrl = cursor.getString(17),
+                uzh = cursor.getString(18),
+                totalType = if (cursor.isNull(19)) null else cursor.getInt(19),
+                createdAt = cursor.getLong(20),
+                updatedAt = cursor.getLong(21)
+            ))
+        }
+        cursor.close()
+        
+        return matches
     }
 }
+
+// ==================== DATA CLASSES ====================
 
 // Data classes
 data class User(
@@ -485,4 +664,50 @@ data class BalanceStats(
     var todayMax: Double = 0.0,
     var todayAvg: Double = 0.0,
     var todayErrors: Int = 0
+)
+
+// Новые data classes для таблиц
+data class MatchInfo(
+    val id: Long,
+    val expressId: Long,
+    val idExp: Int,
+    val mId: Int,
+    val idLiga: Int?,
+    val leagueName: String,
+    val homeTeam: String,
+    val awayTeam: String,
+    val idHome: Int?,
+    val idAway: Int?,
+    val startOdds: Double,
+    val currentOdds: Double?,
+    val matchTime: Int,
+    val homeScore: Int,
+    val awayScore: Int,
+    val betType: Int,
+    val status: Int,
+    val matchUrl: String,
+    val uzh: String,
+    val totalType: Int?,
+    val createdAt: Long,
+    val updatedAt: Long
+)
+
+data class ExpressInfo(
+    val id: Long,
+    val idExp: Int,
+    val userId: Long,
+    val kfall: Double,
+    val profLoss: Double,
+    val balans: Double,
+    val sumbet: Double,
+    val stsAll: Int,
+    val ct: Long,
+    val strategy: String,
+    val idExpReplace: Int,
+    val eventsCount: Int,
+    val totalOdds: Double,
+    val betAmount: Double,
+    val potentialWin: Double,
+    val createdAt: Long,
+    val updatedAt: Long
 )
