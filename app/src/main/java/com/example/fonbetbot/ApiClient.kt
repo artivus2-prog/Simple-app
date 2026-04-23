@@ -286,7 +286,7 @@ class ApiClient {
                         }
                         
                         if (sh >= 0 && sa >= 0) {
-                            onSuccess(MatchFactors(sh, sa, factors, handicaps))
+                            onSuccess(MatchFactors(sh, sa, matchTime, factors, handicaps))
                         } else {
                             onSuccess(null)
                         }

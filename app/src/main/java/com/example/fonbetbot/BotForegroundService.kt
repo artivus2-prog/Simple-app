@@ -199,7 +199,7 @@ class BotForegroundService : Service() {
                         onLogUpdate?.invoke("[$timestamp] 💰 Профит: +%.2f ₽".format(difference))
                     } else if (difference < 0 && oldBalance > 0) {
                         onLogUpdate?.invoke("[$timestamp] 📉 Убыток: %.2f ₽".format(difference))
-                    }
+                    } else {onLogUpdate.invoke("empty"}
                 }
             },
             onError = { error ->
