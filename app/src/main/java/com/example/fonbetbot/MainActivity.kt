@@ -1,4 +1,4 @@
-// MainActivity.kt - ПОЛНЫЙ ФАЙЛ С ИНТЕГРАЦИЕЙ БАЗЫ ДАННЫХ
+// MainActivity.kt - ПОЛНАЯ ВЕРСИЯ
 package com.example.fonbetbot
 
 import android.content.ClipData
@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -28,9 +29,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -72,7 +75,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         checkAndRequestPermissions()
         
-        // Инициализация базы данных
         dbHelper = DatabaseHelper(this)
         
         setContent {
@@ -99,7 +101,6 @@ fun FonbetBotApp(dbHelper: DatabaseHelper) {
     var currentScreen by remember { mutableStateOf("main") }
     var authData by remember { mutableStateOf<AuthData?>(null) }
     
-    // Загружаем сохранённые данные при старте
     LaunchedEffect(Unit) {
         val fsid = prefs.getString("fsid", "") ?: ""
         val deviceId = prefs.getString("device_id", "") ?: ""
@@ -107,17 +108,15 @@ fun FonbetBotApp(dbHelper: DatabaseHelper) {
         if (fsid.isNotEmpty() && deviceId.isNotEmpty()) {
             authData = AuthData(fsid, deviceId)
             
-            // Сохраняем в БД если ещё нет
             try {
                 val userId = dbHelper.saveUser(fsid, deviceId)
                 dbHelper.addLog(userId, "info", "Приложение запущено")
             } catch (e: Exception) {
-                // Игнорируем ошибку БД
+                // Игнорируем
             }
         }
     }
     
-    // Функция сохранения данных
     fun saveAuthData(fsid: String, deviceId: String) {
         prefs.edit()
             .putString("fsid", fsid)
@@ -125,16 +124,14 @@ fun FonbetBotApp(dbHelper: DatabaseHelper) {
             .apply()
         authData = AuthData(fsid, deviceId)
         
-        // Сохраняем в БД
         try {
             val userId = dbHelper.saveUser(fsid, deviceId)
             dbHelper.addLog(userId, "info", "Пользователь авторизован")
         } catch (e: Exception) {
-            // Игнорируем ошибку БД
+            // Игнорируем
         }
     }
     
-    // Функция очистки данных
     fun clearAuthData() {
         prefs.edit().clear().apply()
         authData = null
@@ -199,15 +196,57 @@ fun MainBotScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     
-    var isBotRunning by remember { 
-        mutableStateOf(BotForegroundService.isRunning) 
-    }
-    var balance by remember { mutableStateOf(10000.0) }
+    var isBotRunning by remember { mutableStateOf(BotForegroundService.isRunning) }
+    var balance by remember { mutableStateOf(0.0) }
     val logs = remember { mutableStateListOf<String>() }
     var showMenu by remember { mutableStateOf(false) }
+    var isLoadingBalance by remember { mutableStateOf(false) }
     
-    // Загружаем начальный баланс из БД
-    LaunchedEffect(authData) {
+    fun fetchBalanceFromApi() {
+        if (authData == null) {
+            logs.add(0, "[${getCurrentTime()}] ❌ Нет данных авторизации")
+            return
+        }
+        
+        isLoadingBalance = true
+        
+        val apiClient = ApiClient()
+        apiClient.getSaldo(
+            cookies = emptyMap(),
+            fsid = authData.fsid,
+            deviceId = authData.deviceId,
+            onSuccess = { saldo ->
+                isLoadingBalance = false
+                if (saldo != null) {
+                    val oldBalance = balance
+                    balance = saldo
+                    logs.add(0, "[${getCurrentTime()}] 💰 Баланс обновлён: %.2f ₽".format(saldo))
+                    
+                    scope.launch {
+                        try {
+                            val user = dbHelper.getUser(authData.fsid, authData.deviceId)
+                            user?.let {
+                                dbHelper.saveBalance(it.id, saldo)
+                                if (saldo > oldBalance && oldBalance > 0) {
+                                    dbHelper.addLog(it.id, "profit", "Профит: +%.2f ₽".format(saldo - oldBalance))
+                                } else if (saldo < oldBalance && oldBalance > 0) {
+                                    dbHelper.addLog(it.id, "loss", "Убыток: %.2f ₽".format(saldo - oldBalance))
+                                }
+                            }
+                        } catch (e: Exception) {
+                            // Игнорируем
+                        }
+                    }
+                }
+            },
+            onError = { error ->
+                isLoadingBalance = false
+                logs.add(0, "[${getCurrentTime()}] ❌ Ошибка API: $error")
+            }
+        )
+    }
+    
+    LaunchedEffect(authData, isBotRunning) {
         authData?.let {
             try {
                 val user = dbHelper.getUser(it.fsid, it.deviceId)
@@ -218,17 +257,28 @@ fun MainBotScreen(
                     }
                 }
             } catch (e: Exception) {
-                // Игнорируем ошибку
+                // Игнорируем
+            }
+        }
+        
+        if (isBotRunning && authData != null) {
+            fetchBalanceFromApi()
+        }
+    }
+    
+    LaunchedEffect(Unit) {
+        isBotRunning = BotForegroundService.isRunning
+        if (isBotRunning) {
+            logs.add(0, "[${getCurrentTime()}] 🔄 Подключено к работающему боту")
+            if (BotForegroundService.lastBalance > 0) {
+                balance = BotForegroundService.lastBalance
             }
         }
     }
     
-    // Подписываемся на обновления из сервиса
     DisposableEffect(Unit) {
         BotForegroundService.onBalanceUpdate = { newBalance ->
             balance = newBalance
-            
-            // Сохраняем в БД
             authData?.let { data ->
                 scope.launch {
                     try {
@@ -237,7 +287,7 @@ fun MainBotScreen(
                             dbHelper.saveBalance(it.id, newBalance, "success")
                         }
                     } catch (e: Exception) {
-                        // Игнорируем ошибку
+                        // Игнорируем
                     }
                 }
             }
@@ -246,15 +296,24 @@ fun MainBotScreen(
             logs.add(0, log)
             if (logs.size > 50) logs.removeLast()
         }
+        BotForegroundService.onBetsUpdate = { bets ->
+            bets.chunked(2).forEachIndexed { index, group ->
+                if (group.size == 2) {
+                    val bet1 = group[0]
+                    val bet2 = group[1]
+                    logs.add(0, "[${getCurrentTime()}] 🎯 Экспресс #${index}: m_id=${bet1.first}(${bet1.second}) + m_id=${bet2.first}(${bet2.second})")
+                }
+            }
+        }
+        BotForegroundService.onScoresUpdate = { message ->
+            logs.add(0, message)
+            if (logs.size > 50) logs.removeLast()
+        }
         BotForegroundService.authData = authData
         
-        onDispose {
-            BotForegroundService.onBalanceUpdate = null
-            BotForegroundService.onLogUpdate = null
-        }
+        onDispose { }
     }
     
-    // Функция запуска бота
     fun startBot() {
         if (authData == null) {
             logs.add(0, "[${getCurrentTime()}] ❌ Нет данных авторизации")
@@ -273,7 +332,6 @@ fun MainBotScreen(
         
         isBotRunning = true
         
-        // Логируем в БД
         scope.launch {
             try {
                 val user = dbHelper.getUser(authData.fsid, authData.deviceId)
@@ -282,14 +340,14 @@ fun MainBotScreen(
                     dbHelper.addLog(it.id, "start", "Бот запущен")
                 }
             } catch (e: Exception) {
-                // Игнорируем ошибку
+                // Игнорируем
             }
         }
         
         logs.add(0, "[${getCurrentTime()}] 🚀 Бот запущен в фоне")
+        fetchBalanceFromApi()
     }
     
-    // Функция остановки бота
     fun stopBot() {
         val stopIntent = Intent(context, BotForegroundService::class.java).apply {
             action = BotForegroundService.ACTION_STOP
@@ -298,7 +356,6 @@ fun MainBotScreen(
         
         isBotRunning = false
         
-        // Логируем в БД
         scope.launch {
             try {
                 authData?.let { data ->
@@ -309,25 +366,14 @@ fun MainBotScreen(
                     }
                 }
             } catch (e: Exception) {
-                // Игнорируем ошибку
+                // Игнорируем
             }
         }
         
         logs.add(0, "[${getCurrentTime()}] ⏹ Бот остановлен")
     }
     
-    // Проверяем статус сервиса при запуске
-    LaunchedEffect(Unit) {
-        isBotRunning = BotForegroundService.isRunning
-        if (isBotRunning) {
-            logs.add(0, "[${getCurrentTime()}] 🔄 Подключено к работающему боту")
-        }
-    }
-    
-    // Блокируем кнопку "Назад" если бот запущен
-    BackHandler(enabled = isBotRunning) {
-        // Ничего не делаем - блокируем выход
-    }
+    BackHandler(enabled = isBotRunning) { }
     
     Scaffold(
         topBar = {
@@ -409,7 +455,6 @@ fun MainBotScreen(
                 .padding(paddingValues)
                 .padding(16.dp)
         ) {
-            // Предупреждение о работе в фоне
             if (isBotRunning) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -442,7 +487,6 @@ fun MainBotScreen(
                 Spacer(modifier = Modifier.height(12.dp))
             }
             
-            // Карточка авторизации
             if (authData != null) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -451,9 +495,7 @@ fun MainBotScreen(
                         containerColor = MaterialTheme.colorScheme.secondaryContainer
                     )
                 ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp)
-                    ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -529,7 +571,6 @@ fun MainBotScreen(
                 Spacer(modifier = Modifier.height(12.dp))
             }
             
-            // Карточка баланса и статуса
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(20.dp),
@@ -568,21 +609,35 @@ fun MainBotScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     
-                    Text(
-                        String.format("%.2f ₽", balance),
-                        fontSize = 42.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (balance >= 10000) 
-                            Color(0xFF4CAF50) 
-                        else 
-                            MaterialTheme.colorScheme.onSurface
-                    )
+                    if (isLoadingBalance) {
+                        CircularProgressIndicator(modifier = Modifier.size(32.dp))
+                    } else {
+                        Text(
+                            if (balance > 0) String.format("%.2f ₽", balance) else "—",
+                            fontSize = 42.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (balance >= 10000) 
+                                Color(0xFF4CAF50) 
+                            else 
+                                MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    
+                    if (authData != null && !isLoadingBalance) {
+                        TextButton(
+                            onClick = { fetchBalanceFromApi() },
+                            modifier = Modifier.padding(top = 8.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Обновить баланс", fontSize = 12.sp)
+                        }
+                    }
                 }
             }
             
             Spacer(modifier = Modifier.height(20.dp))
             
-            // Кнопка запуска/остановки
             Button(
                 onClick = {
                     if (isBotRunning) {
@@ -610,7 +665,6 @@ fun MainBotScreen(
                 )
             }
             
-            // Навигация доступна только если бот остановлен
             if (!isBotRunning) {
                 Spacer(modifier = Modifier.height(16.dp))
                 
@@ -641,7 +695,6 @@ fun MainBotScreen(
             
             Spacer(modifier = Modifier.height(16.dp))
             
-            // Лог событий
             Text(
                 "📝 Лог событий",
                 fontSize = 14.sp,
@@ -738,7 +791,7 @@ fun ProfileScreen(
                     userStats = dbHelper.getBalanceStats(userId.id)
                 }
             } catch (e: Exception) {
-                // Игнорируем ошибку
+                // Игнорируем
             }
         }
     }
@@ -792,20 +845,10 @@ fun ProfileScreen(
                     
                     Spacer(modifier = Modifier.height(16.dp))
                     
-                    Text(
-                        "Пользователь",
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    
-                    Text(
-                        "Аккаунт Фонбет",
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Text("Пользователь", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                    Text("Аккаунт Фонбет", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     
                     Spacer(modifier = Modifier.height(24.dp))
-                    
                     Divider()
                     
                     userStats?.let { stats ->
@@ -859,10 +902,7 @@ fun ProfileScreen(
             
             Spacer(modifier = Modifier.height(16.dp))
             
-            Button(
-                onClick = onBack,
-                modifier = Modifier.fillMaxWidth()
-            ) {
+            Button(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
                 Text("На главную")
             }
         }
@@ -877,14 +917,8 @@ fun ProfileInfoRow(label: String, value: String) {
             .padding(vertical = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text(
-            label,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            value,
-            fontWeight = FontWeight.Medium
-        )
+        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -905,7 +939,7 @@ fun StatsScreen(
                     stats = dbHelper.getBalanceStats(userId.id)
                 }
             } catch (e: Exception) {
-                // Игнорируем ошибку
+                // Игнорируем
             }
         }
     }
@@ -993,7 +1027,7 @@ fun HistoryScreen(
                     logs = dbHelper.getLogs(100).filter { log -> log.userId == userId.id }
                 }
             } catch (e: Exception) {
-                // Игнорируем ошибку
+                // Игнорируем
             }
         }
     }
@@ -1049,11 +1083,7 @@ fun HistoryScreen(
                                     fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                Text(
-                                    log.message,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
+                                Text(log.message, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                             }
                             Text(
                                 log.logType.uppercase(),
@@ -1082,16 +1112,39 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val prefs = remember { context.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE) }
     
-    var betAmount by remember { mutableStateOf("100") }
-    var checkInterval by remember { mutableStateOf("5") }
-    var autoStart by remember { mutableStateOf(true) }
-    var notifications by remember { mutableStateOf(true) }
-    var soundEnabled by remember { mutableStateOf(false) }
+    var maxMatchesPerExpress by remember { mutableStateOf(prefs.getInt("max_matches_per_express", 2).toString()) }
+    var multiply by remember { mutableStateOf(prefs.getInt("multiply", 2).toString()) }
+    var allMinKef by remember { mutableStateOf(prefs.getFloat("all_min_kef", 1.67f).toDouble().toString()) }
+    
+    var type924Min by remember { mutableStateOf(prefs.getFloat("type_924_min", 1.15f).toString()) }
+    var type924Max by remember { mutableStateOf(prefs.getFloat("type_924_max", 1.35f).toString()) }
+    var type924Start by remember { mutableStateOf(prefs.getInt("type_924_start", 80).toString()) }
+    var type924End by remember { mutableStateOf(prefs.getInt("type_924_end", 100).toString()) }
+    
+    var type927Min by remember { mutableStateOf(prefs.getFloat("type_927_min", 1.15f).toString()) }
+    var type927Max by remember { mutableStateOf(prefs.getFloat("type_927_max", 1.35f).toString()) }
+    var type927Start by remember { mutableStateOf(prefs.getInt("type_927_start", 1).toString()) }
+    var type927End by remember { mutableStateOf(prefs.getInt("type_927_end", 45).toString()) }
+    
+    var type928Min by remember { mutableStateOf(prefs.getFloat("type_928_min", 1.15f).toString()) }
+    var type928Max by remember { mutableStateOf(prefs.getFloat("type_928_max", 1.35f).toString()) }
+    var type928Start by remember { mutableStateOf(prefs.getInt("type_928_start", 1).toString()) }
+    var type928End by remember { mutableStateOf(prefs.getInt("type_928_end", 45).toString()) }
+    
+    var checkInterval by remember { mutableStateOf(prefs.getString("check_interval", "60") ?: "60") }
+    var betAmount by remember { mutableStateOf(prefs.getString("bet_amount", "100") ?: "100") }
+    var autoStart by remember { mutableStateOf(prefs.getBoolean("auto_start", true)) }
+    var notifications by remember { mutableStateOf(prefs.getBoolean("notifications", true)) }
     
     var showClearDialog by remember { mutableStateOf(false) }
     var showStatsDialog by remember { mutableStateOf(false) }
     var isClearing by remember { mutableStateOf(false) }
+    var expandedLevel by remember { mutableStateOf(true) }
+    var expandedType924 by remember { mutableStateOf(false) }
+    var expandedType927 by remember { mutableStateOf(false) }
+    var expandedType928 by remember { mutableStateOf(false) }
     
     Scaffold(
         topBar = {
@@ -1120,31 +1173,310 @@ fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp)
                 ) {
-                    Column(modifier = Modifier.padding(20.dp)) {
-                        Text(
-                            "💰 Параметры ставок",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        )
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { expandedLevel = !expandedLevel },
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("🎯 LEVEL Настройки", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            Icon(
+                                if (expandedLevel) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                null
+                            )
+                        }
                         
-                        OutlinedTextField(
-                            value = betAmount,
-                            onValueChange = { betAmount = it },
-                            label = { Text("Сумма ставки (₽)") },
-                            leadingIcon = { Icon(Icons.Default.AttachMoney, null) },
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                        if (expandedLevel) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            
+                            OutlinedTextField(
+                                value = maxMatchesPerExpress,
+                                onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) maxMatchesPerExpress = it },
+                                label = { Text("Макс. матчей в экспрессе") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                            )
+                            
+                            Spacer(modifier = Modifier.height(8.dp))
+                            
+                            OutlinedTextField(
+                                value = multiply,
+                                onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) multiply = it },
+                                label = { Text("Множитель (MULTIPLY)") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                            )
+                            
+                            Spacer(modifier = Modifier.height(8.dp))
+                            
+                            OutlinedTextField(
+                                value = allMinKef,
+                                onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) allMinKef = it },
+                                label = { Text("Мин. коэффициент (ALL_MIN_KEF)") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                            )
+                        }
+                    }
+                }
+            }
+            
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { expandedType924 = !expandedType924 },
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("924: 1х/футбол/хоккей", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            Icon(
+                                if (expandedType924) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                null
+                            )
+                        }
                         
-                        Spacer(modifier = Modifier.height(12.dp))
+                        if (expandedType924) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = type924Min,
+                                    onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type924Min = it },
+                                    label = { Text("Мин. кэф", fontSize = 11.sp) },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                                )
+                                
+                                OutlinedTextField(
+                                    value = type924Max,
+                                    onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type924Max = it },
+                                    label = { Text("Макс. кэф", fontSize = 11.sp) },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                                )
+                            }
+                            
+                            Spacer(modifier = Modifier.height(8.dp))
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = type924Start,
+                                    onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type924Start = it },
+                                    label = { Text("Мониторинг с", fontSize = 11.sp) },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                                )
+                                
+                                OutlinedTextField(
+                                    value = type924End,
+                                    onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type924End = it },
+                                    label = { Text("Мониторинг до", fontSize = 11.sp) },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                                )
+                            }
+                            
+                            Text(
+                                "Минуты: ${type924Start} - ${type924End}",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
+                    }
+                }
+            }
+            
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f)
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { expandedType927 = !expandedType927 },
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("927: ф1(+1.5)/футбол/хоккей", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            Icon(
+                                if (expandedType927) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                null
+                            )
+                        }
                         
-                        OutlinedTextField(
-                            value = checkInterval,
-                            onValueChange = { checkInterval = it },
-                            label = { Text("Интервал проверки (сек)") },
-                            leadingIcon = { Icon(Icons.Default.Timer, null) },
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                        if (expandedType927) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = type927Min,
+                                    onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type927Min = it },
+                                    label = { Text("Мин. кэф", fontSize = 11.sp) },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                                )
+                                
+                                OutlinedTextField(
+                                    value = type927Max,
+                                    onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type927Max = it },
+                                    label = { Text("Макс. кэф", fontSize = 11.sp) },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                                )
+                            }
+                            
+                            Spacer(modifier = Modifier.height(8.dp))
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = type927Start,
+                                    onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type927Start = it },
+                                    label = { Text("Мониторинг с", fontSize = 11.sp) },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                                )
+                                
+                                OutlinedTextField(
+                                    value = type927End,
+                                    onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type927End = it },
+                                    label = { Text("Мониторинг до", fontSize = 11.sp) },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                                )
+                            }
+                            
+                            Text(
+                                "Минуты: ${type927Start} - ${type927End}",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
+                    }
+                }
+            }
+            
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.3f)
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { expandedType928 = !expandedType928 },
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("928: ф2(+1.5)/футбол/хоккей", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            Icon(
+                                if (expandedType928) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                null
+                            )
+                        }
+                        
+                        if (expandedType928) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = type928Min,
+                                    onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type928Min = it },
+                                    label = { Text("Мин. кэф", fontSize = 11.sp) },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                                )
+                                
+                                OutlinedTextField(
+                                    value = type928Max,
+                                    onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type928Max = it },
+                                    label = { Text("Макс. кэф", fontSize = 11.sp) },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                                )
+                            }
+                            
+                            Spacer(modifier = Modifier.height(8.dp))
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = type928Start,
+                                    onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type928Start = it },
+                                    label = { Text("Мониторинг с", fontSize = 11.sp) },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                                )
+                                
+                                OutlinedTextField(
+                                    value = type928End,
+                                    onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type928End = it },
+                                    label = { Text("Мониторинг до", fontSize = 11.sp) },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                                )
+                            }
+                            
+                            Text(
+                                "Минуты: ${type928Start} - ${type928End}",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -1154,13 +1486,32 @@ fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp)
                 ) {
-                    Column(modifier = Modifier.padding(20.dp)) {
-                        Text(
-                            "🔧 Общие настройки",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(bottom = 12.dp)
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("🔧 Общие настройки", fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 12.dp))
+                        
+                        OutlinedTextField(
+                            value = checkInterval,
+                            onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) checkInterval = it },
+                            label = { Text("Интервал проверки (сек)") },
+                            leadingIcon = { Icon(Icons.Default.Timer, null) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                         )
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        OutlinedTextField(
+                            value = betAmount,
+                            onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) betAmount = it },
+                            label = { Text("Сумма ставки (₽)") },
+                            leadingIcon = { Icon(Icons.Default.AttachMoney, null) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                        )
+                        
+                        Spacer(modifier = Modifier.height(12.dp))
                         
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -1168,10 +1519,7 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("Автозапуск бота")
-                            Switch(
-                                checked = autoStart,
-                                onCheckedChange = { autoStart = it }
-                            )
+                            Switch(checked = autoStart, onCheckedChange = { autoStart = it })
                         }
                         
                         Divider(modifier = Modifier.padding(vertical = 8.dp))
@@ -1182,30 +1530,12 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("Уведомления")
-                            Switch(
-                                checked = notifications,
-                                onCheckedChange = { notifications = it }
-                            )
-                        }
-                        
-                        Divider(modifier = Modifier.padding(vertical = 8.dp))
-                        
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Звуковые сигналы")
-                            Switch(
-                                checked = soundEnabled,
-                                onCheckedChange = { soundEnabled = it }
-                            )
+                            Switch(checked = notifications, onCheckedChange = { notifications = it })
                         }
                     }
                 }
             }
             
-            // Управление данными
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -1215,12 +1545,7 @@ fun SettingsScreen(
                     )
                 ) {
                     Column(modifier = Modifier.padding(20.dp)) {
-                        Text(
-                            "💾 Управление данными",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        )
+                        Text("💾 Управление данными", fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 12.dp))
                         
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -1228,10 +1553,7 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("Размер базы данных:")
-                            Text(
-                                dbHelper.getDatabaseSize(context),
-                                fontWeight = FontWeight.Bold
-                            )
+                            Text(dbHelper.getDatabaseSize(context), fontWeight = FontWeight.Bold)
                         }
                         
                         Spacer(modifier = Modifier.height(12.dp))
@@ -1264,9 +1586,7 @@ fun SettingsScreen(
                         Button(
                             onClick = { showClearDialog = true },
                             modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.error
-                            )
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                         ) {
                             Icon(Icons.Default.DeleteForever, null)
                             Spacer(modifier = Modifier.width(8.dp))
@@ -1281,15 +1601,37 @@ fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    OutlinedButton(
-                        onClick = onBack,
-                        modifier = Modifier.weight(1f)
-                    ) {
+                    OutlinedButton(onClick = onBack, modifier = Modifier.weight(1f)) {
                         Text("Отмена")
                     }
                     
                     Button(
-                        onClick = onSave,
+                        onClick = {
+                            prefs.edit()
+                                .putInt("max_matches_per_express", maxMatchesPerExpress.toIntOrNull() ?: 2)
+                                .putInt("multiply", multiply.toIntOrNull() ?: 2)
+                                .putFloat("all_min_kef", allMinKef.toFloatOrNull() ?: 1.67f)
+                                .putFloat("type_924_min", type924Min.toFloatOrNull() ?: 1.15f)
+                                .putFloat("type_924_max", type924Max.toFloatOrNull() ?: 1.35f)
+                                .putInt("type_924_start", type924Start.toIntOrNull() ?: 80)
+                                .putInt("type_924_end", type924End.toIntOrNull() ?: 100)
+                                .putFloat("type_927_min", type927Min.toFloatOrNull() ?: 1.15f)
+                                .putFloat("type_927_max", type927Max.toFloatOrNull() ?: 1.35f)
+                                .putInt("type_927_start", type927Start.toIntOrNull() ?: 1)
+                                .putInt("type_927_end", type927End.toIntOrNull() ?: 45)
+                                .putFloat("type_928_min", type928Min.toFloatOrNull() ?: 1.15f)
+                                .putFloat("type_928_max", type928Max.toFloatOrNull() ?: 1.35f)
+                                .putInt("type_928_start", type928Start.toIntOrNull() ?: 1)
+                                .putInt("type_928_end", type928End.toIntOrNull() ?: 45)
+                                .putString("check_interval", checkInterval)
+                                .putString("bet_amount", betAmount)
+                                .putBoolean("auto_start", autoStart)
+                                .putBoolean("notifications", notifications)
+                                .apply()
+                            
+                            Toast.makeText(context, "Настройки сохранены", Toast.LENGTH_SHORT).show()
+                            onSave()
+                        },
                         modifier = Modifier.weight(1f)
                     ) {
                         Text("Сохранить")
@@ -1298,7 +1640,6 @@ fun SettingsScreen(
             }
         }
         
-        // Диалог подтверждения очистки
         if (showClearDialog) {
             AlertDialog(
                 onDismissRequest = { showClearDialog = false },
@@ -1323,8 +1664,9 @@ fun SettingsScreen(
                                 isClearing = false
                                 
                                 val message = if (success) {
-                                    // Также очищаем SharedPreferences
                                     context.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
+                                        .edit().clear().apply()
+                                    context.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE)
                                         .edit().clear().apply()
                                     
                                     "Все данные успешно удалены"
@@ -1339,33 +1681,23 @@ fun SettingsScreen(
                                 }
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.error
-                        )
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                     ) {
                         if (isClearing) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                color = Color.White,
-                                strokeWidth = 2.dp
-                            )
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
                         } else {
                             Text("Да, удалить всё")
                         }
                     }
                 },
                 dismissButton = {
-                    TextButton(
-                        onClick = { showClearDialog = false },
-                        enabled = !isClearing
-                    ) {
+                    TextButton(onClick = { showClearDialog = false }, enabled = !isClearing) {
                         Text("Отмена")
                     }
                 }
             )
         }
         
-        // Диалог статистики БД
         if (showStatsDialog) {
             val stats = remember { dbHelper.getTableStats() }
             
@@ -1373,9 +1705,7 @@ fun SettingsScreen(
                 onDismissRequest = { showStatsDialog = false },
                 title = { Text("📊 Статистика базы данных") },
                 text = {
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("Записей в таблицах:", fontWeight = FontWeight.Bold)
                         
                         stats.forEach { (table, count) ->

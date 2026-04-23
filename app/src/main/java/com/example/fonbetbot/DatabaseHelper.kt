@@ -6,7 +6,6 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import android.util.Log
-import android.widget.Toast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -15,7 +14,7 @@ class DatabaseHelper(context: Context) :
     
     companion object {
         private const val DATABASE_NAME = "fonbet_bot.db"
-        private const val DATABASE_VERSION = 1
+        private const val DATABASE_VERSION = 2
         private const val TAG = "DatabaseHelper"
     }
     
@@ -89,18 +88,22 @@ class DatabaseHelper(context: Context) :
             db.execSQL("""
                 CREATE TABLE IF NOT EXISTS express_bets (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    id_exp INTEGER NOT NULL,
                     user_id INTEGER,
+                    id_exp INTEGER NOT NULL,
+                    kfall REAL,
+                    profloss REAL DEFAULT 0,
+                    balans REAL,
+                    sumbet REAL,
+                    sts_all INTEGER DEFAULT 1,
+                    ct INTEGER,
+                    strategy TEXT,
+                    id_exp_replace INTEGER DEFAULT 0,
+                    events_count INTEGER DEFAULT 0,
                     total_odds REAL,
-                    kfall INTEGER,
-                    sts_all INTEGER,
                     bet_amount REAL,
                     potential_win REAL,
-                    profit_loss REAL,
                     balance REAL,
-                    strategy TEXT,
-                    id_exp_replace INTEGER,
-                    events_count INTEGER DEFAULT 0,
+                    profit_loss REAL,
                     created_time INTEGER,
                     created_at INTEGER DEFAULT (strftime('%s', 'now')),
                     updated_at INTEGER DEFAULT (strftime('%s', 'now')),
@@ -125,10 +128,10 @@ class DatabaseHelper(context: Context) :
                     start_odds REAL,
                     current_odds REAL,
                     match_time INTEGER,
-                    home_score INTEGER,
-                    away_score INTEGER,
+                    home_score INTEGER DEFAULT 0,
+                    away_score INTEGER DEFAULT 0,
                     bet_type INTEGER,
-                    status INTEGER,
+                    status INTEGER DEFAULT 1,
                     match_url TEXT,
                     uzh TEXT,
                     total_type INTEGER,
@@ -145,7 +148,9 @@ class DatabaseHelper(context: Context) :
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_logs_user_time ON bot_logs(user_id, created_at)")
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_sessions_user ON bot_sessions(user_id, start_time)")
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_express_user ON express_bets(user_id)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_express_sts ON express_bets(sts_all)")
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_express ON express_events(express_id)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_status ON express_events(status)")
             
             Log.d(TAG, "Database created successfully")
         } catch (e: Exception) {
@@ -155,7 +160,11 @@ class DatabaseHelper(context: Context) :
     
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         Log.d(TAG, "Upgrading database from $oldVersion to $newVersion")
-        // При обновлении версии можно добавить миграции
+        if (oldVersion < 2) {
+            // Добавляем новые поля при обновлении
+            db.execSQL("ALTER TABLE express_events ADD COLUMN home_score INTEGER DEFAULT 0")
+            db.execSQL("ALTER TABLE express_events ADD COLUMN away_score INTEGER DEFAULT 0")
+        }
     }
     
     // Сохранение пользователя
@@ -197,39 +206,11 @@ class DatabaseHelper(context: Context) :
         return null
     }
     
-    // Получение активного пользователя
-    fun getActiveUser(): User? {
-        val db = readableDatabase
-        val cursor = db.query(
-            "users",
-            null,
-            "is_active = 1",
-            null, null, null,
-            "last_login DESC",
-            "1"
-        )
-        
-        cursor.use {
-            if (it.moveToFirst()) {
-                return User(
-                    id = it.getLong(it.getColumnIndexOrThrow("id")),
-                    fsid = it.getString(it.getColumnIndexOrThrow("fsid")),
-                    deviceId = it.getString(it.getColumnIndexOrThrow("device_id")),
-                    clientId = it.getLong(it.getColumnIndexOrThrow("client_id")),
-                    sysId = it.getInt(it.getColumnIndexOrThrow("sys_id")),
-                    isActive = true
-                )
-            }
-        }
-        return null
-    }
-    
     // Сохранение баланса
     fun saveBalance(userId: Long, balance: Double, status: String = "success", 
                     errorMessage: String? = null, rawResponse: String? = null): Long {
         val db = writableDatabase
         
-        // Получаем предыдущий баланс
         var previousBalance: Double? = null
         val cursor = db.query(
             "balance_history",
@@ -257,8 +238,6 @@ class DatabaseHelper(context: Context) :
         }
         
         val id = db.insert("balance_history", null, values)
-        
-        // Обновляем активную сессию
         updateActiveSession(userId, balance)
         
         return id
@@ -365,7 +344,6 @@ class DatabaseHelper(context: Context) :
         val db = readableDatabase
         val stats = BalanceStats()
         
-        // Текущий баланс
         val cursor = db.query(
             "balance_history",
             arrayOf("balance", "check_time"),
@@ -382,8 +360,6 @@ class DatabaseHelper(context: Context) :
             }
         }
         
-        // Статистика за сегодня
-        val todayStart = System.currentTimeMillis() / 1000
         val todayCursor = db.rawQuery("""
             SELECT 
                 MIN(balance) as min_balance,
@@ -418,19 +394,17 @@ class DatabaseHelper(context: Context) :
         return@withContext try {
             val db = writableDatabase
             
-            // Очищаем все таблицы
             db.execSQL("DELETE FROM express_events")
             db.execSQL("DELETE FROM express_bets")
             db.execSQL("DELETE FROM bot_logs")
             db.execSQL("DELETE FROM bot_sessions")
             db.execSQL("DELETE FROM balance_history")
             db.execSQL("DELETE FROM users")
-            
-            // Сбрасываем автоинкремент
             db.execSQL("DELETE FROM sqlite_sequence")
             
-            // Очищаем SharedPreferences
             context.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
+                .edit().clear().apply()
+            context.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE)
                 .edit().clear().apply()
             
             Log.d(TAG, "All data cleared successfully")
@@ -471,6 +445,17 @@ class DatabaseHelper(context: Context) :
         }
         
         return stats
+    }
+    
+    // Обновить статус экспресса
+    fun updateExpressStatus(expressId: Long, status: Int, profitLoss: Double? = null) {
+        val db = writableDatabase
+        val values = ContentValues().apply {
+            put("sts_all", status)
+            profitLoss?.let { put("profloss", it) }
+            put("updated_at", System.currentTimeMillis() / 1000)
+        }
+        db.update("express_bets", values, "id = ?", arrayOf(expressId.toString()))
     }
 }
 
