@@ -215,49 +215,52 @@ fun MainBotScreen(
     var showExitDialog by remember { mutableStateOf(false) }
     
     fun fetchBalanceFromApi() {
-        if (authData == null) {
-            logs.add(0, "[${getCurrentTime()}] ❌ Нет данных авторизации")
-            return
-        }
-        
-        isLoadingBalance = true
-        
-        val apiClient = ApiClient()
-        apiClient.getSaldo(
-            cookies = emptyMap(),
-            fsid = authData.fsid,
-            deviceId = authData.deviceId,
-            onSuccess = { saldo ->
-                isLoadingBalance = false
-                if (saldo != null) {
-                    val oldBalance = balance
-                    balance = saldo
-                    logs.add(0, "[${getCurrentTime()}] 💰 Баланс обновлён: %.2f ₽".format(saldo))
-                    
-                    scope.launch {
-                        try {
-                            val user = dbHelper.getUser(authData.fsid, authData.deviceId)
-                            user?.let {
-                                dbHelper.saveBalance(it.id, saldo)
-                                if (saldo > oldBalance && oldBalance > 0) {
-                                    dbHelper.addLog(it.id, "profit", "Профит: +%.2f ₽".format(saldo - oldBalance))
-                                } else if (saldo < oldBalance && oldBalance > 0) {
-                                    dbHelper.addLog(it.id, "loss", "Убыток: %.2f ₽".format(saldo - oldBalance))
-                                } else {dbHelper.addLog(it.id,"loss","empty")}
-                            }
-                        } catch (e: Exception) {
-                            // Игнорируем
-                        }
-                    }
-                }
-            },
-            onError = { error ->
-                isLoadingBalance = false
-                logs.add(0, "[${getCurrentTime()}] ❌ Ошибка API: $error")
-            }
-        )
+    if (authData == null) {
+        logs.add(0, "[${getCurrentTime()}] ❌ Нет данных авторизации")
+        return
     }
     
+    isLoadingBalance = true
+    
+    val apiClient = ApiClient()
+    apiClient.getSaldo(
+        cookies = emptyMap(),
+        fsid = authData.fsid,
+        deviceId = authData.deviceId,
+        onSuccess = { sessionInfo: ApiClient.SessionInfo? ->
+            isLoadingBalance = false
+            if (sessionInfo != null && sessionInfo.saldo != null) {
+                val saldo = sessionInfo.saldo
+                val oldBalance = balance
+                balance = saldo
+                logs.add(0, "[${getCurrentTime()}] 💰 Баланс обновлён: %.2f ₽".format(saldo))
+                
+                scope.launch {
+                    try {
+                        val user = dbHelper.getUser(authData.fsid, authData.deviceId)
+                        user?.let {
+                            dbHelper.saveBalance(it.id, saldo)
+                            if (saldo > oldBalance && oldBalance > 0) {
+                                dbHelper.addLog(it.id, "profit", "Профит: +%.2f ₽".format(saldo - oldBalance))
+                            } else if (saldo < oldBalance && oldBalance > 0) {
+                                dbHelper.addLog(it.id, "loss", "Убыток: %.2f ₽".format(saldo - oldBalance))
+                            }
+                        }
+                    } catch (e: Exception) { }
+                }
+            }
+        },
+        onError = { error: String ->
+            isLoadingBalance = false
+            logs.add(0, "[${getCurrentTime()}] ❌ Ошибка API: $error")
+        }
+    )
+}
+    private fun typeName(type: Int): String = when (type) {
+    924 -> "1X"; 927 -> "Ф1(+1.5)"; 928 -> "Ф2(+1.5)"; else -> "Тип $type"
+}
+
+
     LaunchedEffect(authData, isBotRunning) {
         authData?.let {
             try {
@@ -1938,7 +1941,7 @@ fun MatchCard(match: MatchInfo) {
                 Text("Кэф: ${"%.2f".format(match.startOdds)}", fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
             
-            Text("Тип ставки: ${getTypeName(match.betType)}", fontSize = 12.sp)
+            Text("Тип ставки: ${typeName(match.betType)}", fontSize = 12.sp)
             
             if (expanded) {
                 Divider(modifier = Modifier.padding(vertical = 8.dp))
@@ -2160,7 +2163,7 @@ fun MatchInExpressCard(match: MatchInfo) {
                     2 -> "✅"
                     else -> "❌"
                 }
-                Text("$matchStatus ${getTypeName(match.betType)}", fontSize = 12.sp)
+                Text("$matchStatus ${typeName(match.betType)}", fontSize = 12.sp)
                 Text("Кэф: ${"%.2f".format(match.startOdds)}", fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
         }
@@ -2180,14 +2183,14 @@ fun DetailRow(label: String, value: String) {
     }
 }
 
-fun getTypeName(type: Int): String {
-    return when (type) {
-        924 -> "1X"
-        927 -> "Ф1(+1.5)"
-        928 -> "Ф2(+1.5)"
-        else -> "Тип $type"
-    }
-}
+// fun typeName(type: Int): String {
+//     return when (type) {
+//         924 -> "1X"
+//         927 -> "Ф1(+1.5)"
+//         928 -> "Ф2(+1.5)"
+//         else -> "Тип $type"
+//     }
+// }
 
 fun formatTimestamp(timestamp: Long): String {
     if (timestamp == 0L) return "—"
