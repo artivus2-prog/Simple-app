@@ -1,4 +1,4 @@
-// DatabaseHelper.kt - ОБНОВЛЕННАЯ ВЕРСИЯ С МЕТОДАМИ ДЛЯ ТАБЛИЦ
+// DatabaseHelper.kt - ПОЛНАЯ ВЕРСИЯ С is_finalized
 package com.example.fonbetbot
 
 import android.content.ContentValues
@@ -6,7 +6,6 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import android.util.Log
-import android.widget.Toast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -15,7 +14,7 @@ class DatabaseHelper(context: Context) :
     
     companion object {
         private const val DATABASE_NAME = "fonbet_bot.db"
-        private const val DATABASE_VERSION = 1
+        private const val DATABASE_VERSION = 2
         private const val TAG = "DatabaseHelper"
     }
     
@@ -95,7 +94,7 @@ class DatabaseHelper(context: Context) :
                     profloss REAL DEFAULT 0,
                     balans REAL,
                     sumbet REAL,
-                    sts_all INTEGER DEFAULT 1,
+                    sts_all INTEGER DEFAULT 0,
                     ct INTEGER,
                     strategy TEXT,
                     id_exp_replace INTEGER DEFAULT 0,
@@ -112,7 +111,7 @@ class DatabaseHelper(context: Context) :
                 )
             """)
             
-            // Таблица событий
+            // Таблица событий (матчей)
             db.execSQL("""
                 CREATE TABLE IF NOT EXISTS express_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -128,11 +127,12 @@ class DatabaseHelper(context: Context) :
                     away_team TEXT,
                     start_odds REAL,
                     current_odds REAL,
-                    match_time INTEGER,
+                    match_time INTEGER DEFAULT 0,
                     home_score INTEGER DEFAULT 0,
                     away_score INTEGER DEFAULT 0,
                     bet_type INTEGER,
-                    status INTEGER DEFAULT 1,
+                    status INTEGER DEFAULT 0,
+                    is_finalized INTEGER DEFAULT 0,
                     match_url TEXT,
                     uzh TEXT,
                     total_type INTEGER,
@@ -152,6 +152,7 @@ class DatabaseHelper(context: Context) :
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_express_sts ON express_bets(sts_all)")
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_express ON express_events(express_id)")
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_status ON express_events(status)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_finalized ON express_events(is_finalized)")
             
             Log.d(TAG, "Database created successfully")
         } catch (e: Exception) {
@@ -161,7 +162,10 @@ class DatabaseHelper(context: Context) :
     
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         Log.d(TAG, "Upgrading database from $oldVersion to $newVersion")
-        // При обновлении версии можно добавить миграции
+        if (oldVersion < 2) {
+            db.execSQL("ALTER TABLE express_events ADD COLUMN is_finalized INTEGER DEFAULT 0")
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_finalized ON express_events(is_finalized)")
+        }
     }
     
     // Сохранение пользователя
@@ -235,7 +239,6 @@ class DatabaseHelper(context: Context) :
                     errorMessage: String? = null, rawResponse: String? = null): Long {
         val db = writableDatabase
         
-        // Получаем предыдущий баланс
         var previousBalance: Double? = null
         val cursor = db.query(
             "balance_history",
@@ -263,8 +266,6 @@ class DatabaseHelper(context: Context) :
         }
         
         val id = db.insert("balance_history", null, values)
-        
-        // Обновляем активную сессию
         updateActiveSession(userId, balance)
         
         return id
@@ -371,7 +372,6 @@ class DatabaseHelper(context: Context) :
         val db = readableDatabase
         val stats = BalanceStats()
         
-        // Текущий баланс
         val cursor = db.query(
             "balance_history",
             arrayOf("balance", "check_time"),
@@ -388,8 +388,6 @@ class DatabaseHelper(context: Context) :
             }
         }
         
-        // Статистика за сегодня
-        val todayStart = System.currentTimeMillis() / 1000
         val todayCursor = db.rawQuery("""
             SELECT 
                 MIN(balance) as min_balance,
@@ -424,19 +422,17 @@ class DatabaseHelper(context: Context) :
         return@withContext try {
             val db = writableDatabase
             
-            // Очищаем все таблицы
             db.execSQL("DELETE FROM express_events")
             db.execSQL("DELETE FROM express_bets")
             db.execSQL("DELETE FROM bot_logs")
             db.execSQL("DELETE FROM bot_sessions")
             db.execSQL("DELETE FROM balance_history")
             db.execSQL("DELETE FROM users")
-            
-            // Сбрасываем автоинкремент
             db.execSQL("DELETE FROM sqlite_sequence")
             
-            // Очищаем SharedPreferences
             context.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
+                .edit().clear().apply()
+            context.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE)
                 .edit().clear().apply()
             
             Log.d(TAG, "All data cleared successfully")
@@ -479,7 +475,7 @@ class DatabaseHelper(context: Context) :
         return stats
     }
 
-    // ==================== НОВЫЕ МЕТОДЫ ДЛЯ ТАБЛИЦ ====================
+    // ==================== МЕТОДЫ ДЛЯ ТАБЛИЦ ====================
     
     // Получить все матчи
     fun getAllMatches(): List<MatchInfo> {
@@ -495,6 +491,7 @@ class DatabaseHelper(context: Context) :
                 e.id_home, e.id_away, 
                 e.start_odds, e.current_odds, e.match_time,
                 e.home_score, e.away_score, e.bet_type, e.status,
+                e.is_finalized,
                 COALESCE(e.match_url, '') as match_url,
                 COALESCE(e.uzh, '') as uzh,
                 e.total_type, e.created_at, e.updated_at
@@ -521,11 +518,12 @@ class DatabaseHelper(context: Context) :
                 awayScore = cursor.getInt(14),
                 betType = cursor.getInt(15),
                 status = cursor.getInt(16),
-                matchUrl = cursor.getString(17),
-                uzh = cursor.getString(18),
-                totalType = if (cursor.isNull(19)) null else cursor.getInt(19),
-                createdAt = cursor.getLong(20),
-                updatedAt = cursor.getLong(21)
+                isFinalized = cursor.getInt(17),
+                matchUrl = cursor.getString(18),
+                uzh = cursor.getString(19),
+                totalType = if (cursor.isNull(20)) null else cursor.getInt(20),
+                createdAt = cursor.getLong(21),
+                updatedAt = cursor.getLong(22)
             ))
         }
         cursor.close()
@@ -596,6 +594,7 @@ class DatabaseHelper(context: Context) :
                 e.id_home, e.id_away, 
                 e.start_odds, e.current_odds, e.match_time,
                 e.home_score, e.away_score, e.bet_type, e.status,
+                e.is_finalized,
                 COALESCE(e.match_url, '') as match_url,
                 COALESCE(e.uzh, '') as uzh,
                 e.total_type, e.created_at, e.updated_at
@@ -623,11 +622,12 @@ class DatabaseHelper(context: Context) :
                 awayScore = cursor.getInt(14),
                 betType = cursor.getInt(15),
                 status = cursor.getInt(16),
-                matchUrl = cursor.getString(17),
-                uzh = cursor.getString(18),
-                totalType = if (cursor.isNull(19)) null else cursor.getInt(19),
-                createdAt = cursor.getLong(20),
-                updatedAt = cursor.getLong(21)
+                isFinalized = cursor.getInt(17),
+                matchUrl = cursor.getString(18),
+                uzh = cursor.getString(19),
+                totalType = if (cursor.isNull(20)) null else cursor.getInt(20),
+                createdAt = cursor.getLong(21),
+                updatedAt = cursor.getLong(22)
             ))
         }
         cursor.close()
@@ -638,7 +638,6 @@ class DatabaseHelper(context: Context) :
 
 // ==================== DATA CLASSES ====================
 
-// Data classes
 data class User(
     val id: Long,
     val fsid: String,
@@ -666,7 +665,6 @@ data class BalanceStats(
     var todayErrors: Int = 0
 )
 
-// Новые data classes для таблиц
 data class MatchInfo(
     val id: Long,
     val expressId: Long,
@@ -685,6 +683,7 @@ data class MatchInfo(
     val awayScore: Int,
     val betType: Int,
     val status: Int,
+    val isFinalized: Int,
     val matchUrl: String,
     val uzh: String,
     val totalType: Int?,

@@ -14,13 +14,15 @@ class ApiClient {
     private val TAG = "ApiClient"
     
     // Data class для матча с коэффициентами
-    data class MatchFactors(
-        val score1: Int,
-        val score2: Int,
-        val factors: Map<Int, Double>,
-        val handicaps: Map<Int, Double>
-    )
     
+    data class MatchFactors(
+    val score1: Int,
+    val score2: Int,
+    val matchTime: Int,  // ДОБАВЛЕНО: время матча в секундах
+    val factors: Map<Int, Double>,
+    val handicaps: Map<Int, Double>
+)
+
     // Data class для настроек ставок
     data class BetSettings(
         val maxMatchesPerExpress: Int = 2,
