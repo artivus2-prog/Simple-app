@@ -13,10 +13,10 @@ class DatabaseHelper(context: Context) :
     SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
     
     companion object {
-        private const val DATABASE_NAME = "fonbet_bot.db"
-        private const val DATABASE_VERSION = 2
-        private const val TAG = "DatabaseHelper"
-    }
+    private const val DATABASE_NAME = "fonbet_bot.db"
+    private const val DATABASE_VERSION = 3  // было 2
+    private const val TAG = "DatabaseHelper"
+}
     
     override fun onCreate(db: SQLiteDatabase) {
         Log.d(TAG, "Creating database...")
@@ -30,6 +30,7 @@ class DatabaseHelper(context: Context) :
                     device_id TEXT NOT NULL,
                     client_id INTEGER DEFAULT 18845703,
                     sys_id INTEGER DEFAULT 21,
+                    username TEXT,
                     is_active INTEGER DEFAULT 1,
                     created_at INTEGER DEFAULT (strftime('%s', 'now')),
                     updated_at INTEGER DEFAULT (strftime('%s', 'now')),
@@ -161,78 +162,141 @@ class DatabaseHelper(context: Context) :
     }
     
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        Log.d(TAG, "Upgrading database from $oldVersion to $newVersion")
-        if (oldVersion < 2) {
-            db.execSQL("ALTER TABLE express_events ADD COLUMN is_finalized INTEGER DEFAULT 0")
-            db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_finalized ON express_events(is_finalized)")
-        }
+    Log.d(TAG, "Upgrading database from $oldVersion to $newVersion")
+    
+    if (oldVersion < 2) {
+        db.execSQL("ALTER TABLE express_events ADD COLUMN is_finalized INTEGER DEFAULT 0")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_finalized ON express_events(is_finalized)")
     }
     
-    // Сохранение пользователя
-    fun saveUser(fsid: String, deviceId: String): Long {
-        val db = writableDatabase
-        val values = ContentValues().apply {
-            put("fsid", fsid)
-            put("device_id", deviceId)
-            put("last_login", System.currentTimeMillis() / 1000)
-        }
-        
-        return db.insertWithOnConflict("users", null, values, 
-            SQLiteDatabase.CONFLICT_REPLACE)
+    if (oldVersion < 3) {
+        db.execSQL("ALTER TABLE users ADD COLUMN username TEXT")
     }
+}
+        // Обновление clientId и username пользователя
+    fun updateUserInfo(userId: Long, clientId: Long?, username: String?) {
+        val db = writableDatabase
+        val values = ContentValues()
+        
+        clientId?.let { values.put("client_id", it) }
+        username?.let { values.put("username", it) }
+        
+        if (values.size() > 0) {
+            values.put("updated_at", System.currentTimeMillis() / 1000)
+            db.update("users", values, "id = ?", arrayOf(userId.toString()))
+        }
+    }
+
+    // Обновление информации по fsid и deviceId
+    fun updateUserInfoByAuth(fsid: String, deviceId: String, clientId: Long?, username: String?): Boolean {
+        val db = writableDatabase
+        val values = ContentValues()
+        
+        clientId?.let { values.put("client_id", it) }
+        username?.let { values.put("username", it) }
+        
+        if (values.size() > 0) {
+            values.put("updated_at", System.currentTimeMillis() / 1000)
+            val rows = db.update("users", values, "fsid = ? AND device_id = ?", 
+                arrayOf(fsid, deviceId))
+            return rows > 0
+        }
+        return false
+    }
+        fun saveUser(fsid: String, deviceId: String, username: String? = null): Long {
+            val db = writableDatabase
+            val values = ContentValues().apply {
+                put("fsid", fsid)
+                put("device_id", deviceId)
+                username?.let { put("username", it) }
+                put("last_login", System.currentTimeMillis() / 1000)
+            }
+            
+            return db.insertWithOnConflict("users", null, values, 
+                SQLiteDatabase.CONFLICT_REPLACE)
+        }
     
     // Получение пользователя
-    fun getUser(fsid: String, deviceId: String): User? {
-        val db = readableDatabase
-        val cursor = db.query(
-            "users",
-            null,
-            "fsid = ? AND device_id = ?",
-            arrayOf(fsid, deviceId),
-            null, null, null
-        )
-        
-        cursor.use {
-            if (it.moveToFirst()) {
-                return User(
-                    id = it.getLong(it.getColumnIndexOrThrow("id")),
-                    fsid = it.getString(it.getColumnIndexOrThrow("fsid")),
-                    deviceId = it.getString(it.getColumnIndexOrThrow("device_id")),
-                    clientId = it.getLong(it.getColumnIndexOrThrow("client_id")),
-                    sysId = it.getInt(it.getColumnIndexOrThrow("sys_id")),
-                    isActive = it.getInt(it.getColumnIndexOrThrow("is_active")) == 1
-                )
+        fun getUser(fsid: String, deviceId: String): User? {
+            val db = readableDatabase
+            val cursor = db.query(
+                "users",
+                null,
+                "fsid = ? AND device_id = ?",
+                arrayOf(fsid, deviceId),
+                null, null, null
+            )
+            
+            cursor.use {
+                if (it.moveToFirst()) {
+                    return User(
+                        id = it.getLong(it.getColumnIndexOrThrow("id")),
+                        fsid = it.getString(it.getColumnIndexOrThrow("fsid")),
+                        deviceId = it.getString(it.getColumnIndexOrThrow("device_id")),
+                        clientId = it.getLong(it.getColumnIndexOrThrow("client_id")),
+                        sysId = it.getInt(it.getColumnIndexOrThrow("sys_id")),
+                        username = it.getString(it.getColumnIndexOrThrow("username")),
+                        isActive = it.getInt(it.getColumnIndexOrThrow("is_active")) == 1
+                    )
+                }
             }
+            return null
         }
-        return null
-    }
+                // Получить информацию о пользователе с балансом
+        fun getUserFullInfo(fsid: String, deviceId: String): UserFullInfo? {
+            val user = getUser(fsid, deviceId) ?: return null
+            val stats = getBalanceStats(user.id)
+            
+            return UserFullInfo(
+                id = user.id,
+                fsid = user.fsid,
+                deviceId = user.deviceId,
+                clientId = user.clientId,
+                username = user.username,
+                currentBalance = stats.currentBalance,
+                lastCheckTime = stats.lastCheckTime,
+                isActive = user.isActive
+            )
+        }
+
+        // Data class для полной информации
+        data class UserFullInfo(
+            val id: Long,
+            val fsid: String,
+            val deviceId: String,
+            val clientId: Long,
+            val username: String?,
+            val currentBalance: Double,
+            val lastCheckTime: Long,
+            val isActive: Boolean
+        )
     
-    // Получение активного пользователя
-    fun getActiveUser(): User? {
-        val db = readableDatabase
-        val cursor = db.query(
-            "users",
-            null,
-            "is_active = 1",
-            null, null, null,
-            "last_login DESC",
-            "1"
-        )
-        
-        cursor.use {
-            if (it.moveToFirst()) {
-                return User(
-                    id = it.getLong(it.getColumnIndexOrThrow("id")),
-                    fsid = it.getString(it.getColumnIndexOrThrow("fsid")),
-                    deviceId = it.getString(it.getColumnIndexOrThrow("device_id")),
-                    clientId = it.getLong(it.getColumnIndexOrThrow("client_id")),
-                    sysId = it.getInt(it.getColumnIndexOrThrow("sys_id")),
-                    isActive = true
-                )
-            }
+fun getActiveUser(): User? {
+    val db = readableDatabase
+    val cursor = db.query(
+        "users",
+        null,
+        "is_active = 1",
+        null, null, null,
+        "last_login DESC",
+        "1"
+    )
+    
+    cursor.use {
+        if (it.moveToFirst()) {
+            return User(
+                id = it.getLong(it.getColumnIndexOrThrow("id")),
+                fsid = it.getString(it.getColumnIndexOrThrow("fsid")),
+                deviceId = it.getString(it.getColumnIndexOrThrow("device_id")),
+                clientId = it.getLong(it.getColumnIndexOrThrow("client_id")),
+                sysId = it.getInt(it.getColumnIndexOrThrow("sys_id")),
+                username = it.getString(it.getColumnIndexOrThrow("username")),
+                isActive = true
+            )
         }
-        return null
     }
+    return null
+}
     
     // Сохранение баланса
     fun saveBalance(userId: Long, balance: Double, status: String = "success", 
@@ -644,6 +708,7 @@ data class User(
     val deviceId: String,
     val clientId: Long,
     val sysId: Int,
+    val username: String? = null,  // новое поле
     val isActive: Boolean
 )
 

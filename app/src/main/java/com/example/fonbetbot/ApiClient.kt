@@ -8,6 +8,31 @@ import org.json.JSONObject
 import java.io.IOException
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
+// Data class для ставки из ответа
+
+data class BetData(
+    val mId: Int,
+    val type: Int,
+    val sport: String = "",
+    val idExp: Int = 0,
+    val idLiga: Int = 0,
+    val ligaName: String = "",
+    val home: String = "",
+    val away: String = "",
+    val comand1Id: Int = 0,
+    val comand2Id: Int = 0,
+    val curTime: String = "",
+    val sh: Int = 0,
+    val sa: Int = 0,
+    val startKf: Double = 0.0,
+    val lastKf: Double = 0.0,
+    val sts: Int = 1,
+    val url: String = "",
+    val uzh: Double = 0.0,
+    val tbType: Int = 0
+)
+
+// Метод получения ставок
 
 class ApiClient {
     private val client = OkHttpClient()
@@ -60,6 +85,8 @@ class ApiClient {
         val monitorStart: Int,
         val monitorEnd: Int
     )
+
+    
     
     // Метод получения баланса
     fun getSaldo(
@@ -137,69 +164,89 @@ class ApiClient {
     
     // Метод получения ставок
     fun getBets(
-        userId: Long,
-        settings: BetSettings,
-        onSuccess: (List<Pair<Int, Int>>) -> Unit,
-        onError: (String) -> Unit
-    ) {
-        val jsonBody = JSONObject().apply {
-            put("user_id", userId)
-            put("settings", settings.toJson())
-        }
-        
-        val mediaType = "application/json; charset=utf-8".toMediaType()
-        val body = jsonBody.toString().toRequestBody(mediaType)
-        
-        val request = Request.Builder()
-            .url("http://95.183.11.203:5000/api/getBets")
-            .post(body)
-            .addHeader("Content-Type", "application/json")
-            .addHeader("Accept", "application/json")
-            .build()
-        
-        client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                Log.e(TAG, "Ошибка сети getBets: ${e.message}")
-                onError("Ошибка сети: ${e.message}")
-            }
-            
-            override fun onResponse(call: Call, response: Response) {
-                response.use {
-                    val bodyString = response.body?.string() ?: ""
-                    
-                    if (!response.isSuccessful) {
-                        Log.e(TAG, "Ошибка getBets ${response.code}: $bodyString")
-                        onError("Ошибка ${response.code}")
-                        return
-                    }
-                    
-                    try {
-                        val json = JSONObject(bodyString)
-                        val betsList = mutableListOf<Pair<Int, Int>>()
-                        
-                        if (json.has("data")) {
-                            val dataArray = json.getJSONArray("data")
-                            
-                            for (i in 0 until dataArray.length()) {
-                                val betArray = dataArray.getJSONArray(i)
-                                val mId = betArray.getInt(0)
-                                val type = betArray.getInt(1)
-                                betsList.add(Pair(mId, type))
-                            }
-                        }
-                        
-                        Log.d(TAG, "Получено ${betsList.size} ставок")
-                        onSuccess(betsList)
-                        
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Ошибка парсинга getBets: ${e.message}")
-                        onError("Ошибка парсинга: ${e.message}")
-                    }
-                }
-            }
-        })
+    userId: Long,
+    settings: BetSettings,
+    onSuccess: (List<BetData>) -> Unit,
+    onError: (String) -> Unit
+) {
+    val jsonBody = JSONObject().apply {
+        put("user_id", userId)
+        put("settings", settings.toJson())
     }
     
+    val mediaType = "application/json; charset=utf-8".toMediaType()
+    val body = jsonBody.toString().toRequestBody(mediaType)
+    
+    val request = Request.Builder()
+        .url("http://95.183.11.203:5000/api/getBets")
+        .post(body)
+        .addHeader("Content-Type", "application/json")
+        .addHeader("Accept", "application/json")
+        .build()
+    
+    client.newCall(request).enqueue(object : Callback {
+        override fun onFailure(call: Call, e: IOException) {
+            Log.e(TAG, "Ошибка сети getBets: ${e.message}")
+            onError("Ошибка сети: ${e.message}")
+        }
+        
+        override fun onResponse(call: Call, response: Response) {
+            response.use {
+                val bodyString = response.body?.string() ?: ""
+                
+                if (!response.isSuccessful) {
+                    Log.e(TAG, "Ошибка getBets ${response.code}: $bodyString")
+                    onError("Ошибка ${response.code}")
+                    return
+                }
+                
+                try {
+                    val json = JSONObject(bodyString)
+                    val betsList = mutableListOf<BetData>()
+                    
+                    if (json.has("data")) {
+                        val dataArray = json.getJSONArray("data")
+                        
+                        for (i in 0 until dataArray.length()) {
+                            val betJson = dataArray.getJSONObject(i)
+                            
+                            val betData = BetData(
+                                mId = betJson.optInt("m_id", 0),
+                                type = betJson.optInt("type", 0),
+                                sport = betJson.optString("sport", ""),
+                                idExp = betJson.optInt("id_exp", 0),
+                                idLiga = betJson.optInt("id_liga", 0),
+                                ligaName = betJson.optString("liganame", ""),
+                                home = betJson.optString("home", ""),
+                                away = betJson.optString("away", ""),
+                                comand1Id = betJson.optInt("comand1id", 0),
+                                comand2Id = betJson.optInt("comand2id", 0),
+                                curTime = betJson.optString("curtime", ""),
+                                sh = betJson.optInt("sh", 0),
+                                sa = betJson.optInt("sa", 0),
+                                startKf = betJson.optDouble("startkf", 0.0),
+                                lastKf = betJson.optDouble("lastkf", 0.0),
+                                sts = betJson.optInt("sts", 1),
+                                url = betJson.optString("url", ""),
+                                uzh = betJson.optDouble("uzh", 0.0),
+                                tbType = betJson.optInt("tbtype", 0)
+                            )
+                            
+                            betsList.add(betData)
+                        }
+                    }
+                    
+                    Log.d(TAG, "Получено ${betsList.size} ставок")
+                    onSuccess(betsList)
+                    
+                } catch (e: Exception) {
+                    Log.e(TAG, "Ошибка парсинга getBets: ${e.message}")
+                    onError("Ошибка парсинга: ${e.message}")
+                }
+            }
+        }
+    })
+}
     // Метод получения счета, времени и коэффициентов матча
     fun getMatchScore(
         matchId: Int,
