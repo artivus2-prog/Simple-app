@@ -614,15 +614,22 @@ fun MainBotScreen(
                     if (isLoadingBalance) {
                         CircularProgressIndicator(modifier = Modifier.size(32.dp))
                     } else {
-                        val balanceText = if (balance > 0) String.format("%.2f ₽", balance) else "—"
+
+                       /* val balanceText = if (balance > 0) String.format("%.2f ₽", balance) else "—"
                         val balanceColor = if (balance >= 10000) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurface
-                        
-                        Text(
+                        */
+Text(
+                        text = "%.2f ₽".format(balance),
+                        fontSize = 42.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF4CAF50)
+                         )                        
+/*Text(
                             text = balanceText,
                             fontSize = 42.sp,
                             fontWeight = FontWeight.Bold,
                             color = balanceColor
-                        )
+                        )*/
                     }
                     
                     if (authData != null && !isLoadingBalance) {

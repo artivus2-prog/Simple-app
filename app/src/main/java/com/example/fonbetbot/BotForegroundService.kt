@@ -143,15 +143,15 @@ class BotForegroundService : Service() {
     private fun fetchBalance(data: AuthData) {
         val cookieManager = CookieManager.getInstance()
         val cookieString = cookieManager.getCookie("https://www.fon.bet") ?: ""
-        
-        val cookies: Map<String, String> = if (cookieString.isNotEmpty()) {
+        val cookies = emptyMap<String, String>()
+        /*val cookies: Map<String, String> = if (cookieString.isNotEmpty()) {
             cookieString.split("; ").associate { cookie ->
                 val parts = cookie.split("=", limit = 2)
                 parts[0] to (parts.getOrNull(1) ?: "")
             }
         } else {
             emptyMap()
-        }
+        }*/
         
         apiClient.getSaldo(
             cookies = cookies,
