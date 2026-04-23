@@ -1,4 +1,4 @@
-// MainActivity.kt
+// MainActivity.kt - ПОЛНЫЙ ФАЙЛ С ИНТЕГРАЦИЕЙ БАЗЫ ДАННЫХ
 package com.example.fonbetbot
 
 import android.content.ClipData
@@ -13,6 +13,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -30,10 +31,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
 class MainActivity : ComponentActivity() {
+    
+    private lateinit var dbHelper: DatabaseHelper
     
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -68,10 +72,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         checkAndRequestPermissions()
         
+        // Инициализация базы данных
+        dbHelper = DatabaseHelper(this)
+        
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    FonbetBotApp()
+                    FonbetBotApp(dbHelper)
                 }
             }
         }
@@ -85,7 +92,7 @@ data class AuthData(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FonbetBotApp() {
+fun FonbetBotApp(dbHelper: DatabaseHelper) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE) }
     
@@ -99,6 +106,14 @@ fun FonbetBotApp() {
         
         if (fsid.isNotEmpty() && deviceId.isNotEmpty()) {
             authData = AuthData(fsid, deviceId)
+            
+            // Сохраняем в БД если ещё нет
+            try {
+                val userId = dbHelper.saveUser(fsid, deviceId)
+                dbHelper.addLog(userId, "info", "Приложение запущено")
+            } catch (e: Exception) {
+                // Игнорируем ошибку БД
+            }
         }
     }
     
@@ -109,6 +124,14 @@ fun FonbetBotApp() {
             .putString("device_id", deviceId)
             .apply()
         authData = AuthData(fsid, deviceId)
+        
+        // Сохраняем в БД
+        try {
+            val userId = dbHelper.saveUser(fsid, deviceId)
+            dbHelper.addLog(userId, "info", "Пользователь авторизован")
+        } catch (e: Exception) {
+            // Игнорируем ошибку БД
+        }
     }
     
     // Функция очистки данных
@@ -128,7 +151,8 @@ fun FonbetBotApp() {
             onLogout = {
                 currentScreen = "main"
                 clearAuthData()
-            }
+            },
+            dbHelper = dbHelper
         )
         "webAuth" -> WebViewAuthScreen(
             onAuthSuccess = { fsid, deviceId ->
@@ -137,15 +161,25 @@ fun FonbetBotApp() {
             },
             onBack = { currentScreen = "main" }
         )
-        "stats" -> StatsScreen(onBack = { currentScreen = "main" })
+        "stats" -> StatsScreen(
+            onBack = { currentScreen = "main" },
+            dbHelper = dbHelper,
+            authData = authData
+        )
         "settings" -> SettingsScreen(
             onBack = { currentScreen = "main" },
-            onSave = { currentScreen = "main" }
+            onSave = { currentScreen = "main" },
+            dbHelper = dbHelper
         )
-        "history" -> HistoryScreen(onBack = { currentScreen = "main" })
+        "history" -> HistoryScreen(
+            onBack = { currentScreen = "main" },
+            dbHelper = dbHelper,
+            authData = authData
+        )
         "profile" -> ProfileScreen(
             authData = authData,
-            onBack = { currentScreen = "main" }
+            onBack = { currentScreen = "main" },
+            dbHelper = dbHelper
         )
     }
 }
@@ -159,9 +193,11 @@ fun MainBotScreen(
     onNavigateToHistory: () -> Unit,
     onNavigateToProfile: () -> Unit,
     onNavigateToWebAuth: () -> Unit,
-    onLogout: () -> Unit
+    onLogout: () -> Unit,
+    dbHelper: DatabaseHelper
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     
     var isBotRunning by remember { 
         mutableStateOf(BotForegroundService.isRunning) 
@@ -170,18 +206,52 @@ fun MainBotScreen(
     val logs = remember { mutableStateListOf<String>() }
     var showMenu by remember { mutableStateOf(false) }
     
+    // Загружаем начальный баланс из БД
+    LaunchedEffect(authData) {
+        authData?.let {
+            try {
+                val user = dbHelper.getUser(it.fsid, it.deviceId)
+                user?.let { userId ->
+                    val stats = dbHelper.getBalanceStats(userId.id)
+                    if (stats.currentBalance > 0) {
+                        balance = stats.currentBalance
+                    }
+                }
+            } catch (e: Exception) {
+                // Игнорируем ошибку
+            }
+        }
+    }
+    
     // Подписываемся на обновления из сервиса
     DisposableEffect(Unit) {
         BotForegroundService.onBalanceUpdate = { newBalance ->
             balance = newBalance
+            
+            // Сохраняем в БД
+            authData?.let { data ->
+                scope.launch {
+                    try {
+                        val user = dbHelper.getUser(data.fsid, data.deviceId)
+                        user?.let {
+                            dbHelper.saveBalance(it.id, newBalance, "success")
+                        }
+                    } catch (e: Exception) {
+                        // Игнорируем ошибку
+                    }
+                }
+            }
         }
         BotForegroundService.onLogUpdate = { log ->
             logs.add(0, log)
-            if (logs.size > 20) logs.removeLast()
+            if (logs.size > 50) logs.removeLast()
         }
         BotForegroundService.authData = authData
         
-        onDispose { }
+        onDispose {
+            BotForegroundService.onBalanceUpdate = null
+            BotForegroundService.onLogUpdate = null
+        }
     }
     
     // Функция запуска бота
@@ -202,6 +272,20 @@ fun MainBotScreen(
         }
         
         isBotRunning = true
+        
+        // Логируем в БД
+        scope.launch {
+            try {
+                val user = dbHelper.getUser(authData.fsid, authData.deviceId)
+                user?.let {
+                    dbHelper.startBotSession(it.id, balance)
+                    dbHelper.addLog(it.id, "start", "Бот запущен")
+                }
+            } catch (e: Exception) {
+                // Игнорируем ошибку
+            }
+        }
+        
         logs.add(0, "[${getCurrentTime()}] 🚀 Бот запущен в фоне")
     }
     
@@ -213,12 +297,31 @@ fun MainBotScreen(
         context.startService(stopIntent)
         
         isBotRunning = false
+        
+        // Логируем в БД
+        scope.launch {
+            try {
+                authData?.let { data ->
+                    val user = dbHelper.getUser(data.fsid, data.deviceId)
+                    user?.let {
+                        dbHelper.stopBotSession(it.id, "user_stop")
+                        dbHelper.addLog(it.id, "stop", "Бот остановлен")
+                    }
+                }
+            } catch (e: Exception) {
+                // Игнорируем ошибку
+            }
+        }
+        
         logs.add(0, "[${getCurrentTime()}] ⏹ Бот остановлен")
     }
     
     // Проверяем статус сервиса при запуске
     LaunchedEffect(Unit) {
         isBotRunning = BotForegroundService.isRunning
+        if (isBotRunning) {
+            logs.add(0, "[${getCurrentTime()}] 🔄 Подключено к работающему боту")
+        }
     }
     
     // Блокируем кнопку "Назад" если бот запущен
@@ -621,9 +724,24 @@ fun QuickActionButton(
 @Composable
 fun ProfileScreen(
     authData: AuthData?,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    dbHelper: DatabaseHelper
 ) {
     val context = LocalContext.current
+    var userStats by remember { mutableStateOf<BalanceStats?>(null) }
+    
+    LaunchedEffect(authData) {
+        authData?.let {
+            try {
+                val user = dbHelper.getUser(it.fsid, it.deviceId)
+                user?.let { userId ->
+                    userStats = dbHelper.getBalanceStats(userId.id)
+                }
+            } catch (e: Exception) {
+                // Игнорируем ошибку
+            }
+        }
+    }
     
     Scaffold(
         topBar = {
@@ -681,7 +799,7 @@ fun ProfileScreen(
                     )
                     
                     Text(
-                        "user@fonbet-bot.com",
+                        "Аккаунт Фонбет",
                         fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -690,9 +808,15 @@ fun ProfileScreen(
                     
                     Divider()
                     
-                    ProfileInfoRow("ID пользователя", "12345")
-                    ProfileInfoRow("Статус", "Активен")
-                    ProfileInfoRow("Тариф", "Premium")
+                    userStats?.let { stats ->
+                        ProfileInfoRow("Текущий баланс", String.format("%.2f ₽", stats.currentBalance))
+                        ProfileInfoRow("Мин за сегодня", String.format("%.2f ₽", stats.todayMin))
+                        ProfileInfoRow("Макс за сегодня", String.format("%.2f ₽", stats.todayMax))
+                        ProfileInfoRow("Средний за сегодня", String.format("%.2f ₽", stats.todayAvg))
+                        ProfileInfoRow("Ошибок сегодня", stats.todayErrors.toString())
+                    } ?: run {
+                        ProfileInfoRow("Статус", "Загружается...")
+                    }
                     
                     if (authData != null) {
                         Divider(modifier = Modifier.padding(vertical = 12.dp))
@@ -766,7 +890,26 @@ fun ProfileInfoRow(label: String, value: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun StatsScreen(onBack: () -> Unit) {
+fun StatsScreen(
+    onBack: () -> Unit,
+    dbHelper: DatabaseHelper,
+    authData: AuthData?
+) {
+    var stats by remember { mutableStateOf<BalanceStats?>(null) }
+    
+    LaunchedEffect(authData) {
+        authData?.let {
+            try {
+                val user = dbHelper.getUser(it.fsid, it.deviceId)
+                user?.let { userId ->
+                    stats = dbHelper.getBalanceStats(userId.id)
+                }
+            } catch (e: Exception) {
+                // Игнорируем ошибку
+            }
+        }
+    }
+    
     Scaffold(
         topBar = {
             TopAppBar(
@@ -797,10 +940,16 @@ fun StatsScreen(onBack: () -> Unit) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text("📈 За сегодня", fontWeight = FontWeight.Bold, fontSize = 18.sp)
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text("Профит: +1,250 ₽")
-                        Text("Ставок: 15")
-                        Text("Выигрышей: 11")
-                        Text("Процент побед: 73.3%")
+                        
+                        stats?.let {
+                            Text("Текущий баланс: ${String.format("%.2f ₽", it.currentBalance)}")
+                            Text("Минимальный: ${String.format("%.2f ₽", it.todayMin)}")
+                            Text("Максимальный: ${String.format("%.2f ₽", it.todayMax)}")
+                            Text("Средний: ${String.format("%.2f ₽", it.todayAvg)}")
+                            Text("Ошибок: ${it.todayErrors}")
+                        } ?: run {
+                            Text("Нет данных")
+                        }
                     }
                 }
             }
@@ -810,27 +959,16 @@ fun StatsScreen(onBack: () -> Unit) {
                     shape = RoundedCornerShape(16.dp)
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Text("📅 За неделю", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Text("💾 База данных", fontWeight = FontWeight.Bold, fontSize = 18.sp)
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text("Профит: +8,420 ₽")
-                        Text("Ставок: 87")
-                        Text("Выигрышей: 58")
-                        Text("Процент побед: 66.7%")
-                    }
-                }
-            }
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text("🏆 За всё время", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        
+                        val tableStats = remember { dbHelper.getTableStats() }
+                        tableStats.forEach { (table, count) ->
+                            Text("${table.replace("_", " ")}: $count записей")
+                        }
+                        
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text("Профит: +24,850 ₽")
-                        Text("Ставок: 312")
-                        Text("Выигрышей: 218")
-                        Text("Процент побед: 69.9%")
+                        Text("Размер: ${dbHelper.getDatabaseSize(LocalContext.current)}")
                     }
                 }
             }
@@ -840,11 +978,30 @@ fun StatsScreen(onBack: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HistoryScreen(onBack: () -> Unit) {
+fun HistoryScreen(
+    onBack: () -> Unit,
+    dbHelper: DatabaseHelper,
+    authData: AuthData?
+) {
+    var logs by remember { mutableStateOf<List<BotLog>>(emptyList()) }
+    
+    LaunchedEffect(authData) {
+        authData?.let {
+            try {
+                val user = dbHelper.getUser(it.fsid, it.deviceId)
+                user?.let { userId ->
+                    logs = dbHelper.getLogs(100).filter { log -> log.userId == userId.id }
+                }
+            } catch (e: Exception) {
+                // Игнорируем ошибку
+            }
+        }
+    }
+    
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("📜 История ставок") },
+                title = { Text("📜 История") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, "Назад")
@@ -856,51 +1013,59 @@ fun HistoryScreen(onBack: () -> Unit) {
             )
         }
     ) { paddingValues ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(listOf(
-                Triple("15:30", "Победа", "+500 ₽"),
-                Triple("14:15", "Победа", "+250 ₽"),
-                Triple("13:00", "Поражение", "-100 ₽"),
-                Triple("12:30", "Победа", "+750 ₽"),
-                Triple("11:45", "Победа", "+300 ₽"),
-                Triple("10:20", "Поражение", "-100 ₽"),
-                Triple("09:15", "Победа", "+200 ₽")
-            )) { (time, status, amount) ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+        if (logs.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("История пуста")
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(logs) { log ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
                     ) {
-                        Column {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault())
+                                        .format(Date(log.createdAt * 1000)),
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    log.message,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
                             Text(
-                                time,
+                                log.logType.uppercase(),
                                 fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                status,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Medium
+                                fontWeight = FontWeight.Bold,
+                                color = when (log.logLevel) {
+                                    "ERROR" -> Color(0xFFF44336)
+                                    "WARNING" -> Color(0xFFFF9800)
+                                    else -> Color(0xFF4CAF50)
+                                }
                             )
                         }
-                        Text(
-                            amount,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (amount.startsWith("+")) Color(0xFF4CAF50) else Color(0xFFF44336)
-                        )
                     }
                 }
             }
@@ -910,12 +1075,23 @@ fun HistoryScreen(onBack: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onSave: () -> Unit) {
+fun SettingsScreen(
+    onBack: () -> Unit,
+    onSave: () -> Unit,
+    dbHelper: DatabaseHelper
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    
     var betAmount by remember { mutableStateOf("100") }
     var checkInterval by remember { mutableStateOf("5") }
     var autoStart by remember { mutableStateOf(true) }
     var notifications by remember { mutableStateOf(true) }
     var soundEnabled by remember { mutableStateOf(false) }
+    
+    var showClearDialog by remember { mutableStateOf(false) }
+    var showStatsDialog by remember { mutableStateOf(false) }
+    var isClearing by remember { mutableStateOf(false) }
     
     Scaffold(
         topBar = {
@@ -1029,6 +1205,77 @@ fun SettingsScreen(onBack: () -> Unit, onSave: () -> Unit) {
                 }
             }
             
+            // Управление данными
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Text(
+                            "💾 Управление данными",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(bottom = 12.dp)
+                        )
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Размер базы данных:")
+                            Text(
+                                dbHelper.getDatabaseSize(context),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        OutlinedButton(
+                            onClick = { showStatsDialog = true },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Info, null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Статистика базы данных")
+                        }
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        OutlinedButton(
+                            onClick = {
+                                val deleted = dbHelper.cleanupOldLogs(30)
+                                Toast.makeText(context, "Удалено $deleted старых записей", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Delete, null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Очистить старые логи")
+                        }
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        Button(
+                            onClick = { showClearDialog = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.error
+                            )
+                        ) {
+                            Icon(Icons.Default.DeleteForever, null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("ОЧИСТИТЬ ВСЕ ДАННЫЕ")
+                        }
+                    }
+                }
+            }
+            
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1049,6 +1296,115 @@ fun SettingsScreen(onBack: () -> Unit, onSave: () -> Unit) {
                     }
                 }
             }
+        }
+        
+        // Диалог подтверждения очистки
+        if (showClearDialog) {
+            AlertDialog(
+                onDismissRequest = { showClearDialog = false },
+                title = { Text("⚠️ Очистка данных") },
+                text = { 
+                    Text("Вы уверены, что хотите удалить ВСЕ данные?\n\n" +
+                         "Будут удалены:\n" +
+                         "• Данные авторизации\n" +
+                         "• История баланса\n" +
+                         "• Логи работы\n" +
+                         "• Статистика\n\n" +
+                         "Это действие нельзя отменить!")
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showClearDialog = false
+                            isClearing = true
+                            
+                            scope.launch {
+                                val success = dbHelper.clearAllData(context)
+                                isClearing = false
+                                
+                                val message = if (success) {
+                                    // Также очищаем SharedPreferences
+                                    context.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
+                                        .edit().clear().apply()
+                                    
+                                    "Все данные успешно удалены"
+                                } else {
+                                    "Ошибка при удалении данных"
+                                }
+                                
+                                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                                
+                                if (success) {
+                                    onBack()
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error
+                        )
+                    ) {
+                        if (isClearing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = Color.White,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text("Да, удалить всё")
+                        }
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { showClearDialog = false },
+                        enabled = !isClearing
+                    ) {
+                        Text("Отмена")
+                    }
+                }
+            )
+        }
+        
+        // Диалог статистики БД
+        if (showStatsDialog) {
+            val stats = remember { dbHelper.getTableStats() }
+            
+            AlertDialog(
+                onDismissRequest = { showStatsDialog = false },
+                title = { Text("📊 Статистика базы данных") },
+                text = {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("Записей в таблицах:", fontWeight = FontWeight.Bold)
+                        
+                        stats.forEach { (table, count) ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(table.replace("_", " ").replaceFirstChar { it.uppercase() })
+                                Text(count.toString(), fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        
+                        Divider(modifier = Modifier.padding(vertical = 8.dp))
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Общий размер:", fontWeight = FontWeight.Bold)
+                            Text(dbHelper.getDatabaseSize(context), fontWeight = FontWeight.Bold)
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showStatsDialog = false }) {
+                        Text("Закрыть")
+                    }
+                }
+            )
         }
     }
 }
