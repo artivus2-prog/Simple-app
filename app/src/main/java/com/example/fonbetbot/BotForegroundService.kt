@@ -185,7 +185,7 @@ class BotForegroundService : Service() {
                                 dbHelper.addLog(it.id, "profit", "Профит: +%.2f ₽".format(difference))
                             } else if (difference < 0 && oldBalance > 0) {
                                 dbHelper.addLog(it.id, "loss", "Убыток: %.2f ₽".format(difference))
-                            }
+                            } else {dbHelper.addLog(it.id,"loss", "empty")}
                         }
                     } catch (e: Exception) {
                         // Игнорируем
@@ -199,7 +199,7 @@ class BotForegroundService : Service() {
                         onLogUpdate?.invoke("[$timestamp] 💰 Профит: +%.2f ₽".format(difference))
                     } else if (difference < 0 && oldBalance > 0) {
                         onLogUpdate?.invoke("[$timestamp] 📉 Убыток: %.2f ₽".format(difference))
-                    } else {onLogUpdate.invoke("empty"}
+                    } else {onLogUpdate?.invoke("empty")}
                 }
             },
             onError = { error ->
