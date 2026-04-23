@@ -55,37 +55,66 @@ fun WebViewAuthScreen(
     
     val context = LocalContext.current
     val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    
     // Функция для загрузки баланса
-    fun fetchSessionInfo(fsid: String, deviceId: String) {
-        val apiClient = ApiClient()
-        apiClient.getSaldo(
-            cookies = emptyMap(),
-            fsid = fsid,
-            deviceId = deviceId,
-            onSuccess = { sessionInfo ->
-                if (sessionInfo != null) {
-                    capturedFsid = fsid
-                    capturedDeviceId = deviceId
-                    capturedClientId = sessionInfo.clientId
-                    capturedUserName = sessionInfo.userName ?: "Неизвестно"
-                    isAuthorized = true
-                    
-                    // Скрываем WebView после получения данных
-                    webViewRef?.visibility = android.view.View.GONE
-                }
-            },
-            onError = { error ->
-                // Если не удалось получить данные, используем что есть
+fun fetchSessionInfo(fsid: String, deviceId: String) {
+    val apiClient = ApiClient()
+    apiClient.getSaldo(
+        cookies = emptyMap(),
+        fsid = fsid,
+        deviceId = deviceId,
+        onSuccess = { sessionInfo ->
+            if (sessionInfo != null) {
                 capturedFsid = fsid
                 capturedDeviceId = deviceId
-                capturedUserName = "Данные не загружены"
+                capturedClientId = sessionInfo.clientId
+                capturedUserName = sessionInfo.userName ?: "Неизвестно"
                 isAuthorized = true
                 
+                // Скрываем WebView после получения данных
                 webViewRef?.visibility = android.view.View.GONE
             }
-        )
-    }
+        },
+        onError = { error ->
+            // Если не удалось получить данные, используем что есть
+            capturedFsid = fsid
+            capturedDeviceId = deviceId
+            capturedUserName = "Данные не загружены"
+            isAuthorized = true
+            
+            webViewRef?.visibility = android.view.View.GONE
+        }
+    )
+}
+    // Функция для загрузки баланса
+    // fun fetchSessionInfo(fsid: String, deviceId: String) {
+    //     val apiClient = ApiClient()
+    //     apiClient.getSaldo(
+    //         cookies = emptyMap(),
+    //         fsid = fsid,
+    //         deviceId = deviceId,
+    //         onSuccess = { sessionInfo ->
+    //             if (sessionInfo != null) {
+    //                 capturedFsid = fsid
+    //                 capturedDeviceId = deviceId
+    //                 capturedClientId = sessionInfo.clientId
+    //                 capturedUserName = sessionInfo.userName ?: "Неизвестно"
+    //                 isAuthorized = true
+                    
+    //                 // Скрываем WebView после получения данных
+    //                 webViewRef?.visibility = android.view.View.GONE
+    //             }
+    //         },
+    //         onError = { error ->
+    //             // Если не удалось получить данные, используем что есть
+    //             capturedFsid = fsid
+    //             capturedDeviceId = deviceId
+    //             capturedUserName = "Данные не загружены"
+    //             isAuthorized = true
+                
+    //             webViewRef?.visibility = android.view.View.GONE
+    //         }
+    //     )
+    // }
     
     // Устанавливаем перехватчик для автоматического захвата
     fun setupInterceptor() {
@@ -598,7 +627,7 @@ fun WebViewAuthScreen(
                     TextButton(
                         onClick = {
                             if (manualFsid.isNotBlank() && manualDeviceId.isNotBlank()) {
-                                fetchedSessionInfo(manualFsid, manualDeviceId)
+                                fetchSessionInfo(manualFsid, manualDeviceId)
                                 showManualDialog = false
                             } else {
                                 Toast.makeText(context, "Заполните оба поля", Toast.LENGTH_SHORT).show()
