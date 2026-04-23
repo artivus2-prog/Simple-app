@@ -1,4 +1,4 @@
-// MainActivity.kt - ПОЛНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ
+// MainActivity.kt - ПОЛНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ (ЧАСТЬ 1/2)
 package com.example.fonbetbot
 
 import android.content.ClipData
@@ -612,18 +612,18 @@ fun MainBotScreen(
                     )
                     
                     if (isLoadingBalance) {
-    CircularProgressIndicator(modifier = Modifier.size(32.dp))
-} else {
-    Text(
-        text = if (balance > 0) String.format("%.2f ₽", balance) else "—",
-        fontSize = 42.sp,
-        fontWeight = FontWeight.Bold,
-        color = if (balance >= 10000) 
-            Color(0xFF4CAF50) 
-        else 
-            MaterialTheme.colorScheme.onSurface
-    )
-}
+                        CircularProgressIndicator(modifier = Modifier.size(32.dp))
+                    } else {
+                        val balanceText = if (balance > 0) String.format("%.2f ₽", balance) else "—"
+                        val balanceColor = if (balance >= 10000) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurface
+                        
+                        Text(
+                            text = balanceText,
+                            fontSize = 42.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = balanceColor
+                        )
+                    }
                     
                     if (authData != null && !isLoadingBalance) {
                         TextButton(
@@ -801,6 +801,7 @@ fun QuickActionButton(
         }
     }
 }
+// MainActivity.kt - ПОЛНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ (ЧАСТЬ 2/2)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1197,6 +1198,7 @@ fun SettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // LEVEL Настройки
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -1255,6 +1257,7 @@ fun SettingsScreen(
                 }
             }
             
+            // Тип 924
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -1340,6 +1343,7 @@ fun SettingsScreen(
                 }
             }
             
+            // Тип 927
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -1425,6 +1429,7 @@ fun SettingsScreen(
                 }
             }
             
+            // Тип 928
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -1510,6 +1515,7 @@ fun SettingsScreen(
                 }
             }
             
+            // Общие настройки
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -1565,6 +1571,7 @@ fun SettingsScreen(
                 }
             }
             
+            // Управление данными
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -1625,6 +1632,7 @@ fun SettingsScreen(
                 }
             }
             
+            // Кнопки Отмена/Сохранить
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1669,6 +1677,7 @@ fun SettingsScreen(
             }
         }
         
+        // Диалог подтверждения очистки
         if (showClearDialog) {
             AlertDialog(
                 onDismissRequest = { showClearDialog = false },
@@ -1727,6 +1736,7 @@ fun SettingsScreen(
             )
         }
         
+        // Диалог статистики БД
         if (showStatsDialog) {
             val stats = remember { dbHelper.getTableStats() }
             

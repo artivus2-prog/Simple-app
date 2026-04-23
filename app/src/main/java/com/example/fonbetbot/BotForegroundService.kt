@@ -144,14 +144,14 @@ class BotForegroundService : Service() {
         val cookieManager = CookieManager.getInstance()
         val cookieString = cookieManager.getCookie("https://www.fon.bet") ?: ""
         
-        val cookies = if (cookieString.isNotEmpty()) {
-    cookieString.split("; ").associate { cookie ->
-        val parts = cookie.split("=", limit = 2)
-        parts[0] to (parts.getOrNull(1) ?: "")
-    }
-} else {
-    emptyMap()
-}
+        val cookies: Map<String, String> = if (cookieString.isNotEmpty()) {
+            cookieString.split("; ").associate { cookie ->
+                val parts = cookie.split("=", limit = 2)
+                parts[0] to (parts.getOrNull(1) ?: "")
+            }
+        } else {
+            emptyMap()
+        }
         
         apiClient.getSaldo(
             cookies = cookies,
