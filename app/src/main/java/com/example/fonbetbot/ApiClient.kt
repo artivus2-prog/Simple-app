@@ -233,6 +233,14 @@ class ApiClient {
                         val json = JSONObject(bodyString)
                         var sh = -1
                         var sa = -1
+                        var matchTime = 0
+                          if (json.has("liveEventInfos")) {
+        val liveEventInfos = json.getJSONArray("liveEventInfos")
+        if (liveEventInfos.length() > 0) {
+            val liveEventInfo = liveEventInfos.getJSONObject(0)
+            
+            // Получаем время матча
+            matchTime = liveEventInfo.optInt("timerSeconds", 0)
                         
                         // Парсим счет
                         if (json.has("liveEventInfos")) {
