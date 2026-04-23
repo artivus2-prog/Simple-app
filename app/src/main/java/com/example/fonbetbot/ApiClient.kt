@@ -1,4 +1,4 @@
-// ApiClient.kt - ИСПРАВЛЕННАЯ ВЕРСИЯ
+// ApiClient.kt - ПОЛНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ С matchTime
 package com.example.fonbetbot
 
 import android.util.Log
@@ -13,16 +13,15 @@ class ApiClient {
     private val client = OkHttpClient()
     private val TAG = "ApiClient"
     
-    // Data class для матча с коэффициентами
-    
+    // Data class для матча с коэффициентами и временем
     data class MatchFactors(
-    val score1: Int,
-    val score2: Int,
-    val matchTime: Int,  // ДОБАВЛЕНО: время матча в секундах
-    val factors: Map<Int, Double>,
-    val handicaps: Map<Int, Double>
-)
-
+        val score1: Int,
+        val score2: Int,
+        val matchTime: Int,
+        val factors: Map<Int, Double>,
+        val handicaps: Map<Int, Double>
+    )
+    
     // Data class для настроек ставок
     data class BetSettings(
         val maxMatchesPerExpress: Int = 2,
@@ -201,7 +200,7 @@ class ApiClient {
         })
     }
     
-    // Метод получения счета и коэффициентов матча
+    // Метод получения счета, времени и коэффициентов матча
     fun getMatchScore(
         matchId: Int,
         onSuccess: (MatchFactors?) -> Unit,
@@ -234,20 +233,17 @@ class ApiClient {
                         var sh = -1
                         var sa = -1
                         var matchTime = 0
-                          if (json.has("liveEventInfos")) {
-        val liveEventInfos = json.getJSONArray("liveEventInfos")
-        if (liveEventInfos.length() > 0) {
-            val liveEventInfo = liveEventInfos.getJSONObject(0)
-            
-            // Получаем время матча
-            matchTime = liveEventInfo.optInt("timerSeconds", 0)
                         
-                        // Парсим счет
+                        // Парсим счет и время
                         if (json.has("liveEventInfos")) {
                             val liveEventInfos = json.getJSONArray("liveEventInfos")
                             if (liveEventInfos.length() > 0) {
                                 val liveEventInfo = liveEventInfos.getJSONObject(0)
                                 
+                                // Получаем время матча
+                                matchTime = liveEventInfo.optInt("timerSeconds", 0)
+                                
+                                // Получаем счет
                                 if (liveEventInfo.has("scores")) {
                                     val scores = liveEventInfo.getJSONArray("scores")
                                     if (scores.length() > 0) {
@@ -305,5 +301,17 @@ class ApiClient {
                 }
             }
         })
+    }
+    
+    // Метод получения времени матча (оставлен для совместимости)
+    fun getMatchTime(
+        matchId: Int,
+        onSuccess: (Int?) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        getMatchScore(matchId, 
+            onSuccess = { factors -> onSuccess(factors?.matchTime) },
+            onError = onError
+        )
     }
 }
