@@ -1,4 +1,4 @@
-// BotForegroundService.kt - ПОЛНАЯ ВЕРСИЯ
+// BotForegroundService.kt - ПОЛНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ
 package com.example.fonbetbot
 
 import android.app.Notification
@@ -363,7 +363,7 @@ class BotForegroundService : Service() {
             val currentTimeUtc = System.currentTimeMillis() / 1000
             val betAmount = prefs.getString("bet_amount", "100")?.toDoubleOrNull() ?: 100.0
             
-            fetchFactorsForBets(userId, expId, bets, betAmount, currentTimeUtc)
+            fetchFactorsForBets(userId, expId, bets, betAmount, currentTimeUtc.toLong())
             
         } catch (e: Exception) {
             Log.e("BotForegroundService", "Ошибка сохранения экспресса: ${e.message}")
@@ -384,41 +384,59 @@ class BotForegroundService : Service() {
             apiClient.getMatchScore(
                 matchId = mId,
                 onSuccess = { matchFactors ->
+                    val kef: Double
+                    val handicap: Double
+                    val sh: Int
+                    val sa: Int
+                    
                     if (matchFactors != null) {
-                        val kef = matchFactors.factors[type] ?: when (type) {
+                        kef = matchFactors.factors[type] ?: when (type) {
                             924 -> 1.67
                             927 -> 1.85
                             928 -> 1.85
                             else -> 1.5
                         }
-                        
-                        val handicap = matchFactors.handicaps[type] ?: 0.0
-                        
-                        matchesFactors.add(MatchFactorsData(
-                            mId = mId,
-                            type = type,
-                            kef = kef,
-                            handicap = handicap,
-                            sh = matchFactors.score1,
-                            sa = matchFactors.score2
-                        ))
+                        handicap = matchFactors.handicaps[type] ?: 0.0
+                        sh = matchFactors.score1
+                        sa = matchFactors.score2
+                    } else {
+                        kef = when (type) {
+                            924 -> 1.67
+                            927 -> 1.85
+                            928 -> 1.85
+                            else -> 1.5
+                        }
+                        handicap = 0.0
+                        sh = 0
+                        sa = 0
                     }
+                    
+                    matchesFactors.add(MatchFactorsData(
+                        mId = mId,
+                        type = type,
+                        kef = kef,
+                        handicap = handicap,
+                        sh = sh,
+                        sa = sa
+                    ))
                     
                     completedRequests++
                     if (completedRequests == bets.size) {
                         saveExpressWithFactors(userId, expId, matchesFactors, betAmount, currentTimeUtc)
                     }
                 },
-                onError = { error ->
+                onError = { _ ->
+                    val kef = when (type) {
+                        924 -> 1.67
+                        927 -> 1.85
+                        928 -> 1.85
+                        else -> 1.5
+                    }
+                    
                     matchesFactors.add(MatchFactorsData(
                         mId = mId,
                         type = type,
-                        kef = when (type) {
-                            924 -> 1.67
-                            927 -> 1.85
-                            928 -> 1.85
-                            else -> 1.5
-                        },
+                        kef = kef,
                         handicap = 0.0,
                         sh = 0,
                         sa = 0
@@ -715,7 +733,7 @@ class BotForegroundService : Service() {
                             markMatchAsCompleted(match)
                         }
                     },
-                    onError = { error ->
+                    onError = { _ ->
                         markMatchAsCompleted(match)
                     }
                 )
