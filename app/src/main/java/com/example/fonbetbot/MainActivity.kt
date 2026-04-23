@@ -1,4 +1,4 @@
-// MainActivity.kt - ПОЛНАЯ ВЕРСИЯ С ДИАЛОГОМ ПОДТВЕРЖДЕНИЯ
+// MainActivity.kt - ПОЛНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ
 package com.example.fonbetbot
 
 import android.content.ClipData
@@ -373,7 +373,6 @@ fun MainBotScreen(
         logs.add(0, "[${getCurrentTime()}] ⏹ Бот остановлен")
     }
     
-    // При нажатии кнопки "Назад" показываем диалог подтверждения
     BackHandler(enabled = isBotRunning) {
         showExitDialog = true
     }
@@ -389,9 +388,7 @@ fun MainBotScreen(
                 },
                 actions = {
                     if (isBotRunning) {
-                        IconButton(onClick = { 
-                            showExitDialog = true
-                        }) {
+                        IconButton(onClick = { showExitDialog = true }) {
                             Icon(Icons.Default.Stop, "Остановить бота")
                         }
                     }
@@ -609,7 +606,7 @@ fun MainBotScreen(
                     Spacer(modifier = Modifier.height(16.dp))
                     
                     Text(
-                        "Текущий баланс",
+                        text = "Текущий баланс",
                         fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -618,7 +615,7 @@ fun MainBotScreen(
                         CircularProgressIndicator(modifier = Modifier.size(32.dp))
                     } else {
                         Text(
-                            if (balance > 0) String.format("%.2f ₽", balance) else "—",
+                            text = if (balance > 0) String.format("%.2f ₽", balance) else "—",
                             fontSize = 42.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (balance >= 10000) 
@@ -664,7 +661,7 @@ fun MainBotScreen(
                 enabled = authData != null || isBotRunning
             ) {
                 Text(
-                    if (isBotRunning) "🛑 ОСТАНОВИТЬ БОТА" else "▶ ЗАПУСТИТЬ БОТА",
+                    text = if (isBotRunning) "🛑 ОСТАНОВИТЬ БОТА" else "▶ ЗАПУСТИТЬ БОТА",
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -701,7 +698,7 @@ fun MainBotScreen(
             Spacer(modifier = Modifier.height(16.dp))
             
             Text(
-                "📝 Лог событий",
+                text = "📝 Лог событий",
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(bottom = 8.dp)
@@ -724,7 +721,7 @@ fun MainBotScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            "Запустите бота для отображения логов",
+                            text = "Запустите бота для отображения логов",
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -735,7 +732,7 @@ fun MainBotScreen(
                     ) {
                         items(logs) { log ->
                             Text(
-                                log,
+                                text = log,
                                 fontSize = 12.sp,
                                 fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                                 modifier = Modifier.padding(vertical = 2.dp)
@@ -751,9 +748,7 @@ fun MainBotScreen(
             AlertDialog(
                 onDismissRequest = { showExitDialog = false },
                 title = { Text("⚠️ Остановить бота?") },
-                text = { 
-                    Text("Бот работает в фоновом режиме.\n\nОстановить бота и выйти?") 
-                },
+                text = { Text("Бот работает в фоновом режиме.\n\nОстановить бота и выйти?") },
                 confirmButton = {
                     Button(
                         onClick = {
@@ -802,7 +797,7 @@ fun QuickActionButton(
         ) {
             Icon(icon, text, modifier = Modifier.size(24.dp))
             Spacer(modifier = Modifier.height(4.dp))
-            Text(text, fontSize = 12.sp)
+            Text(text = text, fontSize = 12.sp)
         }
     }
 }
