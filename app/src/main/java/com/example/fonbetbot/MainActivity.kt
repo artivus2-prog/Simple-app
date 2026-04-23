@@ -1,4 +1,4 @@
-// MainActivity.kt - ПОЛНАЯ ВЕРСИЯ
+// MainActivity.kt - ПОЛНАЯ ВЕРСИЯ С ДИАЛОГОМ ПОДТВЕРЖДЕНИЯ
 package com.example.fonbetbot
 
 import android.content.ClipData
@@ -33,7 +33,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -201,6 +200,7 @@ fun MainBotScreen(
     val logs = remember { mutableStateListOf<String>() }
     var showMenu by remember { mutableStateOf(false) }
     var isLoadingBalance by remember { mutableStateOf(false) }
+    var showExitDialog by remember { mutableStateOf(false) }
     
     fun fetchBalanceFromApi() {
         if (authData == null) {
@@ -373,7 +373,10 @@ fun MainBotScreen(
         logs.add(0, "[${getCurrentTime()}] ⏹ Бот остановлен")
     }
     
-    BackHandler(enabled = isBotRunning) { }
+    // При нажатии кнопки "Назад" показываем диалог подтверждения
+    BackHandler(enabled = isBotRunning) {
+        showExitDialog = true
+    }
     
     Scaffold(
         topBar = {
@@ -386,7 +389,9 @@ fun MainBotScreen(
                 },
                 actions = {
                     if (isBotRunning) {
-                        IconButton(onClick = { stopBot() }) {
+                        IconButton(onClick = { 
+                            showExitDialog = true
+                        }) {
                             Icon(Icons.Default.Stop, "Остановить бота")
                         }
                     }
@@ -641,7 +646,7 @@ fun MainBotScreen(
             Button(
                 onClick = {
                     if (isBotRunning) {
-                        stopBot()
+                        showExitDialog = true
                     } else {
                         startBot()
                     }
@@ -739,6 +744,35 @@ fun MainBotScreen(
                     }
                 }
             }
+        }
+        
+        // Диалог подтверждения остановки бота
+        if (showExitDialog) {
+            AlertDialog(
+                onDismissRequest = { showExitDialog = false },
+                title = { Text("⚠️ Остановить бота?") },
+                text = { 
+                    Text("Бот работает в фоновом режиме.\n\nОстановить бота и выйти?") 
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showExitDialog = false
+                            stopBot()
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error
+                        )
+                    ) {
+                        Text("Остановить")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showExitDialog = false }) {
+                        Text("Отмена")
+                    }
+                }
+            )
         }
     }
 }
