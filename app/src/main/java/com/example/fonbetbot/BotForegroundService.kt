@@ -31,7 +31,7 @@ class BotForegroundService : Service() {
         const val CHANNEL_ID = "BotForegroundChannel"
         const val NOTIFICATION_ID = 1
         const val ACTION_STOP = "STOP_BOT"
-        private const val TAG = "BotForegroundService"  // Добавьте эту строку
+        private const val TAG = "BotForegroundService"
         
         var isRunning = false
         var onBalanceUpdate: ((Double) -> Unit)? = null
@@ -59,9 +59,7 @@ class BotForegroundService : Service() {
                         lastBalance = stats.currentBalance
                     }
                 }
-            } catch (e: Exception) {
-                // Игнорируем
-            }
+            } catch (e: Exception) { }
         }
     }
     
@@ -106,12 +104,9 @@ class BotForegroundService : Service() {
                     dbHelper.startBotSession(it.id, balance)
                     dbHelper.addLog(it.id, "start", "Бот запущен")
                 }
-            } catch (e: Exception) {
-                // Игнорируем
-            }
+            } catch (e: Exception) { }
         }
         
-        // Цикл обновления баланса (раз в минуту)
         serviceScope.launch {
             while (isRunning) {
                 delay(60000)
@@ -121,7 +116,6 @@ class BotForegroundService : Service() {
             }
         }
         
-        // Цикл получения ставок (раз в 30 секунд)
         serviceScope.launch {
             delay(5000)
             while (isRunning) {
@@ -132,7 +126,6 @@ class BotForegroundService : Service() {
             }
         }
         
-        // Цикл обновления счетов (раз в минуту)
         serviceScope.launch {
             delay(10000)
             while (isRunning) {
@@ -141,7 +134,6 @@ class BotForegroundService : Service() {
             }
         }
         
-        // Цикл проверки замены экспрессов (раз в час)
         serviceScope.launch {
             delay(60000)
             while (isRunning) {
@@ -152,200 +144,199 @@ class BotForegroundService : Service() {
     }
     
     private fun fetchBalance(data: AuthData) {
-    val cookieManager = CookieManager.getInstance()
-    val cookieString = cookieManager.getCookie("https://www.fon.bet") ?: ""
-    
-    val cookies = if (cookieString.isNotEmpty()) {
-        cookieString.split("; ").associate { cookie ->
-            val parts = cookie.split("=", limit = 2)
-            parts[0] to (parts.getOrNull(1) ?: "")
+        val cookieManager = CookieManager.getInstance()
+        val cookieString = cookieManager.getCookie("https://www.fon.bet") ?: ""
+        
+        val cookies = if (cookieString.isNotEmpty()) {
+            cookieString.split("; ").associate { cookie ->
+                val parts = cookie.split("=", limit = 2)
+                parts[0] to (parts.getOrNull(1) ?: "")
+            }
+        } else {
+            emptyMap()
         }
-    } else {
-        emptyMap()
-    }
-    
-    apiClient.getSaldo(
-        cookies = cookies,
-        fsid = data.fsid,
-        deviceId = data.deviceId,
-        onSuccess = { sessionInfo ->
-            if (sessionInfo != null) {
-                val newBalance = sessionInfo.saldo  // Правильно: sessionInfo.saldo
-                val oldBalance = balance
-                
-                if (newBalance != null) {
-                    val difference = newBalance - oldBalance
-                    balance = newBalance
-                    lastBalance = newBalance
+        
+        apiClient.getSaldo(
+            cookies = cookies,
+            fsid = data.fsid,
+            deviceId = data.deviceId,
+            onSuccess = { sessionInfo: ApiClient.SessionInfo? ->
+                if (sessionInfo != null) {
+                    val newBalance = sessionInfo.saldo
+                    val oldBalance = balance
                     
-                    onBalanceUpdate?.invoke(newBalance)
-                    
-                    try {
-                        val user = dbHelper.getUser(data.fsid, data.deviceId)
-                        user?.let { userData ->
-                            dbHelper.saveBalance(userData.id, newBalance, "success")
-                            
-                            // Правильно: sessionInfo.clientId и sessionInfo.userName
-                            val userClientId = sessionInfo.clientId
-                            val userDisplayName = sessionInfo.userName
-                            
-                            if (userClientId != null || userDisplayName != null) {
-                                dbHelper.updateUserInfo(userData.id, userClientId, userDisplayName)
+                    if (newBalance != null) {
+                        val difference = newBalance - oldBalance
+                        balance = newBalance
+                        lastBalance = newBalance
+                        
+                        onBalanceUpdate?.invoke(newBalance)
+                        
+                        try {
+                            val user = dbHelper.getUser(data.fsid, data.deviceId)
+                            user?.let { userData ->
+                                dbHelper.saveBalance(userData.id, newBalance, "success")
+                                
+                                val userClientId = sessionInfo.clientId
+                                val userDisplayName = sessionInfo.userName
+                                
+                                if (userClientId != null || userDisplayName != null) {
+                                    dbHelper.updateUserInfo(userData.id, userClientId, userDisplayName)
+                                }
+                                
+                                if (difference > 0 && oldBalance > 0) {
+                                    dbHelper.addLog(userData.id, "profit", "Профит: +%.2f ₽".format(difference))
+                                } else if (difference < 0 && oldBalance > 0) {
+                                    dbHelper.addLog(userData.id, "loss", "Убыток: %.2f ₽".format(difference))
+                                }
                             }
-                            
-                            if (difference > 0 && oldBalance > 0) {
-                                dbHelper.addLog(userData.id, "profit", "Профит: +%.2f ₽".format(difference))
-                            } else if (difference < 0 && oldBalance > 0) {
-                                dbHelper.addLog(userData.id, "loss", "Убыток: %.2f ₽".format(difference))
-                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Ошибка сохранения баланса: ${e.message}")
                         }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Ошибка сохранения баланса: ${e.message}")
-                    }
-                    
-                    // Формируем текст уведомления
-                    val displayName = sessionInfo.userName ?: ""
-                    val displayText = if (displayName.isNotEmpty()) {
-                        "Баланс: %.2f ₽ | %s".format(newBalance, displayName)
-                    } else {
-                        "Баланс: %.2f ₽".format(newBalance)
-                    }
-                    
-                    val notification = createNotification("Бот активен", displayText)
-                    (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
-                        .notify(NOTIFICATION_ID, notification)
-                    
-                    val timestamp = getCurrentTime()
-                    if (difference > 0 && oldBalance > 0) {
-                        onLogUpdate?.invoke("[$timestamp] 💰 Профит: +%.2f ₽".format(difference))
-                    } else if (difference < 0 && oldBalance > 0) {
-                        onLogUpdate?.invoke("[$timestamp] 📉 Убыток: %.2f ₽".format(difference))
+                        
+                        val displayName = sessionInfo.userName ?: ""
+                        val displayText: String = if (displayName.isNotEmpty()) {
+                            "Баланс: %.2f ₽ | %s".format(newBalance, displayName)
+                        } else {
+                            "Баланс: %.2f ₽".format(newBalance)
+                        }
+                        
+                        val notification = createNotification("Бот активен", displayText)
+                        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
+                            .notify(NOTIFICATION_ID, notification)
+                        
+                        val timestamp = getCurrentTime()
+                        if (difference > 0 && oldBalance > 0) {
+                            onLogUpdate?.invoke("[$timestamp] 💰 Профит: +%.2f ₽".format(difference))
+                        } else if (difference < 0 && oldBalance > 0) {
+                            onLogUpdate?.invoke("[$timestamp] 📉 Убыток: %.2f ₽".format(difference))
+                        }
                     }
                 }
-            }
-        },
-        onError = { error ->
-            onLogUpdate?.invoke("[${getCurrentTime()}] ❌ Ошибка API: $error")
-            
-            try {
-                val user = dbHelper.getUser(data.fsid, data.deviceId)
-                user?.let {
-                    dbHelper.addLog(it.id, "error", "Ошибка API: $error", "ERROR")
+            },
+            onError = { error: String ->
+                onLogUpdate?.invoke("[${getCurrentTime()}] ❌ Ошибка API: $error")
+                
+                try {
+                    val user = dbHelper.getUser(data.fsid, data.deviceId)
+                    user?.let {
+                        dbHelper.addLog(it.id, "error", "Ошибка API: $error", "ERROR")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Ошибка логирования: ${e.message}")
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Ошибка логирования: ${e.message}")
             }
-        }
-    )
-}
-    
+        )
+    }
     
     private fun fetchBets(data: AuthData) {
-    try {
-        val user = dbHelper.getUser(data.fsid, data.deviceId)
-        user?.let { userData ->
-            val settings = ApiClient.BetSettings(
-                maxMatchesPerExpress = prefs.getInt("max_matches_per_express", 2),
-                multiply = prefs.getInt("multiply", 2),
-                allMinKef = prefs.getFloat("all_min_kef", 1.67f).toDouble(),
-                types = mapOf(
-                    924 to ApiClient.TypeSettings(
-                        "1х/футбол/хоккей",
-                        prefs.getFloat("type_924_min", 1.15f).toDouble(),
-                        prefs.getFloat("type_924_max", 1.35f).toDouble(),
-                        prefs.getInt("type_924_start", 80),
-                        prefs.getInt("type_924_end", 100)
-                    ),
-                    927 to ApiClient.TypeSettings(
-                        "ф1(+1.5)/футбол/хоккей",
-                        prefs.getFloat("type_927_min", 1.15f).toDouble(),
-                        prefs.getFloat("type_927_max", 1.35f).toDouble(),
-                        prefs.getInt("type_927_start", 1),
-                        prefs.getInt("type_927_end", 45)
-                    ),
-                    928 to ApiClient.TypeSettings(
-                        "ф2(+1.5)/футбол/хоккей",
-                        prefs.getFloat("type_928_min", 1.15f).toDouble(),
-                        prefs.getFloat("type_928_max", 1.35f).toDouble(),
-                        prefs.getInt("type_928_start", 1),
-                        prefs.getInt("type_928_end", 45)
+        try {
+            val user = dbHelper.getUser(data.fsid, data.deviceId)
+            user?.let { userData ->
+                val settings = ApiClient.BetSettings(
+                    maxMatchesPerExpress = prefs.getInt("max_matches_per_express", 2),
+                    multiply = prefs.getInt("multiply", 2),
+                    allMinKef = prefs.getFloat("all_min_kef", 1.67f).toDouble(),
+                    types = mapOf(
+                        924 to ApiClient.TypeSettings(
+                            "1х/футбол/хоккей",
+                            prefs.getFloat("type_924_min", 1.15f).toDouble(),
+                            prefs.getFloat("type_924_max", 1.35f).toDouble(),
+                            prefs.getInt("type_924_start", 80),
+                            prefs.getInt("type_924_end", 100)
+                        ),
+                        927 to ApiClient.TypeSettings(
+                            "ф1(+1.5)/футбол/хоккей",
+                            prefs.getFloat("type_927_min", 1.15f).toDouble(),
+                            prefs.getFloat("type_927_max", 1.35f).toDouble(),
+                            prefs.getInt("type_927_start", 1),
+                            prefs.getInt("type_927_end", 45)
+                        ),
+                        928 to ApiClient.TypeSettings(
+                            "ф2(+1.5)/футбол/хоккей",
+                            prefs.getFloat("type_928_min", 1.15f).toDouble(),
+                            prefs.getFloat("type_928_max", 1.35f).toDouble(),
+                            prefs.getInt("type_928_start", 1),
+                            prefs.getInt("type_928_end", 45)
+                        )
                     )
                 )
-            )
-            
-            // Используем ApiClient.BetData напрямую
-            apiClient.getBets(
-                userId = userData.id,
-                settings = settings,
-                onSuccess = { betDataList ->
-                    if (betDataList.isNotEmpty()) {
-                        val bets = betDataList.map { it.mId to it.type }
-                        
-                        onLogUpdate?.invoke("[${getCurrentTime()}] 🎲 Получен сигнал на создание ставки! (${bets.size} матчей)")
-                        
-                        betDataList.forEach { betData ->
-                            val matchInfo = buildString {
-                                append("📊 Матч #${betData.mId}: ")
-                                if (betData.home.isNotEmpty() || betData.away.isNotEmpty()) {
-                                    append("${betData.home} vs ${betData.away} | ")
-                                }
-                                if (betData.ligaName.isNotEmpty()) {
-                                    append("${betData.ligaName} | ")
-                                }
-                                append("Кэф: ${"%.2f".format(betData.startKf)} | ")
-                                append("Тип: ${getTypeName(betData.type)} ")
+                
+                apiClient.getBets(
+                    userId = userData.id,
+                    settings = settings,
+                    onSuccess = { betDataList: List<ApiClient.BetData> ->
+                        if (betDataList.isNotEmpty()) {
+                            val bets = betDataList.map { betData: ApiClient.BetData -> 
+                                Pair(betData.mId, betData.type) 
                             }
-                            onLogUpdate?.invoke("[${getCurrentTime()}] $matchInfo")
-                        }
-                        
-                        val maxMatches = settings.maxMatchesPerExpress
-                        val expressGroups = bets.chunked(maxMatches)
-                        
-                        onLogUpdate?.invoke("[${getCurrentTime()}] 📨 Сгруппировано в ${expressGroups.size} экспрессов (по $maxMatches матча)")
-                        
-                        expressGroups.forEachIndexed { index, group ->
-                            if (group.isNotEmpty()) {
-                                val existingExpress = findExistingExpress(userData.id, group)
-                                
-                                if (existingExpress != null) {
-                                    Log.d(TAG, "Экспресс #${existingExpress.first} уже существует, мониторим")
-                                    checkExpressMatchesStatus(existingExpress.second, existingExpress.first, userData.id)
-                                } else {
-                                    val newExpId = (System.currentTimeMillis() / 1000).toInt() + index
-                                    
-                                    val groupBetData = betDataList.filter { betData ->
-                                        group.any { it.first == betData.mId }
+                            
+                            onLogUpdate?.invoke("[${getCurrentTime()}] 🎲 Получен сигнал на создание ставки! (${bets.size} матчей)")
+                            
+                            betDataList.forEach { betData: ApiClient.BetData ->
+                                val matchInfo = buildString {
+                                    append("📊 Матч #${betData.mId}: ")
+                                    if (betData.home.isNotEmpty() || betData.away.isNotEmpty()) {
+                                        append("${betData.home} vs ${betData.away} | ")
                                     }
-                                    
-                                    val matchesInfo = groupBetData.joinToString(" + ") { 
-                                        "${it.home.take(10)} vs ${it.away.take(10)} (${getTypeName(it.type)})" 
+                                    if (betData.ligaName.isNotEmpty()) {
+                                        append("${betData.ligaName} | ")
                                     }
-                                    val message = "🎯 Новый экспресс #$newExpId (${group.size} матчей): $matchesInfo"
+                                    append("Кэф: ${"%.2f".format(betData.startKf)} | ")
+                                    append("Тип: ${getTypeName(betData.type)} ")
+                                }
+                                onLogUpdate?.invoke("[${getCurrentTime()}] $matchInfo")
+                            }
+                            
+                            val maxMatches = settings.maxMatchesPerExpress
+                            val expressGroups = bets.chunked(maxMatches)
+                            
+                            onLogUpdate?.invoke("[${getCurrentTime()}] 📨 Сгруппировано в ${expressGroups.size} экспрессов (по $maxMatches матча)")
+                            
+                            expressGroups.forEachIndexed { index: Int, group: List<Pair<Int, Int>> ->
+                                if (group.isNotEmpty()) {
+                                    val existingExpress = findExistingExpress(userData.id, group)
                                     
-                                    onLogUpdate?.invoke("[${getCurrentTime()}] $message")
-                                    onBetsUpdate?.invoke(group)
-                                    
-                                    saveExpressToDb(userData.id, newExpId, group, null, groupBetData)
-                                    placeBet(userData.id, newExpId, group)
+                                    if (existingExpress != null) {
+                                        Log.d(TAG, "Экспресс #${existingExpress.first} уже существует, мониторим")
+                                        checkExpressMatchesStatus(existingExpress.second, existingExpress.first, userData.id)
+                                    } else {
+                                        val newExpId = (System.currentTimeMillis() / 1000).toInt() + index
+                                        
+                                        val groupBetData = betDataList.filter { betData: ApiClient.BetData ->
+                                            group.any { it.first == betData.mId }
+                                        }
+                                        
+                                        val matchesInfo = groupBetData.joinToString(" + ") { betData: ApiClient.BetData ->
+                                            "${betData.home.take(10)} vs ${betData.away.take(10)} (${getTypeName(betData.type)})" 
+                                        }
+                                        val message = "🎯 Новый экспресс #$newExpId (${group.size} матчей): $matchesInfo"
+                                        
+                                        onLogUpdate?.invoke("[${getCurrentTime()}] $message")
+                                        onBetsUpdate?.invoke(group)
+                                        
+                                        saveExpressToDb(userData.id, newExpId, group, null, groupBetData)
+                                        placeBet(userData.id, newExpId, group)
+                                    }
                                 }
                             }
+                            
+                            checkCompletedMatches(userData.id)
+                        } else {
+                            onLogUpdate?.invoke("[${getCurrentTime()}] 📭 Нет подходящих матчей")
                         }
-                        
-                        checkCompletedMatches(userData.id)
-                    } else {
-                        onLogUpdate?.invoke("[${getCurrentTime()}] 📭 Нет подходящих матчей")
+                    },
+                    onError = { error: String ->
+                        Log.e(TAG, "Ошибка получения ставок: $error")
+                        onLogUpdate?.invoke("[${getCurrentTime()}] ❌ Ошибка получения ставок: $error")
                     }
-                },
-                onError = { error ->
-                    Log.e(TAG, "Ошибка получения ставок: $error")
-                    onLogUpdate?.invoke("[${getCurrentTime()}] ❌ Ошибка получения ставок: $error")
-                }
-            )
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка в fetchBets: ${e.message}")
         }
-    } catch (e: Exception) {
-        Log.e(TAG, "Ошибка в fetchBets: ${e.message}")
     }
-}
+    
     private fun placeBet(userId: Long, expId: Int, bets: List<Pair<Int, Int>>) {
         try {
             val db = dbHelper.writableDatabase
@@ -398,12 +389,12 @@ class BotForegroundService : Service() {
             }
             
         } catch (e: Exception) {
-            Log.e("BotForegroundService", "Ошибка в placeBet: ${e.message}")
+            Log.e(TAG, "Ошибка в placeBet: ${e.message}")
         }
     }
     
     private fun simulatePlaceBet(userId: Long, expId: Int, bets: List<Pair<Int, Int>>, amount: Double, kef: Double): Boolean {
-        Log.d("BotForegroundService", "🎲 SIMULATE PLACE BET: userId=$userId, expId=$expId, matches=${bets.size}, amount=$amount, kef=$kef")
+        Log.d(TAG, "🎲 SIMULATE PLACE BET: userId=$userId, expId=$expId, matches=${bets.size}, amount=$amount, kef=$kef")
         Thread.sleep(500)
         return Math.random() > 0.05
     }
@@ -483,7 +474,7 @@ class BotForegroundService : Service() {
         }
         eventsCursor.close()
         
-        events.forEach { event ->
+        events.forEach { event: EventInfo ->
             updateMatchScore(event, expressId, expId, userId)
         }
         
@@ -491,222 +482,214 @@ class BotForegroundService : Service() {
     }
     
     private fun saveExpressToDb(
-    userId: Long, 
-    expId: Int, 
-    bets: List<Pair<Int, Int>>, 
-    customBetAmount: Double? = null,
-    betDataList: List<ApiClient.BetData> = emptyList()
-) {
-    try {
-        val currentTimeUtc = System.currentTimeMillis() / 1000
-        val betAmount = customBetAmount ?: prefs.getString("bet_amount", "30")?.toDoubleOrNull() ?: 30.0
-        
-        val betDataMap = betDataList.associateBy { it.mId }
-        
-        fetchFactorsForBets(userId, expId, bets, betAmount, currentTimeUtc, betDataMap)
-        
-    } catch (e: Exception) {
-        Log.e(TAG, "Ошибка сохранения экспресса: ${e.message}")
-    }
-}
-
-private fun fetchFactorsForBets(
-    userId: Long, 
-    expId: Int, 
-    bets: List<Pair<Int, Int>>, 
-    betAmount: Double, 
-    currentTimeUtc: Long,
-    betDataMap: Map<Int, ApiClient.BetData> = emptyMap()
-) {
-    val matchesFactors = mutableListOf<MatchFactorsData>()
-    var completedCount = 0
-    
-    bets.forEach { (mId, type) ->
-        val betData = betDataMap[mId]
-        
-        apiClient.getMatchScore(
-            matchId = mId,
-            onSuccess = { matchFactors ->
-                val kef: Double
-                val handicap: Double
-                val sh: Int
-                val sa: Int
-                val matchTime: Int
-                
-                if (matchFactors != null) {
-                    kef = matchFactors.factors[type] ?: betData?.startKf ?: when (type) {
-                        924 -> 1.67
-                        927 -> 1.85
-                        928 -> 1.85
-                        else -> 1.5
-                    }
-                    handicap = matchFactors.handicaps[type] ?: 0.0
-                    sh = matchFactors.score1
-                    sa = matchFactors.score2
-                    matchTime = matchFactors.matchTime
-                } else {
-                    kef = betData?.startKf ?: when (type) {
-                        924 -> 1.67
-                        927 -> 1.85
-                        928 -> 1.85
-                        else -> 1.5
-                    }
-                    handicap = 0.0
-                    sh = betData?.sh ?: 0
-                    sa = betData?.sa ?: 0
-                    matchTime = 0
-                }
-                
-                matchesFactors.add(MatchFactorsData(
-                    mId = mId,
-                    type = type,
-                    kef = kef,
-                    handicap = handicap,
-                    sh = sh,
-                    sa = sa,
-                    matchTime = matchTime,
-                    leagueName = betData?.ligaName ?: "",
-                    homeTeam = betData?.home ?: "",
-                    awayTeam = betData?.away ?: "",
-                    idLiga = betData?.idLiga ?: 0,
-                    idHome = betData?.comand1Id ?: 0,
-                    idAway = betData?.comand2Id ?: 0,
-                    url = betData?.url ?: "",
-                    uzh = betData?.uzh?.toString() ?: "0.0",
-                    tbType = betData?.tbType ?: 0
-                ))
-                
-                completedCount++
-                if (completedCount == bets.size) {
-                    saveExpressWithFactors(userId, expId, matchesFactors, betAmount, currentTimeUtc)
-                }
-            },
-            onError = { _ ->
-                val kef = betData?.startKf ?: when (type) {
-                    924 -> 1.67
-                    927 -> 1.85
-                    928 -> 1.85
-                    else -> 1.5
-                }
-                
-                matchesFactors.add(MatchFactorsData(
-                    mId = mId,
-                    type = type,
-                    kef = kef,
-                    handicap = 0.0,
-                    sh = betData?.sh ?: 0,
-                    sa = betData?.sa ?: 0,
-                    matchTime = 0,
-                    leagueName = betData?.ligaName ?: "",
-                    homeTeam = betData?.home ?: "",
-                    awayTeam = betData?.away ?: "",
-                    idLiga = betData?.idLiga ?: 0,
-                    idHome = betData?.comand1Id ?: 0,
-                    idAway = betData?.comand2Id ?: 0,
-                    url = betData?.url ?: "",
-                    uzh = betData?.uzh?.toString() ?: "0.0",
-                    tbType = betData?.tbType ?: 0
-                ))
-                
-                completedCount++
-                if (completedCount == bets.size) {
-                    saveExpressWithFactors(userId, expId, matchesFactors, betAmount, currentTimeUtc)
-                }
-            }
-        )
-    }
-}
-
-    
-private fun saveExpressWithFactors(
-    userId: Long,
-    expId: Int,
-    matchesFactors: List<MatchFactorsData>,
-    betAmount: Double,
-    currentTimeUtc: Long
-) {
-    val db = dbHelper.writableDatabase
-    
-    var totalKef = 1.0
-    matchesFactors.forEach { totalKef *= it.kef }
-    
-    val values = ContentValues().apply {
-        put("user_id", userId)
-        put("id_exp", expId)
-        put("kfall", totalKef)
-        put("profloss", 0.0)
-        put("balans", balance)
-        put("sumbet", betAmount)
-        put("sts_all", 0)
-        put("is_bet_placed", 1)
-        put("ct", currentTimeUtc)
-        put("strategy", "0.0")
-        put("id_exp_replace", 0)
-        put("events_count", matchesFactors.size)
-        put("total_odds", totalKef)
-        put("bet_amount", betAmount)
-        put("potential_win", betAmount * totalKef)
-        put("balance", balance)
-        put("created_time", currentTimeUtc)
-    }
-    
-    val expressId = db.insert("express_bets", null, values)
-    
-    matchesFactors.forEach { match ->
-        val initialStatus = if (match.sh > 0 || match.sa > 0) {
-            checkMatchStatus(match.type, match.sh, match.sa)
-        } else {
-            0
-        }
-        
-        val eventValues = ContentValues().apply {
-            put("express_id", expressId)
-            put("id_exp", expId)
-            put("user_id", userId)
-            put("m_id", match.mId)
-            put("start_odds", match.kef)
-            put("bet_type", match.type)
-            put("status", initialStatus)
-            put("home_score", match.sh)
-            put("away_score", match.sa)
-            put("match_time", match.matchTime)
-            put("created_at", currentTimeUtc)
-            put("uzh", match.uzh)
-            put("is_finalized", 0)
+        userId: Long, 
+        expId: Int, 
+        bets: List<Pair<Int, Int>>, 
+        customBetAmount: Double? = null,
+        betDataList: List<ApiClient.BetData> = emptyList()
+    ) {
+        try {
+            val currentTimeUtc = System.currentTimeMillis() / 1000
+            val betAmount = customBetAmount ?: prefs.getString("bet_amount", "30")?.toDoubleOrNull() ?: 30.0
             
-            // Сохраняем дополнительную информацию о матче
-            if (match.idLiga > 0) put("id_liga", match.idLiga)
-            if (match.leagueName.isNotEmpty()) put("league_name", match.leagueName)
-            if (match.homeTeam.isNotEmpty()) put("home_team", match.homeTeam)
-            if (match.awayTeam.isNotEmpty()) put("away_team", match.awayTeam)
-            if (match.idHome > 0) put("id_home", match.idHome)
-            if (match.idAway > 0) put("id_away", match.idAway)
-            if (match.url.isNotEmpty()) put("match_url", match.url)
-            if (match.tbType > 0) put("total_type", match.tbType)
+            val betDataMap: Map<Int, ApiClient.BetData> = betDataList.associateBy { it.mId }
+            
+            fetchFactorsForBets(userId, expId, bets, betAmount, currentTimeUtc, betDataMap)
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка сохранения экспресса: ${e.message}")
+        }
+    }
+    
+    private fun fetchFactorsForBets(
+        userId: Long, 
+        expId: Int, 
+        bets: List<Pair<Int, Int>>, 
+        betAmount: Double, 
+        currentTimeUtc: Long,
+        betDataMap: Map<Int, ApiClient.BetData> = emptyMap()
+    ) {
+        val matchesFactors = mutableListOf<MatchFactorsData>()
+        var completedCount = 0
+        
+        bets.forEach { (mId: Int, type: Int) ->
+            val betData = betDataMap[mId]
+            
+            apiClient.getMatchScore(
+                matchId = mId,
+                onSuccess = { matchFactors: ApiClient.MatchFactors? ->
+                    val kef: Double
+                    val handicap: Double
+                    val sh: Int
+                    val sa: Int
+                    val matchTime: Int
+                    
+                    if (matchFactors != null) {
+                        kef = matchFactors.factors[type] ?: betData?.startKf ?: when (type) {
+                            924 -> 1.67
+                            927 -> 1.85
+                            928 -> 1.85
+                            else -> 1.5
+                        }
+                        handicap = matchFactors.handicaps[type] ?: 0.0
+                        sh = matchFactors.score1
+                        sa = matchFactors.score2
+                        matchTime = matchFactors.matchTime
+                    } else {
+                        kef = betData?.startKf ?: when (type) {
+                            924 -> 1.67
+                            927 -> 1.85
+                            928 -> 1.85
+                            else -> 1.5
+                        }
+                        handicap = 0.0
+                        sh = betData?.sh ?: 0
+                        sa = betData?.sa ?: 0
+                        matchTime = 0
+                    }
+                    
+                    matchesFactors.add(MatchFactorsData(
+                        mId = mId,
+                        type = type,
+                        kef = kef,
+                        handicap = handicap,
+                        sh = sh,
+                        sa = sa,
+                        matchTime = matchTime,
+                        leagueName = betData?.ligaName ?: "",
+                        homeTeam = betData?.home ?: "",
+                        awayTeam = betData?.away ?: "",
+                        idLiga = betData?.idLiga ?: 0,
+                        idHome = betData?.comand1Id ?: 0,
+                        idAway = betData?.comand2Id ?: 0,
+                        url = betData?.url ?: "",
+                        uzh = betData?.uzh?.toString() ?: "0.0",
+                        tbType = betData?.tbType ?: 0
+                    ))
+                    
+                    completedCount++
+                    if (completedCount == bets.size) {
+                        saveExpressWithFactors(userId, expId, matchesFactors, betAmount, currentTimeUtc)
+                    }
+                },
+                onError = { _: String ->
+                    val kef = betData?.startKf ?: when (type) {
+                        924 -> 1.67
+                        927 -> 1.85
+                        928 -> 1.85
+                        else -> 1.5
+                    }
+                    
+                    matchesFactors.add(MatchFactorsData(
+                        mId = mId,
+                        type = type,
+                        kef = kef,
+                        handicap = 0.0,
+                        sh = betData?.sh ?: 0,
+                        sa = betData?.sa ?: 0,
+                        matchTime = 0,
+                        leagueName = betData?.ligaName ?: "",
+                        homeTeam = betData?.home ?: "",
+                        awayTeam = betData?.away ?: "",
+                        idLiga = betData?.idLiga ?: 0,
+                        idHome = betData?.comand1Id ?: 0,
+                        idAway = betData?.comand2Id ?: 0,
+                        url = betData?.url ?: "",
+                        uzh = betData?.uzh?.toString() ?: "0.0",
+                        tbType = betData?.tbType ?: 0
+                    ))
+                    
+                    completedCount++
+                    if (completedCount == bets.size) {
+                        saveExpressWithFactors(userId, expId, matchesFactors, betAmount, currentTimeUtc)
+                    }
+                }
+            )
+        }
+    }
+    
+    private fun saveExpressWithFactors(
+        userId: Long,
+        expId: Int,
+        matchesFactors: List<MatchFactorsData>,
+        betAmount: Double,
+        currentTimeUtc: Long
+    ) {
+        val db = dbHelper.writableDatabase
+        
+        var totalKef = 1.0
+        matchesFactors.forEach { totalKef *= it.kef }
+        
+        val values = ContentValues().apply {
+            put("user_id", userId)
+            put("id_exp", expId)
+            put("kfall", totalKef)
+            put("profloss", 0.0)
+            put("balans", balance)
+            put("sumbet", betAmount)
+            put("sts_all", 0)
+            put("is_bet_placed", 1)
+            put("ct", currentTimeUtc)
+            put("strategy", "0.0")
+            put("id_exp_replace", 0)
+            put("events_count", matchesFactors.size)
+            put("total_odds", totalKef)
+            put("bet_amount", betAmount)
+            put("potential_win", betAmount * totalKef)
+            put("balance", balance)
+            put("created_time", currentTimeUtc)
         }
         
-        db.insert("express_events", null, eventValues)
+        val expressId = db.insert("express_bets", null, values)
+        
+        matchesFactors.forEach { match ->
+            val initialStatus = if (match.sh > 0 || match.sa > 0) {
+                checkMatchStatus(match.type, match.sh, match.sa)
+            } else {
+                0
+            }
+            
+            val eventValues = ContentValues().apply {
+                put("express_id", expressId)
+                put("id_exp", expId)
+                put("user_id", userId)
+                put("m_id", match.mId)
+                put("start_odds", match.kef)
+                put("bet_type", match.type)
+                put("status", initialStatus)
+                put("home_score", match.sh)
+                put("away_score", match.sa)
+                put("match_time", match.matchTime)
+                put("created_at", currentTimeUtc)
+                put("uzh", match.uzh)
+                put("is_finalized", 0)
+                
+                if (match.idLiga > 0) put("id_liga", match.idLiga.toLong())
+                if (match.leagueName.isNotEmpty()) put("league_name", match.leagueName)
+                if (match.homeTeam.isNotEmpty()) put("home_team", match.homeTeam)
+                if (match.awayTeam.isNotEmpty()) put("away_team", match.awayTeam)
+                if (match.idHome > 0) put("id_home", match.idHome.toLong())
+                if (match.idAway > 0) put("id_away", match.idAway.toLong())
+                if (match.url.isNotEmpty()) put("match_url", match.url)
+                if (match.tbType > 0) put("total_type", match.tbType.toLong())
+            }
+            
+            db.insert("express_events", null, eventValues)
+        }
+        
+        checkExpressStatus(expressId, expId, userId)
+        
+        val kefInfo = matchesFactors.joinToString(" × ") { 
+            "${it.homeTeam.take(10)} vs ${it.awayTeam.take(10)}:${getTypeName(it.type)}(${"%.2f".format(it.kef)})" 
+        }
+        val message = "✅ Экспресс #$expId сохранен (${matchesFactors.size} матчей): $kefInfo | Общий кэф: ${"%.2f".format(totalKef)} | Ставка: ${betAmount.toInt()} ₽"
+        
+        onLogUpdate?.invoke("[${getCurrentTime()}] $message")
+        Log.d(TAG, "Экспресс #$expId сохранен с ${matchesFactors.size} матчами")
     }
-    
-    checkExpressStatus(expressId, expId, userId)
-    
-    val kefInfo = matchesFactors.joinToString(" × ") { 
-        "${it.homeTeam.take(10)} vs ${it.awayTeam.take(10)}:${getTypeName(it.type)}(${"%.2f".format(it.kef)})" 
-    }
-    val message = "✅ Экспресс #$expId сохранен (${matchesFactors.size} матчей): $kefInfo | Общий кэф: ${"%.2f".format(totalKef)} | Ставка: ${betAmount.toInt()} ₽"
-    
-    onLogUpdate?.invoke("[${getCurrentTime()}] $message")
-    Log.d("BotForegroundService", "Экспресс #$expId сохранен с ${matchesFactors.size} матчами, есть названия команд: ${matchesFactors.any { it.homeTeam.isNotEmpty() }}")
 }
 // BotForegroundService.kt - ПОЛНАЯ ВЕРСИЯ (ЧАСТЬ 2/2)
-    fun getTypeName(type: Int): String {
-        return when (type) {
-            924 -> "1X"
-            927 -> "Ф1(+1.5)"
-            928 -> "Ф2(+1.5)"
-            else -> "Тип $type"
-        }
-    }
+
     private fun updateActiveMatchesScores() {
         try {
             val db = dbHelper.readableDatabase
@@ -728,7 +711,7 @@ private fun saveExpressWithFactors(
             }
             cursor.close()
             
-            activeExpresses.forEach { (expressId, expId, userId) ->
+            activeExpresses.forEach { (expressId: Long, expId: Int, userId: Long) ->
                 val eventsCursor = db.query(
                     "express_events",
                     arrayOf("id", "m_id", "bet_type", "status", "home_score", "away_score", "match_time"),
@@ -751,21 +734,21 @@ private fun saveExpressWithFactors(
                 }
                 eventsCursor.close()
                 
-                events.forEach { event ->
+                events.forEach { event: EventInfo ->
                     updateMatchScore(event, expressId, expId, userId)
                 }
                 
                 checkExpressStatus(expressId, expId, userId)
             }
         } catch (e: Exception) {
-            Log.e("BotForegroundService", "Ошибка обновления счетов: ${e.message}")
+            Log.e(TAG, "Ошибка обновления счетов: ${e.message}")
         }
     }
     
     private fun updateMatchScore(event: EventInfo, expressId: Long, expId: Int, userId: Long) {
         apiClient.getMatchScore(
             matchId = event.mId,
-            onSuccess = { matchFactors ->
+            onSuccess = { matchFactors: ApiClient.MatchFactors? ->
                 if (matchFactors != null) {
                     val sh = matchFactors.score1
                     val sa = matchFactors.score2
@@ -810,8 +793,8 @@ private fun saveExpressWithFactors(
                     checkMatchTimeout(event, expressId, expId, userId)
                 }
             },
-            onError = { error ->
-                Log.e("BotForegroundService", "Ошибка получения счета: $error")
+            onError = { error: String ->
+                Log.e(TAG, "Ошибка получения счета: $error")
                 checkMatchTimeout(event, expressId, expId, userId)
             }
         )
@@ -1132,9 +1115,7 @@ private fun saveExpressWithFactors(
                     dbHelper.stopBotSession(it.id, "user_stop")
                     dbHelper.addLog(it.id, "stop", "Бот остановлен")
                 }
-            } catch (e: Exception) {
-                // Игнорируем
-            }
+            } catch (e: Exception) { }
         }
         
         onLogUpdate?.invoke("[${getCurrentTime()}] ⏹ Бот остановлен")
@@ -1224,6 +1205,15 @@ private fun saveExpressWithFactors(
         return java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
     }
     
+    fun getTypeName(type: Int): String {
+        return when (type) {
+            924 -> "1X"
+            927 -> "Ф1(+1.5)"
+            928 -> "Ф2(+1.5)"
+            else -> "Тип $type"
+        }
+    }
+    
     override fun onDestroy() {
         super.onDestroy()
         isRunning = false
@@ -1243,23 +1233,23 @@ private fun saveExpressWithFactors(
     )
     
     data class MatchFactorsData(
-    val mId: Int,
-    val type: Int,
-    val kef: Double,
-    val handicap: Double,
-    val sh: Int,
-    val sa: Int,
-    val matchTime: Int = 0,
-    val leagueName: String = "",
-    val homeTeam: String = "",
-    val awayTeam: String = "",
-    val idLiga: Int = 0,
-    val idHome: Int = 0,
-    val idAway: Int = 0,
-    val url: String = "",
-    val uzh: String = "0.0",
-    val tbType: Int = 0
-)
+        val mId: Int,
+        val type: Int,
+        val kef: Double,
+        val handicap: Double,
+        val sh: Int,
+        val sa: Int,
+        val matchTime: Int = 0,
+        val leagueName: String = "",
+        val homeTeam: String = "",
+        val awayTeam: String = "",
+        val idLiga: Int = 0,
+        val idHome: Int = 0,
+        val idAway: Int = 0,
+        val url: String = "",
+        val uzh: String = "0.0",
+        val tbType: Int = 0
+    )
     
     data class ActiveMatch(
         val id: Long,

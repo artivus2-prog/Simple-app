@@ -1,224 +1,379 @@
-// В начале файла добавьте импорт
+// ApiClient.kt - ПОЛНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ
 package com.example.fonbetbot
 
-// ... все импорты ...
+import android.util.Log
+import okhttp3.*
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.IOException
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 
-class BotForegroundService : Service() {
-    
-    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private var balance = 0.0
-    private val apiClient = ApiClient()
-    private lateinit var dbHelper: DatabaseHelper
-    private lateinit var prefs: SharedPreferences
+class ApiClient {
+    private val client = OkHttpClient()
     
     companion object {
-        const val CHANNEL_ID = "BotForegroundChannel"
-        const val NOTIFICATION_ID = 1
-        const val ACTION_STOP = "STOP_BOT"
-        private const val TAG = "BotForegroundService"
-        
-        var isRunning = false
-        var onBalanceUpdate: ((Double) -> Unit)? = null
-        var onLogUpdate: ((String) -> Unit)? = null
-        var onBetsUpdate: ((List<Pair<Int, Int>>) -> Unit)? = null
-        var onScoresUpdate: ((String) -> Unit)? = null
-        var authData: AuthData? = null
-        var lastBalance: Double = 0.0
+        const val TAG = "ApiClient"
     }
     
-    // ... другие методы ...
-
-    private fun fetchBalance(data: AuthData) {
-        val cookieManager = CookieManager.getInstance()
-        val cookieString = cookieManager.getCookie("https://www.fon.bet") ?: ""
-        
-        val cookies = if (cookieString.isNotEmpty()) {
-            cookieString.split("; ").associate { cookie ->
-                val parts = cookie.split("=", limit = 2)
-                parts[0] to (parts.getOrNull(1) ?: "")
+    // Data class для ответа session/info
+    data class SessionInfo(
+        val saldo: Double?,
+        val clientId: Long?,
+        val userName: String?
+    )
+    
+    // Data class для матча с коэффициентами и временем
+    data class MatchFactors(
+        val score1: Int,
+        val score2: Int,
+        val matchTime: Int,
+        val factors: Map<Int, Double>,
+        val handicaps: Map<Int, Double>
+    )
+    
+    // Data class для ставки из ответа getBets
+    data class BetData(
+        val mId: Int,
+        val type: Int,
+        val sport: String = "",
+        val idExp: Int = 0,
+        val idLiga: Int = 0,
+        val ligaName: String = "",
+        val home: String = "",
+        val away: String = "",
+        val comand1Id: Int = 0,
+        val comand2Id: Int = 0,
+        val curTime: String = "",
+        val sh: Int = 0,
+        val sa: Int = 0,
+        val startKf: Double = 0.0,
+        val lastKf: Double = 0.0,
+        val sts: Int = 1,
+        val url: String = "",
+        val uzh: Double = 0.0,
+        val tbType: Int = 0
+    )
+    
+    // Data class для настроек ставок
+    data class BetSettings(
+        val maxMatchesPerExpress: Int = 2,
+        val multiply: Int = 2,
+        val allMinKef: Double = 1.67,
+        val types: Map<Int, TypeSettings> = mapOf(
+            924 to TypeSettings("1х/футбол/хоккей", 1.15, 1.35, 80, 100),
+            927 to TypeSettings("ф1(+1.5)/футбол/хоккей", 1.15, 1.35, 1, 45),
+            928 to TypeSettings("ф2(+1.5)/футбол/хоккей", 1.15, 1.35, 1, 45)
+        )
+    ) {
+        fun toJson(): JSONObject {
+            return JSONObject().apply {
+                put("MAX_MATCHES_PER_EXPRESS", maxMatchesPerExpress)
+                put("MULTIPLY", multiply)
+                put("ALL_MIN_KEF", allMinKef)
+                put("types", JSONObject().apply {
+                    types.forEach { (typeId, typeSettings) ->
+                        put(typeId.toString(), JSONArray().apply {
+                            put(typeSettings.name)
+                            put(typeSettings.minBet)
+                            put(typeSettings.maxBet)
+                            put(typeSettings.monitorStart)
+                            put(typeSettings.monitorEnd)
+                        })
+                    }
+                })
             }
-        } else {
-            emptyMap()
+        }
+    }
+    
+    data class TypeSettings(
+        val name: String,
+        val minBet: Double,
+        val maxBet: Double,
+        val monitorStart: Int,
+        val monitorEnd: Int
+    )
+    
+    // Метод получения баланса
+    fun getSaldo(
+        cookies: Map<String, String>,
+        fsid: String,
+        deviceId: String,
+        clientId: Long = 18845703,
+        sysId: Int = 21,
+        onSuccess: (SessionInfo?) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        val jsonBody = JSONObject().apply {
+            put("clientId", clientId)
+            put("fsid", fsid)
+            put("sysId", sysId)
+            put("deviceId", deviceId)
         }
         
-        apiClient.getSaldo(
-            cookies = cookies,
-            fsid = data.fsid,
-            deviceId = data.deviceId,
-            onSuccess = { sessionInfo ->
-                if (sessionInfo != null) {
-                    val newBalance = sessionInfo.saldo
-                    val oldBalance = balance
+        val mediaType = "application/json; charset=utf-8".toMediaType()
+        val body = jsonBody.toString().toRequestBody(mediaType)
+        
+        val requestBuilder = Request.Builder()
+            .url("https://clientsapi-lb51-w.bk6bba-resources.com/session/info")
+            .post(body)
+            .addHeader("Content-Type", "application/json")
+            .addHeader("Accept", "application/json")
+        
+        val cookieHeader = cookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
+        if (cookieHeader.isNotEmpty()) {
+            requestBuilder.addHeader("Cookie", cookieHeader)
+        }
+        
+        val request = requestBuilder.build()
+        
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                onError("Ошибка сети: ${e.message}")
+            }
+            
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    val bodyString = response.body?.string() ?: ""
                     
-                    if (newBalance != null) {
-                        val difference = newBalance - oldBalance
-                        balance = newBalance
-                        lastBalance = newBalance
+                    if (!response.isSuccessful) {
+                        onError("Ошибка ${response.code}")
+                        return
+                    }
+                    
+                    try {
+                        val json = JSONObject(bodyString)
                         
-                        onBalanceUpdate?.invoke(newBalance)
-                        
-                        try {
-                            val user = dbHelper.getUser(data.fsid, data.deviceId)
-                            user?.let { userData ->
-                                dbHelper.saveBalance(userData.id, newBalance, "success")
-                                
-                                val userClientId = sessionInfo.clientId
-                                val userDisplayName = sessionInfo.userName
-                                
-                                if (userClientId != null || userDisplayName != null) {
-                                    dbHelper.updateUserInfo(userData.id, userClientId, userDisplayName)
-                                }
-                                
-                                if (difference > 0 && oldBalance > 0) {
-                                    dbHelper.addLog(userData.id, "profit", "Профит: +%.2f ₽".format(difference))
-                                } else if (difference < 0 && oldBalance > 0) {
-                                    dbHelper.addLog(userData.id, "loss", "Убыток: %.2f ₽".format(difference))
-                                }
-                            }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Ошибка сохранения баланса: ${e.message}")
-                        }
-                        
-                        val displayName = sessionInfo.userName ?: ""
-                        val displayText: String = if (displayName.isNotEmpty()) {
-                            "Баланс: %.2f ₽ | %s".format(newBalance, displayName)
+                        val saldo: Double? = if (json.has("saldo") && !json.isNull("saldo")) {
+                            json.getDouble("saldo")
                         } else {
-                            "Баланс: %.2f ₽".format(newBalance)
+                            null
                         }
                         
-                        val notification = createNotification("Бот активен", displayText)
-                        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
-                            .notify(NOTIFICATION_ID, notification)
-                        
-                        val timestamp = getCurrentTime()
-                        if (difference > 0 && oldBalance > 0) {
-                            onLogUpdate?.invoke("[$timestamp] 💰 Профит: +%.2f ₽".format(difference))
-                        } else if (difference < 0 && oldBalance > 0) {
-                            onLogUpdate?.invoke("[$timestamp] 📉 Убыток: %.2f ₽".format(difference))
+                        val extractedClientId: Long? = if (json.has("clientId") && !json.isNull("clientId")) {
+                            json.getLong("clientId")
+                        } else {
+                            null
                         }
+                        
+                        val userName: String? = if (json.has("registration") && !json.isNull("registration")) {
+                            val registration = json.getJSONObject("registration")
+                            if (registration.has("name") && !registration.isNull("name")) {
+                                registration.getString("name")
+                            } else {
+                                null
+                            }
+                        } else {
+                            null
+                        }
+                        
+                        val sessionInfo = SessionInfo(
+                            saldo = saldo,
+                            clientId = extractedClientId,
+                            userName = userName
+                        )
+                        
+                        onSuccess(sessionInfo)
+                        
+                    } catch (e: Exception) {
+                        onError("Ошибка парсинга: ${e.message}")
                     }
-                }
-            },
-            onError = { error ->
-                onLogUpdate?.invoke("[${getCurrentTime()}] ❌ Ошибка API: $error")
-                
-                try {
-                    val user = dbHelper.getUser(data.fsid, data.deviceId)
-                    user?.let {
-                        dbHelper.addLog(it.id, "error", "Ошибка API: $error", "ERROR")
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Ошибка логирования: ${e.message}")
                 }
             }
+        })
+    }
+    
+    // Метод получения ставок
+    fun getBets(
+        userId: Long,
+        settings: BetSettings,
+        onSuccess: (List<BetData>) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        val jsonBody = JSONObject().apply {
+            put("user_id", userId)
+            put("settings", settings.toJson())
+        }
+        
+        val mediaType = "application/json; charset=utf-8".toMediaType()
+        val body = jsonBody.toString().toRequestBody(mediaType)
+        
+        val request = Request.Builder()
+            .url("http://95.183.11.203:5000/api/getBets")
+            .post(body)
+            .addHeader("Content-Type", "application/json")
+            .addHeader("Accept", "application/json")
+            .build()
+        
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.e(TAG, "Ошибка сети getBets: ${e.message}")
+                onError("Ошибка сети: ${e.message}")
+            }
+            
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    val bodyString = response.body?.string() ?: ""
+                    
+                    if (!response.isSuccessful) {
+                        Log.e(TAG, "Ошибка getBets ${response.code}: $bodyString")
+                        onError("Ошибка ${response.code}")
+                        return
+                    }
+                    
+                    try {
+                        val json = JSONObject(bodyString)
+                        val betsList = mutableListOf<BetData>()
+                        
+                        if (json.has("data")) {
+                            val dataArray = json.getJSONArray("data")
+                            
+                            for (i in 0 until dataArray.length()) {
+                                val betJson = dataArray.getJSONObject(i)
+                                
+                                val betData = BetData(
+                                    mId = betJson.optInt("m_id", 0),
+                                    type = betJson.optInt("type", 0),
+                                    sport = betJson.optString("sport", ""),
+                                    idExp = betJson.optInt("id_exp", 0),
+                                    idLiga = betJson.optInt("id_liga", 0),
+                                    ligaName = betJson.optString("liganame", ""),
+                                    home = betJson.optString("home", ""),
+                                    away = betJson.optString("away", ""),
+                                    comand1Id = betJson.optInt("comand1id", 0),
+                                    comand2Id = betJson.optInt("comand2id", 0),
+                                    curTime = betJson.optString("curtime", ""),
+                                    sh = betJson.optInt("sh", 0),
+                                    sa = betJson.optInt("sa", 0),
+                                    startKf = betJson.optDouble("startkf", 0.0),
+                                    lastKf = betJson.optDouble("lastkf", 0.0),
+                                    sts = betJson.optInt("sts", 1),
+                                    url = betJson.optString("url", ""),
+                                    uzh = betJson.optDouble("uzh", 0.0),
+                                    tbType = betJson.optInt("tbtype", 0)
+                                )
+                                
+                                betsList.add(betData)
+                            }
+                        }
+                        
+                        Log.d(TAG, "Получено ${betsList.size} ставок")
+                        onSuccess(betsList)
+                        
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Ошибка парсинга getBets: ${e.message}")
+                        onError("Ошибка парсинга: ${e.message}")
+                    }
+                }
+            }
+        })
+    }
+    
+    // Метод получения счета, времени и коэффициентов матча
+    fun getMatchScore(
+        matchId: Int,
+        onSuccess: (MatchFactors?) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        val url = "https://line-lb61-w.bk6bba-resources.com/ma/events/event?lang=ru&version=75079713020&eventId=$matchId&scopeMarket=1600"
+        
+        val request = Request.Builder()
+            .url(url)
+            .get()
+            .addHeader("Accept", "application/json")
+            .build()
+        
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                onError("Ошибка сети: ${e.message}")
+            }
+            
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    val bodyString = response.body?.string() ?: ""
+                    
+                    if (!response.isSuccessful) {
+                        onError("Ошибка ${response.code}")
+                        return
+                    }
+                    
+                    try {
+                        val json = JSONObject(bodyString)
+                        var sh = -1
+                        var sa = -1
+                        var matchTime = 0
+                        
+                        if (json.has("liveEventInfos")) {
+                            val liveEventInfos = json.getJSONArray("liveEventInfos")
+                            if (liveEventInfos.length() > 0) {
+                                val liveEventInfo = liveEventInfos.getJSONObject(0)
+                                matchTime = liveEventInfo.optInt("timerSeconds", 0)
+                                
+                                if (liveEventInfo.has("scores")) {
+                                    val scores = liveEventInfo.getJSONArray("scores")
+                                    if (scores.length() > 0) {
+                                        val mainScore = scores.getJSONArray(0)
+                                        if (mainScore.length() > 0) {
+                                            val scoreObj = mainScore.getJSONObject(0)
+                                            sh = scoreObj.optInt("c1", -1)
+                                            sa = scoreObj.optInt("c2", -1)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        val factors = mutableMapOf<Int, Double>()
+                        val handicaps = mutableMapOf<Int, Double>()
+                        
+                        if (json.has("customFactors")) {
+                            val customFactors = json.getJSONArray("customFactors")
+                            for (i in 0 until customFactors.length()) {
+                                val factorGroup = customFactors.getJSONObject(i)
+                                
+                                if (factorGroup.has("e") && factorGroup.getInt("e") == matchId) {
+                                    if (factorGroup.has("factors")) {
+                                        val factorsArray = factorGroup.getJSONArray("factors")
+                                        for (j in 0 until factorsArray.length()) {
+                                            val factor = factorsArray.getJSONObject(j)
+                                            val f = factor.optInt("f", 0)
+                                            val v = factor.optDouble("v", 0.0)
+                                            
+                                            if (f in listOf(924, 927, 928) && v > 0) {
+                                                factors[f] = v
+                                                val p = factor.optInt("p", 0)
+                                                if (p > 0) {
+                                                    handicaps[f] = p / 100.0
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if (sh >= 0 && sa >= 0) {
+                            onSuccess(MatchFactors(sh, sa, matchTime, factors, handicaps))
+                        } else {
+                            onSuccess(null)
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Ошибка парсинга: ${e.message}")
+                        onError("Ошибка парсинга: ${e.message}")
+                    }
+                }
+            }
+        })
+    }
+    
+    fun getMatchTime(
+        matchId: Int,
+        onSuccess: (Int?) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        getMatchScore(matchId, 
+            onSuccess = { factors -> onSuccess(factors?.matchTime) },
+            onError = onError
         )
     }
-    
-    private fun fetchBets(data: AuthData) {
-        try {
-            val user = dbHelper.getUser(data.fsid, data.deviceId)
-            user?.let { userData ->
-                val settings = ApiClient.BetSettings(
-                    maxMatchesPerExpress = prefs.getInt("max_matches_per_express", 2),
-                    multiply = prefs.getInt("multiply", 2),
-                    allMinKef = prefs.getFloat("all_min_kef", 1.67f).toDouble(),
-                    types = mapOf(
-                        924 to ApiClient.TypeSettings(
-                            "1х/футбол/хоккей",
-                            prefs.getFloat("type_924_min", 1.15f).toDouble(),
-                            prefs.getFloat("type_924_max", 1.35f).toDouble(),
-                            prefs.getInt("type_924_start", 80),
-                            prefs.getInt("type_924_end", 100)
-                        ),
-                        927 to ApiClient.TypeSettings(
-                            "ф1(+1.5)/футбол/хоккей",
-                            prefs.getFloat("type_927_min", 1.15f).toDouble(),
-                            prefs.getFloat("type_927_max", 1.35f).toDouble(),
-                            prefs.getInt("type_927_start", 1),
-                            prefs.getInt("type_927_end", 45)
-                        ),
-                        928 to ApiClient.TypeSettings(
-                            "ф2(+1.5)/футбол/хоккей",
-                            prefs.getFloat("type_928_min", 1.15f).toDouble(),
-                            prefs.getFloat("type_928_max", 1.35f).toDouble(),
-                            prefs.getInt("type_928_start", 1),
-                            prefs.getInt("type_928_end", 45)
-                        )
-                    )
-                )
-                
-                apiClient.getBets(
-                    userId = userData.id,
-                    settings = settings,
-                    onSuccess = { betDataList ->
-                        if (betDataList.isNotEmpty()) {
-                            val bets = betDataList.map { it.mId to it.type }
-                            
-                            onLogUpdate?.invoke("[${getCurrentTime()}] 🎲 Получен сигнал на создание ставки! (${bets.size} матчей)")
-                            
-                            betDataList.forEach { betData ->
-                                val matchInfo = buildString {
-                                    append("📊 Матч #${betData.mId}: ")
-                                    if (betData.home.isNotEmpty() || betData.away.isNotEmpty()) {
-                                        append("${betData.home} vs ${betData.away} | ")
-                                    }
-                                    if (betData.ligaName.isNotEmpty()) {
-                                        append("${betData.ligaName} | ")
-                                    }
-                                    append("Кэф: ${"%.2f".format(betData.startKf)} | ")
-                                    append("Тип: ${getTypeName(betData.type)} ")
-                                }
-                                onLogUpdate?.invoke("[${getCurrentTime()}] $matchInfo")
-                            }
-                            
-                            val maxMatches = settings.maxMatchesPerExpress
-                            val expressGroups = bets.chunked(maxMatches)
-                            
-                            onLogUpdate?.invoke("[${getCurrentTime()}] 📨 Сгруппировано в ${expressGroups.size} экспрессов (по $maxMatches матча)")
-                            
-                            expressGroups.forEachIndexed { index, group ->
-                                if (group.isNotEmpty()) {
-                                    val existingExpress = findExistingExpress(userData.id, group)
-                                    
-                                    if (existingExpress != null) {
-                                        Log.d(TAG, "Экспресс #${existingExpress.first} уже существует, мониторим")
-                                        checkExpressMatchesStatus(existingExpress.second, existingExpress.first, userData.id)
-                                    } else {
-                                        val newExpId = (System.currentTimeMillis() / 1000).toInt() + index
-                                        
-                                        val groupBetData = betDataList.filter { betData ->
-                                            group.any { it.first == betData.mId }
-                                        }
-                                        
-                                        val matchesInfo = groupBetData.joinToString(" + ") { 
-                                            "${it.home.take(10)} vs ${it.away.take(10)} (${getTypeName(it.type)})" 
-                                        }
-                                        val message = "🎯 Новый экспресс #$newExpId (${group.size} матчей): $matchesInfo"
-                                        
-                                        onLogUpdate?.invoke("[${getCurrentTime()}] $message")
-                                        onBetsUpdate?.invoke(group)
-                                        
-                                        saveExpressToDb(userData.id, newExpId, group, null, groupBetData)
-                                        placeBet(userData.id, newExpId, group)
-                                    }
-                                }
-                            }
-                            
-                            checkCompletedMatches(userData.id)
-                        } else {
-                            onLogUpdate?.invoke("[${getCurrentTime()}] 📭 Нет подходящих матчей")
-                        }
-                    },
-                    onError = { error ->
-                        Log.e(TAG, "Ошибка получения ставок: $error")
-                        onLogUpdate?.invoke("[${getCurrentTime()}] ❌ Ошибка получения ставок: $error")
-                    }
-                )
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Ошибка в fetchBets: ${e.message}")
-        }
-    }
-    
-    // ... остальные методы ...
 }
