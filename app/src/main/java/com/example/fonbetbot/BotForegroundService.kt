@@ -262,10 +262,12 @@ class BotForegroundService : Service() {
                             betDataList.forEach { betData: ApiClient.BetData ->
                                 val matchInfo = buildString {
                                     append("📊 Матч #${betData.mId}: ")
-                                    if (betData.home.isNotEmpty() || betData.away.isNotEmpty())
+                                    if (betData.home.isNotEmpty() || betData.away.isNotEmpty()) {
                                         append("${betData.home} vs ${betData.away} | ")
-                                    if (betData.ligaName.isNotEmpty())
+                                    }
+                                    if (betData.ligaName.isNotEmpty()) {
                                         append("${betData.ligaName} | ")
+                                    }
                                     append("Кэф: ${"%.2f".format(betData.startKf)} | ")
                                     append("Тип: ${typeName(betData.type)} ")
                                 }

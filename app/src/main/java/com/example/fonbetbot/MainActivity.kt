@@ -244,7 +244,7 @@ fun MainBotScreen(
                                 dbHelper.addLog(it.id, "profit", "Профит: +%.2f ₽".format(saldo - oldBalance))
                             } else if (saldo < oldBalance && oldBalance > 0) {
                                 dbHelper.addLog(it.id, "loss", "Убыток: %.2f ₽".format(saldo - oldBalance))
-                            }
+                            } else {dbHelper.addLog(it.id, "loss", "Убыток: %.2f ₽".format(saldo - oldBalance))}
                         }
                     } catch (e: Exception) { }
                 }
@@ -256,9 +256,7 @@ fun MainBotScreen(
         }
     )
 }
-    private fun typeName(type: Int): String = when (type) {
-    924 -> "1X"; 927 -> "Ф1(+1.5)"; 928 -> "Ф2(+1.5)"; else -> "Тип $type"
-}
+
 
 
     LaunchedEffect(authData, isBotRunning) {
@@ -2195,4 +2193,7 @@ fun DetailRow(label: String, value: String) {
 fun formatTimestamp(timestamp: Long): String {
     if (timestamp == 0L) return "—"
     return SimpleDateFormat("dd.MM.yy HH:mm", Locale.getDefault()).format(Date(timestamp * 1000))
+}
+    fun typeName(type: Int): String = when (type) {
+    924 -> "1X"; 927 -> "Ф1(+1.5)"; 928 -> "Ф2(+1.5)"; else -> "Тип $type"
 }
