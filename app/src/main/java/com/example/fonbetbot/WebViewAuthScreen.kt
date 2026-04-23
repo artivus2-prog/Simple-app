@@ -56,6 +56,7 @@ fun WebViewAuthScreen(
     val context = LocalContext.current
     val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     // Функция для загрузки баланса
+// Функция для загрузки баланса
 fun fetchSessionInfo(fsid: String, deviceId: String) {
     val apiClient = ApiClient()
     apiClient.getSaldo(
@@ -66,16 +67,14 @@ fun fetchSessionInfo(fsid: String, deviceId: String) {
             if (sessionInfo != null) {
                 capturedFsid = fsid
                 capturedDeviceId = deviceId
-                capturedClientId = sessionInfo.clientId
-                capturedUserName = sessionInfo.userName ?: "Неизвестно"
+                capturedClientId = sessionInfo.clientId  // Правильно
+                capturedUserName = sessionInfo.userName ?: "Неизвестно"  // Правильно
                 isAuthorized = true
                 
-                // Скрываем WebView после получения данных
                 webViewRef?.visibility = android.view.View.GONE
             }
         },
         onError = { error ->
-            // Если не удалось получить данные, используем что есть
             capturedFsid = fsid
             capturedDeviceId = deviceId
             capturedUserName = "Данные не загружены"

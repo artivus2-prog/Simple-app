@@ -169,53 +169,58 @@ class BotForegroundService : Service() {
         fsid = data.fsid,
         deviceId = data.deviceId,
         onSuccess = { sessionInfo ->
-            if (sessionInfo != null && sessionInfo.saldo != null) {
-                val newBalance = sessionInfo.saldo
+            if (sessionInfo != null) {
+                val newBalance = sessionInfo.saldo  // Правильно: sessionInfo.saldo
                 val oldBalance = balance
-                val difference = newBalance - oldBalance
-                balance = newBalance
-                lastBalance = newBalance
                 
-                onBalanceUpdate?.invoke(newBalance)
-                
-                try {
-                    val user = dbHelper.getUser(data.fsid, data.deviceId)
-                    user?.let { userData ->
-                        dbHelper.saveBalance(userData.id, newBalance, "success")
-                        
-                        // Сохраняем clientId и userName, если есть
-                        val clientId = sessionInfo.clientId
-                        val userName = sessionInfo.userName
-                        if (clientId != null || userName != null) {
-                            dbHelper.updateUserInfo(userData.id, clientId, userName)
+                if (newBalance != null) {
+                    val difference = newBalance - oldBalance
+                    balance = newBalance
+                    lastBalance = newBalance
+                    
+                    onBalanceUpdate?.invoke(newBalance)
+                    
+                    try {
+                        val user = dbHelper.getUser(data.fsid, data.deviceId)
+                        user?.let { userData ->
+                            dbHelper.saveBalance(userData.id, newBalance, "success")
+                            
+                            // Правильно: sessionInfo.clientId и sessionInfo.userName
+                            val userClientId = sessionInfo.clientId
+                            val userDisplayName = sessionInfo.userName
+                            
+                            if (userClientId != null || userDisplayName != null) {
+                                dbHelper.updateUserInfo(userData.id, userClientId, userDisplayName)
+                            }
+                            
+                            if (difference > 0 && oldBalance > 0) {
+                                dbHelper.addLog(userData.id, "profit", "Профит: +%.2f ₽".format(difference))
+                            } else if (difference < 0 && oldBalance > 0) {
+                                dbHelper.addLog(userData.id, "loss", "Убыток: %.2f ₽".format(difference))
+                            }
                         }
-                        
-                        if (difference > 0 && oldBalance > 0) {
-                            dbHelper.addLog(userData.id, "profit", "Профит: +%.2f ₽".format(difference))
-                        } else if (difference < 0 && oldBalance > 0) {
-                            dbHelper.addLog(userData.id, "loss", "Убыток: %.2f ₽".format(difference))
-                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Ошибка сохранения баланса: ${e.message}")
                     }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Ошибка сохранения баланса: ${e.message}")
-                }
-                
-                val userDisplayName = sessionInfo.userName ?: ""
-                val displayText = if (userDisplayName.isNotEmpty()) {
-                    "Баланс: %.2f ₽ | %s".format(newBalance, userDisplayName)
-                } else {
-                    "Баланс: %.2f ₽".format(newBalance)
-                }
-                
-                val notification = createNotification("Бот активен", displayText)
-                (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
-                    .notify(NOTIFICATION_ID, notification)
-                
-                val timestamp = getCurrentTime()
-                if (difference > 0 && oldBalance > 0) {
-                    onLogUpdate?.invoke("[$timestamp] 💰 Профит: +%.2f ₽".format(difference))
-                } else if (difference < 0 && oldBalance > 0) {
-                    onLogUpdate?.invoke("[$timestamp] 📉 Убыток: %.2f ₽".format(difference))
+                    
+                    // Формируем текст уведомления
+                    val displayName = sessionInfo.userName ?: ""
+                    val displayText = if (displayName.isNotEmpty()) {
+                        "Баланс: %.2f ₽ | %s".format(newBalance, displayName)
+                    } else {
+                        "Баланс: %.2f ₽".format(newBalance)
+                    }
+                    
+                    val notification = createNotification("Бот активен", displayText)
+                    (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
+                        .notify(NOTIFICATION_ID, notification)
+                    
+                    val timestamp = getCurrentTime()
+                    if (difference > 0 && oldBalance > 0) {
+                        onLogUpdate?.invoke("[$timestamp] 💰 Профит: +%.2f ₽".format(difference))
+                    } else if (difference < 0 && oldBalance > 0) {
+                        onLogUpdate?.invoke("[$timestamp] 📉 Убыток: %.2f ₽".format(difference))
+                    }
                 }
             }
         },
@@ -268,19 +273,16 @@ class BotForegroundService : Service() {
                 )
             )
             
+            // Используем ApiClient.BetData напрямую
             apiClient.getBets(
                 userId = userData.id,
                 settings = settings,
                 onSuccess = { betDataList ->
                     if (betDataList.isNotEmpty()) {
-                        // Извлекаем только m_id и type для создания пар
-                        val bets = betDataList.map { betData -> 
-                            Pair(betData.mId, betData.type) 
-                        }
+                        val bets = betDataList.map { it.mId to it.type }
                         
                         onLogUpdate?.invoke("[${getCurrentTime()}] 🎲 Получен сигнал на создание ставки! (${bets.size} матчей)")
                         
-                        // Логируем подробную информацию о матчах
                         betDataList.forEach { betData ->
                             val matchInfo = buildString {
                                 append("📊 Матч #${betData.mId}: ")
@@ -292,9 +294,6 @@ class BotForegroundService : Service() {
                                 }
                                 append("Кэф: ${"%.2f".format(betData.startKf)} | ")
                                 append("Тип: ${getTypeName(betData.type)} ")
-                                if (betData.curTime.isNotEmpty()) {
-                                    append("| ${betData.curTime}")
-                                }
                             }
                             onLogUpdate?.invoke("[${getCurrentTime()}] $matchInfo")
                         }
@@ -306,15 +305,6 @@ class BotForegroundService : Service() {
                         
                         expressGroups.forEachIndexed { index, group ->
                             if (group.isNotEmpty()) {
-                                // Получаем соответствующие BetData для этой группы
-                                val startIndex = index * maxMatches
-                                val endIndex = minOf(startIndex + maxMatches, betDataList.size)
-                                val groupBetData = if (startIndex < betDataList.size) {
-                                    betDataList.subList(startIndex, endIndex)
-                                } else {
-                                    emptyList()
-                                }
-                                
                                 val existingExpress = findExistingExpress(userData.id, group)
                                 
                                 if (existingExpress != null) {
@@ -322,6 +312,10 @@ class BotForegroundService : Service() {
                                     checkExpressMatchesStatus(existingExpress.second, existingExpress.first, userData.id)
                                 } else {
                                     val newExpId = (System.currentTimeMillis() / 1000).toInt() + index
+                                    
+                                    val groupBetData = betDataList.filter { betData ->
+                                        group.any { it.first == betData.mId }
+                                    }
                                     
                                     val matchesInfo = groupBetData.joinToString(" + ") { 
                                         "${it.home.take(10)} vs ${it.away.take(10)} (${getTypeName(it.type)})" 
@@ -331,7 +325,6 @@ class BotForegroundService : Service() {
                                     onLogUpdate?.invoke("[${getCurrentTime()}] $message")
                                     onBetsUpdate?.invoke(group)
                                     
-                                    // Сохраняем с дополнительной информацией о матчах
                                     saveExpressToDb(userData.id, newExpId, group, null, groupBetData)
                                     placeBet(userData.id, newExpId, group)
                                 }
@@ -508,17 +501,14 @@ class BotForegroundService : Service() {
         val currentTimeUtc = System.currentTimeMillis() / 1000
         val betAmount = customBetAmount ?: prefs.getString("bet_amount", "30")?.toDoubleOrNull() ?: 30.0
         
-        // Создаём карту для быстрого поиска BetData по m_id
         val betDataMap = betDataList.associateBy { it.mId }
         
-        fetchFactorsForBets(userId, expId, bets, betAmount, currentTimeUtc.toLong(), betDataMap)
+        fetchFactorsForBets(userId, expId, bets, betAmount, currentTimeUtc, betDataMap)
         
     } catch (e: Exception) {
         Log.e(TAG, "Ошибка сохранения экспресса: ${e.message}")
     }
 }
-@Volatile
-private var completedRequests = 0
 
 private fun fetchFactorsForBets(
     userId: Long, 
@@ -528,8 +518,8 @@ private fun fetchFactorsForBets(
     currentTimeUtc: Long,
     betDataMap: Map<Int, ApiClient.BetData> = emptyMap()
 ) {
-    val matchesFactors = Collections.synchronizedList(mutableListOf<MatchFactorsData>())
-    completedRequests = 0
+    val matchesFactors = mutableListOf<MatchFactorsData>()
+    var completedCount = 0
     
     bets.forEach { (mId, type) ->
         val betData = betDataMap[mId]
@@ -586,8 +576,8 @@ private fun fetchFactorsForBets(
                     tbType = betData?.tbType ?: 0
                 ))
                 
-                completedRequests++
-                if (completedRequests == bets.size) {
+                completedCount++
+                if (completedCount == bets.size) {
                     saveExpressWithFactors(userId, expId, matchesFactors, betAmount, currentTimeUtc)
                 }
             },
@@ -618,14 +608,15 @@ private fun fetchFactorsForBets(
                     tbType = betData?.tbType ?: 0
                 ))
                 
-                completedRequests++
-                if (completedRequests == bets.size) {
+                completedCount++
+                if (completedCount == bets.size) {
                     saveExpressWithFactors(userId, expId, matchesFactors, betAmount, currentTimeUtc)
                 }
             }
         )
     }
 }
+
     
 private fun saveExpressWithFactors(
     userId: Long,
