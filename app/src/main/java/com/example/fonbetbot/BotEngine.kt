@@ -152,10 +152,11 @@ class BotEngine(
                                 if (newBalance > oldBalance && oldBalance > 0) {
                                     dbHelper.addLog(u.id, "profit", "Профит: +%.2f ₽".format(newBalance - oldBalance))
                                     onLogUpdate?.invoke("[${getCurrentTime()}] 💰 Профит: +%.2f ₽".format(newBalance - oldBalance))
-                                } else if (newBalance < oldBalance && oldBalance > 0) {
+                                }
+                                if (newBalance < oldBalance && oldBalance > 0) {
                                     dbHelper.addLog(u.id, "loss", "Убыток: %.2f ₽".format(newBalance - oldBalance))
                                     onLogUpdate?.invoke("[${getCurrentTime()}] 📉 Убыток: %.2f ₽".format(newBalance - oldBalance))
-                                } else {dbHelper.addLog(u.id,"un","un")}
+                                }
                             }
                         } catch (e: Exception) { Log.e(TAG, "Ошибка сохранения баланса: ${e.message}") }
                     }
@@ -552,7 +553,14 @@ class BotEngine(
         return expressId
     }
 
-    private fun checkMatchStatus(betType: Int, sh: Int, sa: Int): Int { return when (betType) { 924 -> if (sh >= sa) 2 else 1; 927 -> if (sh + 1 >= sa) 2 else 1; 928 -> if (sa + 1 >= sh) 2 else 1; else -> 1 } }
+    private fun checkMatchStatus(betType: Int, sh: Int, sa: Int): Int {
+        return when (betType) {
+            924 -> if (sh >= sa) 2 else 1
+            927 -> if (sh + 1 >= sa) 2 else 1
+            928 -> if (sa + 1 >= sh) 2 else 1
+            else -> 1
+        }
+    }
 
     private fun typeName(type: Int): String = when (type) { 924 -> "1X"; 927 -> "Ф1(+1.5)"; 928 -> "Ф2(+1.5)"; else -> "Тип $type" }
 

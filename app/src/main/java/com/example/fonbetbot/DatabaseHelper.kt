@@ -54,15 +54,6 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME
         if (values.size() > 0) { values.put("updated_at", System.currentTimeMillis() / 1000); val rows = db.update("users", values, "id = ?", arrayOf(userId.toString())); Log.d("DatabaseHelper", "Обновлено строк: $rows") }
     }
 
-    fun updateUserInfoByAuth(fsid: String, deviceId: String, clientId: Long?, username: String?): Boolean {
-        val db = writableDatabase
-        val values = ContentValues()
-        clientId?.let { values.put("client_id", it) }
-        username?.let { values.put("username", it) }
-        if (values.size() > 0) { values.put("updated_at", System.currentTimeMillis() / 1000); val rows = db.update("users", values, "fsid = ? AND device_id = ?", arrayOf(fsid, deviceId)); return rows > 0 }
-        return false
-    }
-
     fun saveUser(fsid: String, deviceId: String, username: String? = null): Long {
         val db = writableDatabase
         val values = ContentValues().apply { put("fsid", fsid); put("device_id", deviceId); username?.let { put("username", it) }; put("last_login", System.currentTimeMillis() / 1000) }
@@ -83,13 +74,6 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME
     }
 
     data class UserFullInfo(val id: Long, val fsid: String, val deviceId: String, val clientId: Long, val username: String?, val currentBalance: Double, val lastCheckTime: Long, val isActive: Boolean)
-    
-    fun getActiveUser(): User? {
-        val db = readableDatabase
-        val cursor = db.query("users", null, "is_active = 1", null, null, null, "last_login DESC", "1")
-        cursor.use { if (it.moveToFirst()) return User(it.getLong(it.getColumnIndexOrThrow("id")), it.getString(it.getColumnIndexOrThrow("fsid")), it.getString(it.getColumnIndexOrThrow("device_id")), it.getLong(it.getColumnIndexOrThrow("client_id")), it.getInt(it.getColumnIndexOrThrow("sys_id")), it.getString(it.getColumnIndexOrThrow("username")), true) }
-        return null
-    }
     
     fun saveBalance(userId: Long, balance: Double, status: String = "success", errorMessage: String? = null, rawResponse: String? = null): Long {
         val db = writableDatabase
