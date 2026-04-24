@@ -136,6 +136,11 @@ class ApiClient {
                 response.use {
                     val bodyString = response.body?.string() ?: ""
                     
+                    // ЛОГИРОВАНИЕ ПОЛНОГО ОТВЕТА ДЛЯ ДИАГНОСТИКИ
+                    Log.d(TAG, "=== session/info FULL RESPONSE ===")
+                    Log.d(TAG, bodyString)
+                    Log.d(TAG, "=== END session/info ===")
+                    
                     if (!response.isSuccessful) {
                         onError("Ошибка ${response.code}")
                         return
@@ -156,14 +161,46 @@ class ApiClient {
                             null
                         }
                         
-                        val userName: String? = if (json.has("registration") && !json.isNull("registration")) {
-                            val registration = json.getJSONObject("registration")
-                            if (registration.has("name") && !registration.isNull("name")) {
-                                registration.getString("name")
-                            } else {
-                                null
+                        // РАСШИРЕННОЕ ИЗВЛЕЧЕНИЕ ИМЕНИ ПОЛЬЗОВАТЕЛЯ
+                        val userName: String? = try {
+                            when {
+                                // Основной путь: registration.name
+                                json.has("registration") && !json.isNull("registration") -> {
+                                    val registration = json.getJSONObject("registration")
+                                    when {
+                                        registration.has("name") && !registration.isNull("name") -> {
+                                            val name = registration.getString("name")
+                                            Log.d(TAG, "✅ Имя найдено в registration.name: $name")
+                                            name
+                                        }
+                                        registration.has("fullName") && !registration.isNull("fullName") -> {
+                                            registration.getString("fullName")
+                                        }
+                                        registration.has("firstName") && registration.has("lastName") -> {
+                                            val firstName = registration.optString("firstName", "")
+                                            val lastName = registration.optString("lastName", "")
+                                            "$lastName $firstName".trim()
+                                        }
+                                        else -> null
+                                    }
+                                }
+                                // Альтернативные пути
+                                json.has("userName") && !json.isNull("userName") -> {
+                                    json.getString("userName")
+                                }
+                                json.has("fullName") && !json.isNull("fullName") -> {
+                                    json.getString("fullName")
+                                }
+                                json.has("name") && !json.isNull("name") -> {
+                                    json.getString("name")
+                                }
+                                else -> {
+                                    Log.d(TAG, "⚠️ Имя пользователя не найдено в ответе")
+                                    null
+                                }
                             }
-                        } else {
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Ошибка извлечения имени: ${e.message}")
                             null
                         }
                         
@@ -173,9 +210,11 @@ class ApiClient {
                             userName = userName
                         )
                         
+                        Log.d(TAG, "SessionInfo: saldo=$saldo, clientId=$extractedClientId, userName=$userName")
                         onSuccess(sessionInfo)
                         
                     } catch (e: Exception) {
+                        Log.e(TAG, "Ошибка парсинга: ${e.message}")
                         onError("Ошибка парсинга: ${e.message}")
                     }
                 }
@@ -214,6 +253,8 @@ class ApiClient {
             override fun onResponse(call: Call, response: Response) {
                 response.use {
                     val bodyString = response.body?.string() ?: ""
+                    
+                    Log.d(TAG, "getBets response: $bodyString")
                     
                     if (!response.isSuccessful) {
                         Log.e(TAG, "Ошибка getBets ${response.code}: $bodyString")
@@ -307,7 +348,16 @@ class ApiClient {
                             val liveEventInfos = json.getJSONArray("liveEventInfos")
                             if (liveEventInfos.length() > 0) {
                                 val liveEventInfo = liveEventInfos.getJSONObject(0)
-                                matchTime = liveEventInfo.optInt("timerSeconds", 0)
+                                
+                                // ИСПРАВЛЕНИЕ: конвертируем секунды в минуты
+                                val timerSeconds = liveEventInfo.optInt("timerSeconds", 0)
+                                matchTime = if (timerSeconds > 0) {
+                                    Math.round(timerSeconds / 60.0).toInt()
+                                } else {
+                                    0
+                                }
+                                
+                                Log.d(TAG, "Матч #$matchId: timerSeconds=$timerSeconds, matchTime=$matchTime мин")
                                 
                                 if (liveEventInfo.has("scores")) {
                                     val scores = liveEventInfo.getJSONArray("scores")

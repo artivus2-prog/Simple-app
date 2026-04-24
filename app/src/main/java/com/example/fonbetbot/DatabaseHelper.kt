@@ -175,17 +175,20 @@ class DatabaseHelper(context: Context) :
 }
         // Обновление clientId и username пользователя
     fun updateUserInfo(userId: Long, clientId: Long?, username: String?) {
-        val db = writableDatabase
-        val values = ContentValues()
-        
-        clientId?.let { values.put("client_id", it) }
-        username?.let { values.put("username", it) }
-        
-        if (values.size() > 0) {
-            values.put("updated_at", System.currentTimeMillis() / 1000)
-            db.update("users", values, "id = ?", arrayOf(userId.toString()))
-        }
+    val db = writableDatabase
+    val values = ContentValues()
+    
+    Log.d("DatabaseHelper", "updateUserInfo: userId=$userId, clientId=$clientId, username=$username")
+    
+    clientId?.let { values.put("client_id", it) }
+    username?.let { values.put("username", it) }
+    
+    if (values.size() > 0) {
+        values.put("updated_at", System.currentTimeMillis() / 1000)
+        val rows = db.update("users", values, "id = ?", arrayOf(userId.toString()))
+        Log.d("DatabaseHelper", "Обновлено строк: $rows")
     }
+}
 
     // Обновление информации по fsid и deviceId
     fun updateUserInfoByAuth(fsid: String, deviceId: String, clientId: Long?, username: String?): Boolean {

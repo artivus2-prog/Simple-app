@@ -576,4 +576,3 @@ fun WebViewAuthScreen(
     }
 }
 
-// Вспомогательная функция для clickable
