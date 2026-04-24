@@ -1,4 +1,4 @@
-// ApiClient.kt - ПОЛНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ С РЕАЛЬНЫМИ СТАВКАМИ
+// ApiClient.kt
 package com.example.fonbetbot
 
 import android.util.Log
@@ -16,23 +16,23 @@ class ApiClient {
         const val TAG = "ApiClient"
     }
     
-    // Data class для ответа session/info
     data class SessionInfo(
         val saldo: Double?,
         val clientId: Long?,
         val userName: String?
     )
     
-    // Data class для матча с коэффициентами и временем
     data class MatchFactors(
         val score1: Int,
         val score2: Int,
         val matchTime: Int,
         val factors: Map<Int, Double>,
-        val handicaps: Map<Int, Double>
+        val handicaps: Map<Int, Double>,
+        val comand1: String = "",
+        val comand2: String = "",
+        val ligaName: String = ""
     )
     
-    // Data class для ставки из ответа getBets
     data class BetData(
         val mId: Int,
         val type: Int,
@@ -55,7 +55,6 @@ class ApiClient {
         val tbType: Int = 0
     )
     
-    // Data class для настроек ставок
     data class BetSettings(
         val maxMatchesPerExpress: Int = 2,
         val multiply: Int = 2,
@@ -94,8 +93,6 @@ class ApiClient {
         val monitorEnd: Int
     )
 
-    // ==================== DATA CLASSES ДЛЯ РЕАЛЬНЫХ СТАВОК ====================
-    
     data class BetSlipItem(
         val eventId: Int,
         val factorId: Int,
@@ -121,7 +118,6 @@ class ApiClient {
         val rawResponse: JSONObject
     )
     
-    // Метод получения баланса
     fun getSaldo(
         cookies: Map<String, String>,
         fsid: String,
@@ -177,29 +173,19 @@ class ApiClient {
                         
                         val saldo: Double? = if (json.has("saldo") && !json.isNull("saldo")) {
                             json.getDouble("saldo")
-                        } else {
-                            null
-                        }
+                        } else null
                         
                         val extractedClientId: Long? = if (json.has("clientId") && !json.isNull("clientId")) {
                             json.getLong("clientId")
-                        } else {
-                            null
-                        }
+                        } else null
                         
                         val userName: String? = try {
                             when {
                                 json.has("registration") && !json.isNull("registration") -> {
                                     val registration = json.getJSONObject("registration")
                                     when {
-                                        registration.has("name") && !registration.isNull("name") -> {
-                                            val name = registration.getString("name")
-                                            Log.d(TAG, "✅ Имя найдено в registration.name: $name")
-                                            name
-                                        }
-                                        registration.has("fullName") && !registration.isNull("fullName") -> {
-                                            registration.getString("fullName")
-                                        }
+                                        registration.has("name") && !registration.isNull("name") -> registration.getString("name")
+                                        registration.has("fullName") && !registration.isNull("fullName") -> registration.getString("fullName")
                                         registration.has("firstName") && registration.has("lastName") -> {
                                             val firstName = registration.optString("firstName", "")
                                             val lastName = registration.optString("lastName", "")
@@ -208,31 +194,17 @@ class ApiClient {
                                         else -> null
                                     }
                                 }
-                                json.has("userName") && !json.isNull("userName") -> {
-                                    json.getString("userName")
-                                }
-                                json.has("fullName") && !json.isNull("fullName") -> {
-                                    json.getString("fullName")
-                                }
-                                json.has("name") && !json.isNull("name") -> {
-                                    json.getString("name")
-                                }
-                                else -> {
-                                    Log.d(TAG, "⚠️ Имя пользователя не найдено в ответе")
-                                    null
-                                }
+                                json.has("userName") && !json.isNull("userName") -> json.getString("userName")
+                                json.has("fullName") && !json.isNull("fullName") -> json.getString("fullName")
+                                json.has("name") && !json.isNull("name") -> json.getString("name")
+                                else -> null
                             }
                         } catch (e: Exception) {
                             Log.e(TAG, "Ошибка извлечения имени: ${e.message}")
                             null
                         }
                         
-                        val sessionInfo = SessionInfo(
-                            saldo = saldo,
-                            clientId = extractedClientId,
-                            userName = userName
-                        )
-                        
+                        val sessionInfo = SessionInfo(saldo = saldo, clientId = extractedClientId, userName = userName)
                         Log.d(TAG, "SessionInfo: saldo=$saldo, clientId=$extractedClientId, userName=$userName")
                         onSuccess(sessionInfo)
                         
@@ -245,7 +217,6 @@ class ApiClient {
         })
     }
     
-    // Метод получения ставок
     fun getBets(
         userId: Long,
         settings: BetSettings,
@@ -276,7 +247,6 @@ class ApiClient {
             override fun onResponse(call: Call, response: Response) {
                 response.use {
                     val bodyString = response.body?.string() ?: ""
-                    
                     Log.d(TAG, "getBets response: $bodyString")
                     
                     if (!response.isSuccessful) {
@@ -291,11 +261,9 @@ class ApiClient {
                         
                         if (json.has("data")) {
                             val dataArray = json.getJSONArray("data")
-                            
                             for (i in 0 until dataArray.length()) {
                                 val betJson = dataArray.getJSONObject(i)
-                                
-                                val betData = BetData(
+                                betsList.add(BetData(
                                     mId = betJson.optInt("m_id", 0),
                                     type = betJson.optInt("type", 0),
                                     sport = betJson.optString("sport", ""),
@@ -315,9 +283,7 @@ class ApiClient {
                                     url = betJson.optString("url", ""),
                                     uzh = betJson.optDouble("uzh", 0.0),
                                     tbType = betJson.optInt("tbtype", 0)
-                                )
-                                
-                                betsList.add(betData)
+                                ))
                             }
                         }
                         
@@ -333,7 +299,6 @@ class ApiClient {
         })
     }
     
-    // Метод получения счета, времени и коэффициентов матча
     fun getMatchScore(
         matchId: Int,
         onSuccess: (MatchFactors?) -> Unit,
@@ -366,6 +331,20 @@ class ApiClient {
                         var sh = -1
                         var sa = -1
                         var matchTime = 0
+                        var comand1 = ""
+                        var comand2 = ""
+                        var ligaName = ""
+                        
+                        comand1 = json.optString("comand1", "")
+                        comand2 = json.optString("comand2", "")
+                        ligaName = json.optString("liganame", "")
+                        
+                        if (comand1.isEmpty() && json.has("event")) {
+                            val event = json.getJSONObject("event")
+                            comand1 = event.optString("comand1", "")
+                            comand2 = event.optString("comand2", "")
+                            ligaName = event.optString("liganame", "")
+                        }
                         
                         if (json.has("liveEventInfos")) {
                             val liveEventInfos = json.getJSONArray("liveEventInfos")
@@ -373,13 +352,17 @@ class ApiClient {
                                 val liveEventInfo = liveEventInfos.getJSONObject(0)
                                 
                                 val timerSeconds = liveEventInfo.optInt("timerSeconds", 0)
-                                matchTime = if (timerSeconds > 0) {
-                                    Math.round(timerSeconds / 60.0).toInt()
-                                } else {
-                                    0
-                                }
+                                matchTime = if (timerSeconds > 0) Math.round(timerSeconds / 60.0).toInt() else 0
                                 
                                 Log.d(TAG, "Матч #$matchId: timerSeconds=$timerSeconds, matchTime=$matchTime мин")
+                                
+                                if (comand1.isEmpty()) {
+                                    comand1 = liveEventInfo.optString("comand1", "")
+                                    comand2 = liveEventInfo.optString("comand2", "")
+                                }
+                                if (ligaName.isEmpty()) {
+                                    ligaName = liveEventInfo.optString("liganame", "")
+                                }
                                 
                                 if (liveEventInfo.has("scores")) {
                                     val scores = liveEventInfo.getJSONArray("scores")
@@ -414,9 +397,7 @@ class ApiClient {
                                             if (f in listOf(924, 927, 928) && v > 0) {
                                                 factors[f] = v
                                                 val p = factor.optInt("p", 0)
-                                                if (p > 0) {
-                                                    handicaps[f] = p / 100.0
-                                                }
+                                                if (p > 0) handicaps[f] = p / 100.0
                                             }
                                         }
                                     }
@@ -425,7 +406,7 @@ class ApiClient {
                         }
                         
                         if (sh >= 0 && sa >= 0) {
-                            onSuccess(MatchFactors(sh, sa, matchTime, factors, handicaps))
+                            onSuccess(MatchFactors(sh, sa, matchTime, factors, handicaps, comand1, comand2, ligaName))
                         } else {
                             onSuccess(null)
                         }
@@ -438,22 +419,10 @@ class ApiClient {
         })
     }
     
-    fun getMatchTime(
-        matchId: Int,
-        onSuccess: (Int?) -> Unit,
-        onError: (String) -> Unit
-    ) {
-        getMatchScore(matchId, 
-            onSuccess = { factors -> onSuccess(factors?.matchTime) },
-            onError = onError
-        )
+    fun getMatchTime(matchId: Int, onSuccess: (Int?) -> Unit, onError: (String) -> Unit) {
+        getMatchScore(matchId, onSuccess = { factors -> onSuccess(factors?.matchTime) }, onError = onError)
     }
 
-    // ==================== МЕТОДЫ ДЛЯ РЕАЛЬНОЙ СТАВКИ ====================
-
-    /**
-     * Шаг 1: Получить информацию о ставках (betSlipInfo)
-     */
     fun getBetSlipInfo(
         bets: List<BetData>,
         cookies: Map<String, String>,
@@ -495,9 +464,7 @@ class ApiClient {
             .addHeader("Accept", "application/json")
 
         val cookieHeader = cookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
-        if (cookieHeader.isNotEmpty()) {
-            requestBuilder.addHeader("Cookie", cookieHeader)
-        }
+        if (cookieHeader.isNotEmpty()) requestBuilder.addHeader("Cookie", cookieHeader)
 
         client.newCall(requestBuilder.build()).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
@@ -534,8 +501,7 @@ class ApiClient {
                             ))
                         }
 
-                        Log.d(TAG, "betSlipInfo success: K=$k, bets=${betsInfo.size}, min=${sums?.optDouble("min")}, max=${sums?.optDouble("max")}")
-                        
+                        Log.d(TAG, "betSlipInfo success: K=$k, bets=${betsInfo.size}")
                         onSuccess(BetSlipInfoResponse(
                             totalK = k,
                             bets = betsInfo,
@@ -551,9 +517,6 @@ class ApiClient {
         })
     }
 
-    /**
-     * Шаг 2: Получить requestId для ставки
-     */
     fun getBetRequestId(
         cookies: Map<String, String>,
         fsid: String,
@@ -583,9 +546,7 @@ class ApiClient {
             .addHeader("Accept", "application/json")
 
         val cookieHeader = cookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
-        if (cookieHeader.isNotEmpty()) {
-            requestBuilder.addHeader("Cookie", cookieHeader)
-        }
+        if (cookieHeader.isNotEmpty()) requestBuilder.addHeader("Cookie", cookieHeader)
 
         client.newCall(requestBuilder.build()).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
@@ -618,9 +579,6 @@ class ApiClient {
         })
     }
 
-    /**
-     * Шаг 3: Разместить ставку
-     */
     fun placeRealBet(
         requestId: String,
         betSlipInfo: BetSlipInfoResponse,
@@ -641,14 +599,12 @@ class ApiClient {
                     put("value", slipItem.factorValue)
                     put("score", slipItem.score)
                 }
-
                 val betData = bets.find { it.mId == slipItem.eventId && it.type == slipItem.factorId }
                 if (betData != null && betData.type in listOf(1696, 1793, 1796, 1799, 930) && betData.tbType > 0) {
                     betJson.put("param", betData.tbType)
                 } else if (slipItem.param > 0) {
                     betJson.put("param", slipItem.param)
                 }
-
                 put(betJson)
             }
         }
@@ -684,9 +640,7 @@ class ApiClient {
             .addHeader("Accept", "application/json")
 
         val cookieHeader = cookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
-        if (cookieHeader.isNotEmpty()) {
-            requestBuilder.addHeader("Cookie", cookieHeader)
-        }
+        if (cookieHeader.isNotEmpty()) requestBuilder.addHeader("Cookie", cookieHeader)
 
         Log.d(TAG, "placeRealBet requestId=$requestId, amount=$amount")
         
@@ -711,14 +665,8 @@ class ApiClient {
                         val json = JSONObject(bodyString)
                         val result = json.optString("result", "")
                         val betDelay = json.optInt("betDelay", 0)
-
                         Log.d(TAG, "placeBet result=$result, betDelay=$betDelay")
-                        
-                        onSuccess(PlaceBetResponse(
-                            result = result,
-                            betDelay = betDelay,
-                            rawResponse = json
-                        ))
+                        onSuccess(PlaceBetResponse(result = result, betDelay = betDelay, rawResponse = json))
                     } catch (e: Exception) {
                         Log.e(TAG, "placeBet parse error: ${e.message}")
                         onError("placeBet parse error: ${e.message}")
@@ -728,9 +676,6 @@ class ApiClient {
         })
     }
 
-    /**
-     * Шаг 4: Получить результат ставки
-     */
     fun getBetResult(
         requestId: String,
         cookies: Map<String, String>,
@@ -762,9 +707,7 @@ class ApiClient {
             .addHeader("Accept", "application/json")
 
         val cookieHeader = cookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
-        if (cookieHeader.isNotEmpty()) {
-            requestBuilder.addHeader("Cookie", cookieHeader)
-        }
+        if (cookieHeader.isNotEmpty()) requestBuilder.addHeader("Cookie", cookieHeader)
 
         Log.d(TAG, "getBetResult requestId=$requestId")
         
