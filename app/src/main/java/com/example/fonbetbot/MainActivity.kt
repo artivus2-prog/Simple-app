@@ -140,7 +140,7 @@ fun MainBotScreen(
                 if (sessionInfo != null && sessionInfo.saldo != null) {
                     val saldo = sessionInfo.saldo; val oldBalance = balance; balance = saldo
                     logs.add(0, "[${getCurrentTime()}] 💰 Баланс обновлён: %.2f ₽".format(saldo))
-scope.launch {
+/*scope.launch {
     try {
         val user = dbHelper.getUser(authData.fsid, authData.deviceId)
         user?.let { u ->
@@ -153,6 +153,7 @@ scope.launch {
             }
         }
     } catch (e: Exception) {}
+*/
 }
                     }
                 }
