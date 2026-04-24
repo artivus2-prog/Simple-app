@@ -147,22 +147,23 @@ fun fetchBalanceFromApi() {
                 val oldBalance = balance
                 balance = saldo
                 logs.add(0, "[${getCurrentTime()}] 💰 Баланс обновлён: %.2f ₽".format(saldo))
-                scope.launch {
-                    try {
-                        val user = dbHelper.getUser(authData.fsid, authData.deviceId)
-                        user?.let { u ->
-                            dbHelper.saveBalance(u.id, saldo)
-                            dbHelper.updateUserInfo(u.id, sessionInfo.clientId, sessionInfo.userName)
-                            val profit = saldo - oldBalance
-                            if (profit > 0 && oldBalance > 0) {
-                                dbHelper.addLog(u.id, "profit", "Профит: +%.2f ₽".format(profit))
-                            } else if (profit < 0 && oldBalance > 0) {
-                                dbHelper.addLog(u.id, "loss", "Убыток: %.2f ₽".format(-profit))
-                            }
-                        }
-                    } catch (e: Exception) {
-                    }
-                }
+scope.launch {
+    try {
+        val user = dbHelper.getUser(authData.fsid, authData.deviceId)
+        user?.let { u ->
+            dbHelper.saveBalance(u.id, saldo)
+            dbHelper.updateUserInfo(u.id, sessionInfo.clientId, sessionInfo.userName)
+            val profit = saldo - oldBalance
+            if (profit > 0 && oldBalance > 0) {
+                dbHelper.addLog(u.id, "profit", "Профит: +%.2f ₽".format(profit))
+            }
+            if (profit < 0 && oldBalance > 0) {
+                dbHelper.addLog(u.id, "loss", "Убыток: %.2f ₽".format(-profit))
+            }
+        }
+    } catch (e: Exception) {
+    }
+}
             }
         },
         onError = { error ->
