@@ -199,7 +199,7 @@ class BotForegroundService : Service() {
                                     dbHelper.addLog(userData.id, "profit", "Профит: +%.2f ₽".format(difference))
                                 } else if (difference < 0 && oldBalance > 0) {
                                     dbHelper.addLog(userData.id, "loss", "Убыток: %.2f ₽".format(difference))
-                                } else {dbHelprr.addLog(userData.id,"loss","empty")}
+                                } else {dbHelper.addLog(userData.id,"loss","empty")}
                             }
                         } catch (e: Exception) {
                             Log.e(TAG, "Ошибка сохранения баланса: ${e.message}")
