@@ -9,6 +9,8 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -650,25 +652,52 @@ fun MainBotScreen(
                 }
             }
 
+            // Замените весь блок "ЛОГ" на этот:
+
             // ЛОГ
             Spacer(modifier = Modifier.height(16.dp))
             Text("📝 Лог событий", fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
-            Card(modifier = Modifier.fillMaxWidth().weight(1f), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
-                if (logs.isEmpty()) Box(modifier = Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) { Text("Запустите бота для отображения логов", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                else LazyColumn(
-                    modifier = Modifier.padding(12.dp),
-                    reverseLayout = true
-                ) {
-                    items(
-                        items = logs,
-                        key = { "log_$it" }
-                    ) { log ->
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                )
+            ) {
+                if (logs.isEmpty()) {
+                    Box(
+                        modifier = Modifier.fillMaxSize().padding(16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Text(
-                            text = log,
-                            fontSize = 12.sp,
-                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                            modifier = Modifier.padding(vertical = 2.dp)
+                            "Запустите бота для отображения логов",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+                } else {
+                    val scrollState = rememberScrollState()
+                    LaunchedEffect(logs.size) {
+                        if (logs.isNotEmpty()) {
+                            scrollState.animateScrollTo(0)
+                        }
+                    }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(scrollState)
+                            .padding(12.dp)
+                    ) {
+                        // Показываем логи в обратном порядке (новые сверху)
+                        logs.forEach { log ->
+                            Text(
+                                text = log,
+                                fontSize = 12.sp,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                modifier = Modifier.padding(vertical = 2.dp)
+                            )
+                        }
                     }
                 }
             }
