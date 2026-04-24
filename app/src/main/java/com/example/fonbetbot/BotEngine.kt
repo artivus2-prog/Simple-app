@@ -198,7 +198,7 @@ class BotEngine(
                                         "Убыток: %.2f ₽".format(newBalance - oldBalance)
                                     )
                                     onLogUpdate?.invoke("[${getCurrentTime()}] 📉 Убыток: %.2f ₽".format(newBalance - oldBalance))
-                                }
+                                } else {dbHelper.addLog(u.id,"draw","draw")}
                             }
                         } catch (e: Exception) {
                             Log.e(TAG, "Ошибка сохранения баланса: ${e.message}")
