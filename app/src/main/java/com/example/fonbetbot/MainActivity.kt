@@ -2194,6 +2194,6 @@ fun formatTimestamp(timestamp: Long): String {
     if (timestamp == 0L) return "—"
     return SimpleDateFormat("dd.MM.yy HH:mm", Locale.getDefault()).format(Date(timestamp * 1000))
 }
-//     fun typeName(type: Int): String = when (type) {
-//     924 -> "1X"; 927 -> "Ф1(+1.5)"; 928 -> "Ф2(+1.5)"; else -> "Тип $type"
-// }
+    fun typeName(type: Int): String = when (type) {
+    924 -> "1X"; 927 -> "Ф1(+1.5)"; 928 -> "Ф2(+1.5)"; else -> "Тип $type"
+}

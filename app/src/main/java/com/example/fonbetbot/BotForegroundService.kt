@@ -193,7 +193,7 @@ class BotForegroundService : Service() {
                                     dbHelper.addLog(userData.id, "profit", "Профит: +%.2f ₽".format(difference))
                                 } else if (difference < 0 && oldBalance > 0) {
                                     dbHelper.addLog(userData.id, "loss", "Убыток: %.2f ₽".format(difference))
-                                }
+                                } else {dbHelper.addLog(userData.id, "loss", "Убыток: %.2f ₽".format(difference))}
                             }
                         } catch (e: Exception) {
                             Log.e(TAG, "Ошибка сохранения баланса: ${e.message}")
