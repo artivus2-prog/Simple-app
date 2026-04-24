@@ -402,7 +402,7 @@ fun MainBotScreen(
                 actions = {
                     if (isBotRunning) {
                         IconButton(onClick = { showExitDialog = true }) {
-                            Icon(Icons.Default.Stop, "Остановить бота")
+                            Icon(Icons.Default.Stop, "Остановить")
                         }
                     }
                     
@@ -1211,7 +1211,7 @@ fun SettingsScreen(
     var type928End by remember { mutableStateOf(prefs.getInt("type_928_end", 45).toString()) }
     
     var checkInterval by remember { mutableStateOf(prefs.getString("check_interval", "60") ?: "60") }
-    var betAmount by remember { mutableStateOf(prefs.getString("bet_amount", "100") ?: "100") }
+    var betAmount by remember { mutableStateOf(prefs.getString("bet_amount", "30") ?: "30") }
     var autoStart by remember { mutableStateOf(prefs.getBoolean("auto_start", true)) }
     var notifications by remember { mutableStateOf(prefs.getBoolean("notifications", true)) }
     
@@ -1222,7 +1222,7 @@ fun SettingsScreen(
     var expandedType924 by remember { mutableStateOf(false) }
     var expandedType927 by remember { mutableStateOf(false) }
     var expandedType928 by remember { mutableStateOf(false) }
-    
+    var testMode by remember { mutableStateOf(prefs.getBoolean("test_mode", true)) }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -1575,7 +1575,27 @@ fun SettingsScreen(
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                         )
-                        
+                        Spacer(modifier = Modifier.height(8.dp))
+
+OutlinedTextField(
+    value = betAmount,
+    onValueChange = { 
+        if (it.isEmpty() || it.matches(Regex("^\\d+$"))) {
+            betAmount = it 
+        }
+    },
+    label = { Text("Базовая сумма ставки (₽)") },
+    leadingIcon = { Icon(Icons.Default.AttachMoney, null) },
+    modifier = Modifier.fillMaxWidth(),
+    singleLine = true,
+    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+    supportingText = {
+        Text(
+            "Начальная сумма для первой ставки (по умолчанию 30 ₽)",
+            fontSize = 11.sp
+        )
+    }
+)
                         Spacer(modifier = Modifier.height(8.dp))
                         
                         OutlinedTextField(
@@ -1609,6 +1629,23 @@ fun SettingsScreen(
                             Text("Уведомления")
                             Switch(checked = notifications, onCheckedChange = { notifications = it })
                         }
+Divider(modifier = Modifier.padding(vertical = 8.dp))
+
+Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.SpaceBetween,
+    verticalAlignment = Alignment.CenterVertically
+) {
+    Column {
+        Text("Тестовый режим")
+        Text(
+            "Ставки сохраняются в БД без реальной отправки",
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+    Switch(checked = testMode, onCheckedChange = { testMode = it })
+}
                     }
                 }
             }
@@ -1701,9 +1738,10 @@ fun SettingsScreen(
                                 .putInt("type_928_start", type928Start.toIntOrNull() ?: 1)
                                 .putInt("type_928_end", type928End.toIntOrNull() ?: 45)
                                 .putString("check_interval", checkInterval)
-                                .putString("bet_amount", betAmount)
+                                .putString("bet_amount", betAmount.ifEmpty { "30" })
                                 .putBoolean("auto_start", autoStart)
                                 .putBoolean("notifications", notifications)
+.putBoolean("test_mode", testMode)
                                 .apply()
                             
                             Toast.makeText(context, "Настройки сохранены", Toast.LENGTH_SHORT).show()
