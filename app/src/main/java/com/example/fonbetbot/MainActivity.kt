@@ -157,7 +157,7 @@ fun fetchBalanceFromApi() {
                             when {
                                 profit > 0 && oldBalance > 0 -> dbHelper.addLog(u.id, "profit", "Профит: +%.2f ₽".format(profit))
                                 profit < 0 && oldBalance > 0 -> dbHelper.addLog(u.id, "loss", "Убыток: %.2f ₽".format(-profit))
-                            }
+                            } else {/* no changes*/}
                         }
                     } catch (e: Exception) {}
                 }
