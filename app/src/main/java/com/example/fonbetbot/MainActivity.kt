@@ -1596,17 +1596,7 @@ OutlinedTextField(
         )
     }
 )
-                        Spacer(modifier = Modifier.height(8.dp))
                         
-                        OutlinedTextField(
-                            value = betAmount,
-                            onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) betAmount = it },
-                            label = { Text("Сумма ставки (₽)") },
-                            leadingIcon = { Icon(Icons.Default.AttachMoney, null) },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                        )
                         
                         Spacer(modifier = Modifier.height(12.dp))
                         

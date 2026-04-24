@@ -1,4 +1,4 @@
-﻿// BotEngine.kt - ИСПРАВЛЕННАЯ ВЕРСИЯ (все проблемы устранены)
+﻿// BotEngine.kt - ИСПРАВЛЕННАЯ ВЕРСИЯ (ошибки компиляции устранены)
 package com.example.fonbetbot
 
 import android.app.PendingIntent
@@ -167,7 +167,6 @@ class BotEngine(
         val data = authData ?: return
         val cookies = getCookies()
 
-        // Приостанавливаем выполнение через callback API
         suspendCancellableCoroutine<Unit> { continuation ->
             apiClient.getSaldo(
                 cookies = cookies,
@@ -185,7 +184,7 @@ class BotEngine(
                             val user = dbHelper.getUser(data.fsid, data.deviceId)
                             user?.let { u ->
                                 dbHelper.saveBalance(u.id, newBalance)
-                                // ✅ Сохраняем clientId и userName из ответа API
+                                // Сохраняем clientId и userName из ответа API
                                 dbHelper.updateUserInfo(u.id, sessionInfo.clientId, sessionInfo.userName)
                                 if (newBalance > oldBalance && oldBalance > 0) {
                                     dbHelper.addLog(
@@ -223,41 +222,49 @@ class BotEngine(
             val user = dbHelper.getUser(data.fsid, data.deviceId) ?: return
             val settings = buildBetSettings()
 
-            apiClient.getBets(
-                userId = user.id,
-                settings = settings,
-                onSuccess = { betDataList ->
-                    if (betDataList.isEmpty()) {
-                        // Тихо, без спама в лог
-                        return@getBets
-                    }
-                    val matchIds = betDataList.map { it.mId }.sorted()
-                    val key = matchIds.joinToString(",")
-                    if (isExpressAlreadyExists(user.id, matchIds)) {
-                        onLogUpdate?.invoke("[${getCurrentTime()}] ⏭ Экспресс уже обработан: $key")
-                        return@getBets
-                    }
-                    onLogUpdate?.invoke("[${getCurrentTime()}] 🎲 Получен экспресс: $key")
-                    betDataList.forEach { betData ->
-                        onLogUpdate?.invoke(
-                            "[${getCurrentTime()}] 📊 Матч #${betData.mId}: " +
-                                    "${betData.home} vs ${betData.away} | " +
-                                    "Кэф: ${"%.2f".format(betData.startKf)} | " +
-                                    "Тип: ${typeName(betData.type)}"
-                        )
-                    }
-                    onBetsUpdate?.invoke(betDataList.map { Pair(it.mId, it.type) })
+            suspendCancellableCoroutine<Unit> { continuation ->
+                apiClient.getBets(
+                    userId = user.id,
+                    settings = settings,
+                    onSuccess = { betDataList ->
+                        if (betDataList.isEmpty()) {
+                            continuation.resume(Unit)
+                            return@getBets
+                        }
+                        val matchIds = betDataList.map { it.mId }.sorted()
+                        val key = matchIds.joinToString(",")
+                        if (isExpressAlreadyExists(user.id, matchIds)) {
+                            onLogUpdate?.invoke("[${getCurrentTime()}] ⏭ Экспресс уже обработан: $key")
+                            continuation.resume(Unit)
+                            return@getBets
+                        }
+                        onLogUpdate?.invoke("[${getCurrentTime()}] 🎲 Получен экспресс: $key")
+                        betDataList.forEach { betData ->
+                            onLogUpdate?.invoke(
+                                "[${getCurrentTime()}] 📊 Матч #${betData.mId}: " +
+                                        "${betData.home} vs ${betData.away} | " +
+                                        "Кэф: ${"%.2f".format(betData.startKf)} | " +
+                                        "Тип: ${typeName(betData.type)}"
+                            )
+                        }
+                        onBetsUpdate?.invoke(betDataList.map { Pair(it.mId, it.type) })
 
-                    val newExpId = (System.currentTimeMillis() / 1000).toInt()
-                    val expressDbId = saveExpressToDb(user.id, newExpId, betDataList)
-                    if (expressDbId > 0) {
-                        placeBet(expressDbId, newExpId, user.id, betDataList)
+                        val newExpId = (System.currentTimeMillis() / 1000).toInt()
+                        val expressDbId = saveExpressToDb(user.id, newExpId, betDataList)
+                        if (expressDbId > 0) {
+                            // Запускаем placeBet в отдельной корутине
+                            CoroutineScope(Dispatchers.IO).launch {
+                                placeBet(expressDbId, newExpId, user.id, betDataList)
+                            }
+                        }
+                        continuation.resume(Unit)
+                    },
+                    onError = { error ->
+                        onLogUpdate?.invoke("[${getCurrentTime()}] ❌ Ставки: $error")
+                        continuation.resume(Unit)
                     }
-                },
-                onError = { error ->
-                    onLogUpdate?.invoke("[${getCurrentTime()}] ❌ Ставки: $error")
-                }
-            )
+                )
+            }
         } catch (e: Exception) {
             Log.e(TAG, "fetchBets error", e)
         }
@@ -327,91 +334,98 @@ class BotEngine(
             return
         }
 
+        // ✅ ВЫЗЫВАЕМ ДО ВСЕХ КОЛБЕКОВ
         val clientId = getClientId()
         onLogUpdate?.invoke("[${getCurrentTime()}] 📋 Запрос betSlipInfo (clientId=$clientId)...")
 
-        suspendCancellableCoroutine<Unit> { outerContinuation ->
-            apiClient.getBetSlipInfo(
-                bets = betDataList,
-                cookies = cookies,
-                fsid = data.fsid,
-                deviceId = data.deviceId,
-                clientId = clientId,
-                onSuccess = { slipInfo ->
-                    onLogUpdate?.invoke("[${getCurrentTime()}] ✅ betSlipInfo: K=${"%.2f".format(slipInfo.totalK)}, мин=${slipInfo.minSum.toInt()}₽")
-                    val betAmount = prefs.getString("bet_amount", "30")?.toDoubleOrNull() ?: 30.0
-                    if (betAmount < slipInfo.minSum) {
-                        onLogUpdate?.invoke("[${getCurrentTime()}] ⚠️ Сумма ${betAmount.toInt()}₽ меньше мин. ${slipInfo.minSum.toInt()}₽")
-                    }
-
-                    apiClient.getBetRequestId(
-                        cookies = cookies,
-                        fsid = data.fsid,
-                        deviceId = data.deviceId,
-                        clientId = clientId,
-                        onSuccess = { requestId ->
-                            onLogUpdate?.invoke("[${getCurrentTime()}] ✅ requestId: $requestId")
-                            apiClient.placeRealBet(
-                                requestId = requestId,
-                                betSlipInfo = slipInfo,
-                                amount = betAmount,
-                                bets = betDataList,
-                                cookies = cookies,
-                                fsid = data.fsid,
-                                clientId = clientId,
-                                onSuccess = { placeResponse ->
-                                    if (placeResponse.result == "betDelay") {
-                                        onLogUpdate?.invoke("[${getCurrentTime()}] ⏳ Ставка в обработке (betDelay=${placeResponse.betDelay}мс)...")
-                                        // Запускаем отложенный запрос результата
-                                        CoroutineScope(Dispatchers.IO).launch {
-                                            delay(placeResponse.betDelay.toLong())
-                                            apiClient.getBetResult(
-                                                requestId = requestId,
-                                                cookies = cookies,
-                                                fsid = data.fsid,
-                                                deviceId = data.deviceId,
-                                                clientId = clientId,
-                                                onSuccess = { result ->
-                                                    processRealBetResult(expressDbId, expId, userId, betDataList, betAmount, slipInfo.totalK, result)
-                                                },
-                                                onError = { error ->
-                                                    onLogUpdate?.invoke("[${getCurrentTime()}] ❌ betResult ошибка: $error")
-                                                    dbHelper.addLog(userId, "bet_error", "betResult: $error", "ERROR")
-                                                }
-                                            )
-                                        }
-                                    } else {
-                                        processRealBetResult(expressDbId, expId, userId, betDataList, betAmount, slipInfo.totalK, ApiClient.BetResultResponse(placeResponse.rawResponse))
-                                    }
-                                    outerContinuation.resume(Unit)
-                                },
-                                onError = { error ->
-                                    onLogUpdate?.invoke("[${getCurrentTime()}] ❌ placeBet: $error")
-                                    dbHelper.addLog(userId, "bet_error", "placeBet: $error", "ERROR")
-                                    outerContinuation.resume(Unit)
-                                }
-                            )
-                        },
-                        onError = { error ->
-                            onLogUpdate?.invoke("[${getCurrentTime()}] ❌ requestId: $error")
-                            dbHelper.addLog(userId, "bet_error", "requestId: $error", "ERROR")
-                            outerContinuation.resume(Unit)
-                        }
-                    )
-                },
-                onError = { error ->
-                    onLogUpdate?.invoke("[${getCurrentTime()}] ❌ betSlipInfo: $error")
-                    dbHelper.addLog(userId, "bet_error", "betSlipInfo: $error", "ERROR")
-                    outerContinuation.resume(Unit)
+        apiClient.getBetSlipInfo(
+            bets = betDataList,
+            cookies = cookies,
+            fsid = data.fsid,
+            deviceId = data.deviceId,
+            clientId = clientId,
+            onSuccess = { slipInfo ->
+                onLogUpdate?.invoke("[${getCurrentTime()}] ✅ betSlipInfo: K=${"%.2f".format(slipInfo.totalK)}, мин=${slipInfo.minSum.toInt()}₽")
+                val betAmount = prefs.getString("bet_amount", "30")?.toDoubleOrNull() ?: 30.0
+                if (betAmount < slipInfo.minSum) {
+                    onLogUpdate?.invoke("[${getCurrentTime()}] ⚠️ Сумма ${betAmount.toInt()}₽ меньше мин. ${slipInfo.minSum.toInt()}₽")
                 }
-            )
-        }
+
+                apiClient.getBetRequestId(
+                    cookies = cookies,
+                    fsid = data.fsid,
+                    deviceId = data.deviceId,
+                    clientId = clientId,
+                    onSuccess = { requestId ->
+                        onLogUpdate?.invoke("[${getCurrentTime()}] ✅ requestId: $requestId")
+                        apiClient.placeRealBet(
+                            requestId = requestId,
+                            betSlipInfo = slipInfo,
+                            amount = betAmount,
+                            bets = betDataList,
+                            cookies = cookies,
+                            fsid = data.fsid,
+                            clientId = clientId,
+                            onSuccess = { placeResponse ->
+                                if (placeResponse.result == "betDelay") {
+                                    onLogUpdate?.invoke("[${getCurrentTime()}] ⏳ Ставка в обработке (betDelay=${placeResponse.betDelay}мс)...")
+                                    // Запускаем отложенный запрос в отдельной корутине
+                                    CoroutineScope(Dispatchers.IO).launch {
+                                        delay(placeResponse.betDelay.toLong())
+                                        apiClient.getBetResult(
+                                            requestId = requestId,
+                                            cookies = cookies,
+                                            fsid = data.fsid,
+                                            deviceId = data.deviceId,
+                                            clientId = clientId,
+                                            onSuccess = { result ->
+                                                processRealBetResult(
+                                                    expressDbId, expId, userId, betDataList,
+                                                    betAmount, slipInfo.totalK, result
+                                                )
+                                            },
+                                            onError = { error ->
+                                                onLogUpdate?.invoke("[${getCurrentTime()}] ❌ betResult ошибка: $error")
+                                                dbHelper.addLog(userId, "bet_error", "betResult: $error", "ERROR")
+                                            }
+                                        )
+                                    }
+                                } else {
+                                    processRealBetResult(
+                                        expressDbId, expId, userId, betDataList,
+                                        betAmount, slipInfo.totalK,
+                                        ApiClient.BetResultResponse(placeResponse.rawResponse)
+                                    )
+                                }
+                            },
+                            onError = { error ->
+                                onLogUpdate?.invoke("[${getCurrentTime()}] ❌ placeBet: $error")
+                                dbHelper.addLog(userId, "bet_error", "placeBet: $error", "ERROR")
+                            }
+                        )
+                    },
+                    onError = { error ->
+                        onLogUpdate?.invoke("[${getCurrentTime()}] ❌ requestId: $error")
+                        dbHelper.addLog(userId, "bet_error", "requestId: $error", "ERROR")
+                    }
+                )
+            },
+            onError = { error ->
+                onLogUpdate?.invoke("[${getCurrentTime()}] ❌ betSlipInfo: $error")
+                dbHelper.addLog(userId, "bet_error", "betSlipInfo: $error", "ERROR")
+            }
+        )
     }
 
-    private suspend fun processRealBetResult(
-        expressDbId: Long, expId: Int, userId: Long,
-        betDataList: List<ApiClient.BetData>, betAmount: Double,
-        totalKef: Double, resultResponse: ApiClient.BetResultResponse
+    // ✅ НЕ suspend — вызывается из обычных колбеков
+    private fun processRealBetResult(
+        expressDbId: Long,
+        expId: Int,
+        userId: Long,
+        betDataList: List<ApiClient.BetData>,
+        betAmount: Double,
+        totalKef: Double,
+        resultResponse: ApiClient.BetResultResponse
     ) {
         val json = resultResponse.rawResponse
         val result = json.optString("result", "")
@@ -453,8 +467,7 @@ class BotEngine(
                     balance = saldo
                     BotForegroundService.lastBalance = saldo
                     onBalanceUpdate?.invoke(saldo)
-                    val user = dbHelper.getUser(authData!!.fsid, authData!!.deviceId)
-                    user?.let { dbHelper.saveBalance(it.id, saldo, "bet_placed") }
+                    dbHelper.saveBalance(userId, saldo, "bet_placed")
                 }
             } else {
                 // Отклонена
@@ -697,7 +710,6 @@ class BotEngine(
             onLogUpdate?.invoke("[${getCurrentTime()}] 🔄 Замена экспресса #$oldExpId → #$newExpId (${currentBetAmount.toInt()} → ${newBetAmount.toInt()} ₽)")
             prefs.edit().putString("bet_amount", newBetAmount.toInt().toString()).apply()
 
-            // TODO: запросить новый экспресс через getBets с новой суммой
             db.update(
                 "express_bets", ContentValues().apply {
                     put("sts_all", -1)
@@ -725,7 +737,6 @@ class BotEngine(
 
     /**
      * Получает clientId: сначала из БД, если нет — запрашивает через API.
-     * Возвращает реальный clientId или fallback 18845703L.
      */
     private suspend fun getClientId(): Long {
         val data = authData ?: return 18845703L
@@ -738,7 +749,7 @@ class BotEngine(
             return cachedId
         }
 
-        // 2. Если нет — запрашиваем через API
+        // 2. Запрашиваем через API
         Log.w(TAG, "clientId не найден в БД, запрашиваем через API...")
         onLogUpdate?.invoke("[${getCurrentTime()}] ⚠️ clientId не найден, запрашиваю через API...")
 
@@ -749,7 +760,6 @@ class BotEngine(
                 deviceId = data.deviceId,
                 onSuccess = { sessionInfo ->
                     val clientId = sessionInfo?.clientId ?: 18845703L
-                    // Сохраняем в БД
                     user?.let {
                         dbHelper.updateUserInfo(it.id, clientId, sessionInfo?.userName)
                     }
@@ -903,11 +913,14 @@ class BotEngine(
         return expressId
     }
 
-    private fun checkMatchStatus(betType: Int, sh: Int, sa: Int): Int = when (betType) {
-        924 -> if (sh >= sa) 2 else 1
-        927 -> if (sh + 1 >= sa) 2 else 1
-        928 -> if (sa + 1 >= sh) 2 else 1
-        else -> 1
+    // ✅ Исправлено: when как statement, а не expression
+    private fun checkMatchStatus(betType: Int, sh: Int, sa: Int): Int {
+        return when (betType) {
+            924 -> if (sh >= sa) 2 else 1
+            927 -> if (sh + 1 >= sa) 2 else 1
+            928 -> if (sa + 1 >= sh) 2 else 1
+            else -> 1
+        }
     }
 
     private fun typeName(type: Int): String = when (type) {
