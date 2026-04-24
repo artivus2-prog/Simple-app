@@ -140,16 +140,23 @@ fun MainBotScreen(
                 if (sessionInfo != null && sessionInfo.saldo != null) {
                     val saldo = sessionInfo.saldo; val oldBalance = balance; balance = saldo
                     logs.add(0, "[${getCurrentTime()}] 💰 Баланс обновлён: %.2f ₽".format(saldo))
-                    scope.launch {
-                        try {
-                            val user = dbHelper.getUser(authData.fsid, authData.deviceId)
-                            user?.let {
-                                dbHelper.saveBalance(it.id, saldo)
-                                dbHelper.updateUserInfo(it.id, sessionInfo.clientId, sessionInfo.userName)
-                                if (saldo > oldBalance && oldBalance > 0) dbHelper.addLog(it.id, "profit", "Профит: +%.2f ₽".format(saldo - oldBalance))
-                                else if (saldo < oldBalance && oldBalance > 0) dbHelper.addLog(it.id, "loss", "Убыток: %.2f ₽".format(saldo - oldBalance))
-                            } else {dbHelper.addLog(it.id,"un","un")}
-                        } catch (e: Exception) {}
+
+// ЗАМЕНИТЬ на:
+scope.launch {
+    try {
+        val user = dbHelper.getUser(authData.fsid, authData.deviceId)
+        user?.let { u ->
+            dbHelper.saveBalance(u.id, saldo)
+            dbHelper.updateUserInfo(u.id, sessionInfo.clientId, sessionInfo.userName)
+            if (saldo > oldBalance && oldBalance > 0) {
+                dbHelper.addLog(u.id, "profit", "Профит: +%.2f ₽".format(saldo - oldBalance))
+            } else if (saldo < oldBalance && oldBalance > 0) {
+                dbHelper.addLog(u.id, "loss", "Убыток: %.2f ₽".format(saldo - oldBalance))
+            }
+        }
+    } catch (e: Exception) {}
+}
+
                     }
                 }
             },
