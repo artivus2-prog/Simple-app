@@ -155,7 +155,7 @@ class BotEngine(
                                 } else if (newBalance < oldBalance && oldBalance > 0) {
                                     dbHelper.addLog(u.id, "loss", "Убыток: %.2f ₽".format(newBalance - oldBalance))
                                     onLogUpdate?.invoke("[${getCurrentTime()}] 📉 Убыток: %.2f ₽".format(newBalance - oldBalance))
-                                }
+                                } else {dbHelper.addLog(u.id,"un","un")}
                             }
                         } catch (e: Exception) { Log.e(TAG, "Ошибка сохранения баланса: ${e.message}") }
                     }
