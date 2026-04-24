@@ -137,6 +137,399 @@ fun FonbetBotApp(dbHelper: DatabaseHelper) {
     }
 }
 
+// @OptIn(ExperimentalMaterial3Api::class)
+// @Composable
+// fun MainBotScreen(
+//     authData: AuthData?,
+//     onNavigateToStats: () -> Unit,
+//     onNavigateToSettings: () -> Unit,
+//     onNavigateToHistory: () -> Unit,
+//     onNavigateToProfile: () -> Unit,
+//     onNavigateToWebAuth: () -> Unit,
+//     onLogout: () -> Unit,
+//     dbHelper: DatabaseHelper
+// ) {
+//     val context = LocalContext.current
+//     val scope = rememberCoroutineScope()
+//     var isBotRunning by remember { mutableStateOf(BotForegroundService.isRunning) }
+//     var balance by remember { mutableStateOf(0.0) }
+//     val logs = remember { mutableStateListOf<String>() }
+//     var showMenu by remember { mutableStateOf(false) }
+//     var isLoadingBalance by remember { mutableStateOf(false) }
+//     var showExitDialog by remember { mutableStateOf(false) }
+//     //var activeExpresses by remember { mutableStateOf<List<ExpressWithMatches>>(emptyList()) }
+
+//     // fun loadActiveExpresses() {
+//     //     try {
+//     //         val expresses = dbHelper.getAllExpresses().filter { it.stsAll in listOf(0, 1) }
+//     //         activeExpresses = expresses.map { express ->
+//     //             ExpressWithMatches(express, dbHelper.getMatchesByExpressId(express.id))
+//     //         }
+//     //     } catch (e: Exception) {}
+//     // }
+
+//     fun fetchBalanceFromApi() {
+//         if (authData == null) {
+//             logs.add(0, "[${getCurrentTime()}] ❌ Нет данных авторизации")
+//             return
+//         }
+//         isLoadingBalance = true
+//         ApiClient().getSaldo(
+//             cookies = emptyMap(),
+//             fsid = authData.fsid,
+//             deviceId = authData.deviceId,
+//             onSuccess = { sessionInfo ->
+//                 isLoadingBalance = false
+//                 if (sessionInfo != null && sessionInfo.saldo != null) {
+//                     val saldo = sessionInfo.saldo
+//                     val oldBalance = balance
+//                     balance = saldo
+//                     logs.add(0, "[${getCurrentTime()}] 💰 Баланс обновлён: %.2f ₽".format(saldo))
+//                     scope.launch {
+//                         try {
+//                             val user = dbHelper.getUser(authData.fsid, authData.deviceId)
+//                             user?.let { u ->
+//                                 dbHelper.saveBalance(u.id, saldo)
+//                                 dbHelper.updateUserInfo(u.id, sessionInfo.clientId, sessionInfo.userName)
+//                                 val profit = saldo - oldBalance
+//                                 if (profit > 0 && oldBalance > 0) {
+//                                     dbHelper.addLog(u.id, "profit", "Профит: +%.2f ₽".format(profit))
+//                                 }
+//                                 if (profit < 0 && oldBalance > 0) {
+//                                     dbHelper.addLog(u.id, "loss", "Убыток: %.2f ₽".format(-profit))
+//                                 }
+//                             }
+//                         } catch (e: Exception) {}
+//                     }
+//                 }
+//             },
+//             onError = { error ->
+//                 isLoadingBalance = false
+//                 logs.add(0, "[${getCurrentTime()}] ❌ Ошибка API: $error")
+//             }
+//         )
+//     }
+
+//     LaunchedEffect(authData, isBotRunning) {
+//         authData?.let {
+//             try {
+//                 val user = dbHelper.getUser(it.fsid, it.deviceId)
+//                 user?.let { userId ->
+//                     val stats = dbHelper.getBalanceStats(userId.id)
+//                     if (stats.currentBalance > 0) balance = stats.currentBalance
+//                 }
+//             } catch (e: Exception) {}
+//         }
+//         if (isBotRunning && authData != null) fetchBalanceFromApi()
+//         // loadActiveExpresses()
+//     }
+
+//     LaunchedEffect(Unit) {
+//         isBotRunning = BotForegroundService.isRunning
+//         if (isBotRunning) {
+//             logs.add(0, "[${getCurrentTime()}] 🔄 Подключено к работающему боту")
+//             if (BotForegroundService.lastBalance > 0) balance = BotForegroundService.lastBalance
+//         }
+//         // loadActiveExpresses()
+//     }
+
+//     LaunchedEffect(isBotRunning) {
+//         while (isBotRunning) {
+//             delay(30_000)
+//             // loadActiveExpresses()
+//         }
+//     }
+
+//     DisposableEffect(Unit) {
+//         BotForegroundService.onBalanceUpdate = { newBalance ->
+//             balance = newBalance
+//             authData?.let { data ->
+//                 scope.launch {
+//                     try {
+//                         val user = dbHelper.getUser(data.fsid, data.deviceId)
+//                         user?.let { dbHelper.saveBalance(it.id, newBalance, "success") }
+//                     } catch (e: Exception) {}
+//                 }
+//             }
+//         }
+//         BotForegroundService.onLogUpdate = { log ->
+//             // Безопасное обновление из фонового потока
+//             kotlinx.coroutines.MainScope().launch {
+//                 logs.add(0, log)
+//                 if (logs.size > 50) logs.removeLast()
+//             }
+//         }
+//         BotForegroundService.onBetsUpdate = { bets ->
+//             kotlinx.coroutines.MainScope().launch {
+//                 bets.forEach { logs.add(0, "[${getCurrentTime()}] 🎯 m_id=${it.first} (${it.second})") }
+//                 // loadActiveExpresses()
+//             }
+//         }
+//         BotForegroundService.onScoresUpdate = { message ->
+//             kotlinx.coroutines.MainScope().launch {
+//                 logs.add(0, message)
+//                 if (logs.size > 50) logs.removeLast()
+//                 // loadActiveExpresses()
+//             }
+//         }
+//         BotForegroundService.authData = authData
+//         onDispose {}
+//     }
+
+//     fun startBot() {
+//         if (authData == null) {
+//             logs.add(0, "[${getCurrentTime()}] ❌ Нет данных авторизации")
+//             return
+//         }
+        
+//         // Проверка разрешения для Foreground Service
+//         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+//             if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.FOREGROUND_SERVICE_DATA_SYNC)
+//                 != PackageManager.PERMISSION_GRANTED) {
+//                 logs.add(0, "[${getCurrentTime()}] ❌ Нет разрешения на Foreground Service")
+//                 Toast.makeText(context, "Требуется разрешение на фоновую работу", Toast.LENGTH_LONG).show()
+//                 return
+//             }
+//         }
+        
+//         BotForegroundService.authData = authData
+//         val serviceIntent = Intent(context, BotForegroundService::class.java)
+//         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+//             ContextCompat.startForegroundService(context, serviceIntent)
+//         else context.startService(serviceIntent)
+//         isBotRunning = true
+//         scope.launch {
+//             try {
+//                 val user = dbHelper.getUser(authData.fsid, authData.deviceId)
+//                 user?.let {
+//                     dbHelper.startBotSession(it.id, balance)
+//                     dbHelper.addLog(it.id, "start", "Бот запущен")
+//                 }
+//             } catch (e: Exception) {}
+//         }
+//         logs.add(0, "[${getCurrentTime()}] 🚀 Бот запущен в фоне")
+//         fetchBalanceFromApi()
+//     }
+
+//     fun stopBot() {
+//         val stopIntent = Intent(context, BotForegroundService::class.java).apply {
+//             action = BotForegroundService.ACTION_STOP
+//         }
+//         context.startService(stopIntent)
+//         isBotRunning = false
+//         scope.launch {
+//             try {
+//                 authData?.let { data ->
+//                     val user = dbHelper.getUser(data.fsid, data.deviceId)
+//                     user?.let {
+//                         dbHelper.stopBotSession(it.id, "user_stop")
+//                         dbHelper.addLog(it.id, "stop", "Бот остановлен")
+//                     }
+//                 }
+//             } catch (e: Exception) {}
+//         }
+//         logs.add(0, "[${getCurrentTime()}] ⏹ Бот остановлен")
+//     }
+
+//     BackHandler(enabled = isBotRunning) { showExitDialog = true }
+
+//     Scaffold(
+//         topBar = {
+//             TopAppBar(
+//                 title = {
+//                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+//                         Box(
+//                             modifier = Modifier
+//                                 .size(10.dp)
+//                                 .background(
+//                                     color = if (isBotRunning) Color(0xFF4CAF50) else Color(0xFFF44336),
+//                                     shape = RoundedCornerShape(5.dp)
+//                                 )
+//                         )
+//                         Spacer(modifier = Modifier.width(8.dp))
+//                         if (isLoadingBalance) {
+//                             CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+//                             Spacer(modifier = Modifier.width(6.dp))
+//                             Text("...", fontSize = 14.sp)
+//                         } else {
+//                             Text(
+//                                 text = if (balance > 0) "₽ %.2f".format(balance) else "₽ —",
+//                                 fontWeight = FontWeight.Bold,
+//                                 fontSize = 16.sp,
+//                                 color = MaterialTheme.colorScheme.onPrimaryContainer
+//                             )
+//                         }
+//                         Spacer(modifier = Modifier.weight(1f))
+//                         if (authData != null && !isLoadingBalance) {
+//                             IconButton(onClick = { fetchBalanceFromApi() }, modifier = Modifier.size(32.dp)) {
+//                                 Icon(
+//                                     Icons.Default.Refresh,
+//                                     "Обновить",
+//                                     modifier = Modifier.size(18.dp),
+//                                     tint = MaterialTheme.colorScheme.onPrimaryContainer
+//                                 )
+//                             }
+//                         }
+//                     }
+//                 },
+//                 actions = {
+//                     if (isBotRunning) {
+//                         IconButton(onClick = { showExitDialog = true }) {
+//                             Icon(Icons.Default.Stop, "Остановить")
+//                         }
+//                     }
+//                     IconButton(onClick = { showMenu = !showMenu }) {
+//                         Icon(Icons.Default.MoreVert, "Меню")
+//                     }
+//                     DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+//                         DropdownMenuItem(
+//                             text = { Text("👤 Профиль") },
+//                             onClick = { showMenu = false; onNavigateToProfile() },
+//                             enabled = !isBotRunning
+//                         )
+//                         DropdownMenuItem(
+//                             text = { Text("📊 Статистика") },
+//                             onClick = { showMenu = false; onNavigateToStats() },
+//                             enabled = !isBotRunning
+//                         )
+//                         DropdownMenuItem(
+//                             text = { Text("📜 История") },
+//                             onClick = { showMenu = false; onNavigateToHistory() },
+//                             enabled = !isBotRunning
+//                         )
+//                         DropdownMenuItem(
+//                             text = { Text("⚙️ Настройки") },
+//                             onClick = { showMenu = false; onNavigateToSettings() },
+//                             enabled = !isBotRunning
+//                         )
+//                         Divider()
+//                         DropdownMenuItem(
+//                             text = { Text("🚪 Выйти") },
+//                             onClick = {
+//                                 if (!isBotRunning) { showMenu = false; onLogout() }
+//                             },
+//                             enabled = !isBotRunning
+//                         )
+//                     }
+//                 },
+//                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+//             )
+//         }
+//     ) { paddingValues ->
+//         Column(modifier = Modifier.fillMaxSize().padding(paddingValues).padding(16.dp)) {
+
+//             // НЕТ АВТОРИЗАЦИИ
+//             if (authData == null) {
+//                 Spacer(modifier = Modifier.height(40.dp))
+//                 Card(
+//                     modifier = Modifier.fillMaxWidth(),
+//                     shape = RoundedCornerShape(20.dp),
+//                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
+//                 ) {
+//                     Column(modifier = Modifier.padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+//                         Text("🔐", fontSize = 64.sp)
+//                         Spacer(modifier = Modifier.height(16.dp))
+//                         Text("Требуется авторизация", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = MaterialTheme.colorScheme.onTertiaryContainer)
+//                         Spacer(modifier = Modifier.height(8.dp))
+//                         Text("Войдите в аккаунт Фонбет\nдля работы бота", fontSize = 14.sp, color = MaterialTheme.colorScheme.onTertiaryContainer, textAlign = TextAlign.Center)
+//                         Spacer(modifier = Modifier.height(24.dp))
+//                         Button(
+//                             onClick = onNavigateToWebAuth,
+//                             modifier = Modifier.fillMaxWidth().height(56.dp),
+//                             shape = RoundedCornerShape(16.dp),
+//                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+//                         ) {
+//                             Icon(Icons.Default.Lock, null, modifier = Modifier.size(20.dp))
+//                             Spacer(modifier = Modifier.width(8.dp))
+//                             Text("🔐 Авторизоваться", fontSize = 16.sp)
+//                         }
+//                     }
+//                 }
+//                 Spacer(modifier = Modifier.weight(1f))
+//                 return@Column
+//             }
+
+//             // КАРТОЧКА АВТОРИЗАЦИИ
+//             var showAuthDetails by remember { mutableStateOf(false) }
+//             var clientId by remember { mutableStateOf<Long?>(null) }
+//             LaunchedEffect(authData) {
+//                 try {
+//                     val user = dbHelper.getUser(authData.fsid, authData.deviceId)
+//                     clientId = user?.clientId?.takeIf { it > 0 }
+//                 } catch (e: Exception) {}
+//             }
+
+//             Card(
+//                 modifier = Modifier.fillMaxWidth(),
+//                 shape = RoundedCornerShape(12.dp),
+//                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f))
+//             ) {
+//                 Row(
+//                     modifier = Modifier.fillMaxWidth().clickable { showAuthDetails = !showAuthDetails }.padding(horizontal = 12.dp, vertical = 8.dp),
+//                     verticalAlignment = Alignment.CenterVertically
+//                 ) {
+//                     Text("✅", fontSize = 16.sp)
+//                     Spacer(modifier = Modifier.width(8.dp))
+//                     if (clientId != null) {
+//                         Text("ID: ${clientId}", fontWeight = FontWeight.Medium, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+//                     } else {
+//                         Text("Авторизация активна", fontWeight = FontWeight.Medium, fontSize = 13.sp)
+//                     }
+//                     Spacer(modifier = Modifier.weight(1f))
+//                     Icon(if (showAuthDetails) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null, modifier = Modifier.size(18.dp))
+//                 }
+
+//                 if (showAuthDetails) {
+//                     Divider()
+//                     Column(modifier = Modifier.padding(12.dp)) {
+//                         if (clientId != null) {
+//                             Row(verticalAlignment = Alignment.CenterVertically) {
+//                                 Text("Client ID: ", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+//                                 Text("$clientId", fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, color = MaterialTheme.colorScheme.primary)
+//                                 Spacer(modifier = Modifier.width(4.dp))
+//                                 IconButton(onClick = {
+//                                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+//                                     clipboard.setPrimaryClip(ClipData.newPlainText("Client ID", clientId.toString()))
+//                                     Toast.makeText(context, "Client ID скопирован", Toast.LENGTH_SHORT).show()
+//                                 }, modifier = Modifier.size(20.dp)) {
+//                                     Icon(Icons.Default.ContentCopy, "Копировать", modifier = Modifier.size(12.dp))
+//                                 }
+//                             }
+//                             Spacer(modifier = Modifier.height(4.dp))
+//                         }
+//                         Text("FSID: ${authData.fsid.take(30)}...", fontSize = 11.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+//                         Text("DeviceID: ${authData.deviceId.take(30)}...", fontSize = 11.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+//                         Spacer(modifier = Modifier.height(4.dp))
+//                         Row {
+//                             TextButton(onClick = {
+//                                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+//                                 val clientIdStr = if (clientId != null) "Client ID: $clientId\n" else ""
+//                                 clipboard.setPrimaryClip(ClipData.newPlainText("Auth", "${clientIdStr}FSID: ${authData.fsid}\nDeviceID: ${authData.deviceId}"))
+//                                 Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
+//                             }) { Text("📋 Копировать всё", fontSize = 11.sp) }
+//                             TextButton(onClick = onNavigateToProfile) { Text("👤 Профиль", fontSize = 11.sp) }
+//                         }
+//                     }
+//                 }
+//             }
+//             Spacer(modifier = Modifier.height(12.dp))
+
+//             // БОТ РАБОТАЕТ
+//             if (isBotRunning) {
+//                 Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
+//                     Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+//                         Text("🔔", fontSize = 20.sp)
+//                         Spacer(modifier = Modifier.width(8.dp))
+//                         Column {
+//                             Text("Бот работает в фоновом режиме", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+//                             Text("Сверните приложение. Для выхода остановите бота.", fontSize = 12.sp)
+//                         }
+//                     }
+//                 }
+//                 Spacer(modifier = Modifier.height(12.dp))
+//             }
+
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainBotScreen(
@@ -154,63 +547,28 @@ fun MainBotScreen(
     var isBotRunning by remember { mutableStateOf(BotForegroundService.isRunning) }
     var balance by remember { mutableStateOf(0.0) }
     val logs = remember { mutableStateListOf<String>() }
-    var showMenu by remember { mutableStateOf(false) }
-    var isLoadingBalance by remember { mutableStateOf(false) }
     var showExitDialog by remember { mutableStateOf(false) }
-    //var activeExpresses by remember { mutableStateOf<List<ExpressWithMatches>>(emptyList()) }
-
-    // fun loadActiveExpresses() {
-    //     try {
-    //         val expresses = dbHelper.getAllExpresses().filter { it.stsAll in listOf(0, 1) }
-    //         activeExpresses = expresses.map { express ->
-    //             ExpressWithMatches(express, dbHelper.getMatchesByExpressId(express.id))
-    //         }
-    //     } catch (e: Exception) {}
-    // }
 
     fun fetchBalanceFromApi() {
-        if (authData == null) {
-            logs.add(0, "[${getCurrentTime()}] ❌ Нет данных авторизации")
-            return
-        }
-        isLoadingBalance = true
+        if (authData == null) return
         ApiClient().getSaldo(
             cookies = emptyMap(),
             fsid = authData.fsid,
             deviceId = authData.deviceId,
             onSuccess = { sessionInfo ->
-                isLoadingBalance = false
                 if (sessionInfo != null && sessionInfo.saldo != null) {
-                    val saldo = sessionInfo.saldo
-                    val oldBalance = balance
-                    balance = saldo
-                    logs.add(0, "[${getCurrentTime()}] 💰 Баланс обновлён: %.2f ₽".format(saldo))
-                    scope.launch {
-                        try {
-                            val user = dbHelper.getUser(authData.fsid, authData.deviceId)
-                            user?.let { u ->
-                                dbHelper.saveBalance(u.id, saldo)
-                                dbHelper.updateUserInfo(u.id, sessionInfo.clientId, sessionInfo.userName)
-                                val profit = saldo - oldBalance
-                                if (profit > 0 && oldBalance > 0) {
-                                    dbHelper.addLog(u.id, "profit", "Профит: +%.2f ₽".format(profit))
-                                }
-                                if (profit < 0 && oldBalance > 0) {
-                                    dbHelper.addLog(u.id, "loss", "Убыток: %.2f ₽".format(-profit))
-                                }
-                            }
-                        } catch (e: Exception) {}
-                    }
+                    balance = sessionInfo.saldo
+                    logs.add(0, "[${getCurrentTime()}] 💰 Баланс: %.2f ₽".format(sessionInfo.saldo))
                 }
             },
             onError = { error ->
-                isLoadingBalance = false
-                logs.add(0, "[${getCurrentTime()}] ❌ Ошибка API: $error")
+                logs.add(0, "[${getCurrentTime()}] ❌ Ошибка: $error")
             }
         )
     }
 
-    LaunchedEffect(authData, isBotRunning) {
+    LaunchedEffect(Unit) {
+        isBotRunning = BotForegroundService.isRunning
         authData?.let {
             try {
                 val user = dbHelper.getUser(it.fsid, it.deviceId)
@@ -220,95 +578,27 @@ fun MainBotScreen(
                 }
             } catch (e: Exception) {}
         }
-        if (isBotRunning && authData != null) fetchBalanceFromApi()
-        // loadActiveExpresses()
-    }
-
-    LaunchedEffect(Unit) {
-        isBotRunning = BotForegroundService.isRunning
-        if (isBotRunning) {
-            logs.add(0, "[${getCurrentTime()}] 🔄 Подключено к работающему боту")
-            if (BotForegroundService.lastBalance > 0) balance = BotForegroundService.lastBalance
-        }
-        // loadActiveExpresses()
-    }
-
-    LaunchedEffect(isBotRunning) {
-        while (isBotRunning) {
-            delay(30_000)
-            // loadActiveExpresses()
-        }
     }
 
     DisposableEffect(Unit) {
-        BotForegroundService.onBalanceUpdate = { newBalance ->
-            balance = newBalance
-            authData?.let { data ->
-                scope.launch {
-                    try {
-                        val user = dbHelper.getUser(data.fsid, data.deviceId)
-                        user?.let { dbHelper.saveBalance(it.id, newBalance, "success") }
-                    } catch (e: Exception) {}
-                }
-            }
-        }
+        BotForegroundService.onBalanceUpdate = { newBalance -> balance = newBalance }
         BotForegroundService.onLogUpdate = { log ->
-            // Безопасное обновление из фонового потока
-            kotlinx.coroutines.MainScope().launch {
-                logs.add(0, log)
-                if (logs.size > 50) logs.removeLast()
-            }
-        }
-        BotForegroundService.onBetsUpdate = { bets ->
-            kotlinx.coroutines.MainScope().launch {
-                bets.forEach { logs.add(0, "[${getCurrentTime()}] 🎯 m_id=${it.first} (${it.second})") }
-                // loadActiveExpresses()
-            }
-        }
-        BotForegroundService.onScoresUpdate = { message ->
-            kotlinx.coroutines.MainScope().launch {
-                logs.add(0, message)
-                if (logs.size > 50) logs.removeLast()
-                // loadActiveExpresses()
-            }
+            logs.add(0, log)
+            if (logs.size > 50) logs.removeLast()
         }
         BotForegroundService.authData = authData
         onDispose {}
     }
 
     fun startBot() {
-        if (authData == null) {
-            logs.add(0, "[${getCurrentTime()}] ❌ Нет данных авторизации")
-            return
-        }
-        
-        // Проверка разрешения для Foreground Service
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.FOREGROUND_SERVICE_DATA_SYNC)
-                != PackageManager.PERMISSION_GRANTED) {
-                logs.add(0, "[${getCurrentTime()}] ❌ Нет разрешения на Foreground Service")
-                Toast.makeText(context, "Требуется разрешение на фоновую работу", Toast.LENGTH_LONG).show()
-                return
-            }
-        }
-        
+        if (authData == null) return
         BotForegroundService.authData = authData
         val serviceIntent = Intent(context, BotForegroundService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             ContextCompat.startForegroundService(context, serviceIntent)
         else context.startService(serviceIntent)
         isBotRunning = true
-        scope.launch {
-            try {
-                val user = dbHelper.getUser(authData.fsid, authData.deviceId)
-                user?.let {
-                    dbHelper.startBotSession(it.id, balance)
-                    dbHelper.addLog(it.id, "start", "Бот запущен")
-                }
-            } catch (e: Exception) {}
-        }
-        logs.add(0, "[${getCurrentTime()}] 🚀 Бот запущен в фоне")
-        fetchBalanceFromApi()
+        logs.add(0, "[${getCurrentTime()}] 🚀 Бот запущен")
     }
 
     fun stopBot() {
@@ -317,60 +607,18 @@ fun MainBotScreen(
         }
         context.startService(stopIntent)
         isBotRunning = false
-        scope.launch {
-            try {
-                authData?.let { data ->
-                    val user = dbHelper.getUser(data.fsid, data.deviceId)
-                    user?.let {
-                        dbHelper.stopBotSession(it.id, "user_stop")
-                        dbHelper.addLog(it.id, "stop", "Бот остановлен")
-                    }
-                }
-            } catch (e: Exception) {}
-        }
         logs.add(0, "[${getCurrentTime()}] ⏹ Бот остановлен")
     }
-
-    BackHandler(enabled = isBotRunning) { showExitDialog = true }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                        Box(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .background(
-                                    color = if (isBotRunning) Color(0xFF4CAF50) else Color(0xFFF44336),
-                                    shape = RoundedCornerShape(5.dp)
-                                )
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        if (isLoadingBalance) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("...", fontSize = 14.sp)
-                        } else {
-                            Text(
-                                text = if (balance > 0) "₽ %.2f".format(balance) else "₽ —",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        }
-                        Spacer(modifier = Modifier.weight(1f))
-                        if (authData != null && !isLoadingBalance) {
-                            IconButton(onClick = { fetchBalanceFromApi() }, modifier = Modifier.size(32.dp)) {
-                                Icon(
-                                    Icons.Default.Refresh,
-                                    "Обновить",
-                                    modifier = Modifier.size(18.dp),
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                            }
-                        }
-                    }
+                    Text(
+                        text = if (balance > 0) "₽ %.2f".format(balance) else "₽ —",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
                 },
                 actions = {
                     if (isBotRunning) {
@@ -378,157 +626,94 @@ fun MainBotScreen(
                             Icon(Icons.Default.Stop, "Остановить")
                         }
                     }
-                    IconButton(onClick = { showMenu = !showMenu }) {
-                        Icon(Icons.Default.MoreVert, "Меню")
-                    }
-                    DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                        DropdownMenuItem(
-                            text = { Text("👤 Профиль") },
-                            onClick = { showMenu = false; onNavigateToProfile() },
-                            enabled = !isBotRunning
-                        )
-                        DropdownMenuItem(
-                            text = { Text("📊 Статистика") },
-                            onClick = { showMenu = false; onNavigateToStats() },
-                            enabled = !isBotRunning
-                        )
-                        DropdownMenuItem(
-                            text = { Text("📜 История") },
-                            onClick = { showMenu = false; onNavigateToHistory() },
-                            enabled = !isBotRunning
-                        )
-                        DropdownMenuItem(
-                            text = { Text("⚙️ Настройки") },
-                            onClick = { showMenu = false; onNavigateToSettings() },
-                            enabled = !isBotRunning
-                        )
-                        Divider()
-                        DropdownMenuItem(
-                            text = { Text("🚪 Выйти") },
-                            onClick = {
-                                if (!isBotRunning) { showMenu = false; onLogout() }
-                            },
-                            enabled = !isBotRunning
-                        )
-                    }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                )
             )
         }
     ) { paddingValues ->
-        Column(modifier = Modifier.fillMaxSize().padding(paddingValues).padding(16.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(16.dp)
+        ) {
+            // Статус
+            Text(
+                text = if (isBotRunning) "🟢 Бот работает" else "🔴 Бот остановлен",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(16.dp))
 
-            // НЕТ АВТОРИЗАЦИИ
-            if (authData == null) {
-                Spacer(modifier = Modifier.height(40.dp))
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
-                ) {
-                    Column(modifier = Modifier.padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("🔐", fontSize = 64.sp)
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text("Требуется авторизация", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = MaterialTheme.colorScheme.onTertiaryContainer)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("Войдите в аккаунт Фонбет\nдля работы бота", fontSize = 14.sp, color = MaterialTheme.colorScheme.onTertiaryContainer, textAlign = TextAlign.Center)
-                        Spacer(modifier = Modifier.height(24.dp))
-                        Button(
-                            onClick = onNavigateToWebAuth,
-                            modifier = Modifier.fillMaxWidth().height(56.dp),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
-                        ) {
-                            Icon(Icons.Default.Lock, null, modifier = Modifier.size(20.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("🔐 Авторизоваться", fontSize = 16.sp)
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.weight(1f))
-                return@Column
-            }
-
-            // КАРТОЧКА АВТОРИЗАЦИИ
-            var showAuthDetails by remember { mutableStateOf(false) }
-            var clientId by remember { mutableStateOf<Long?>(null) }
-            LaunchedEffect(authData) {
-                try {
-                    val user = dbHelper.getUser(authData.fsid, authData.deviceId)
-                    clientId = user?.clientId?.takeIf { it > 0 }
-                } catch (e: Exception) {}
-            }
-
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f))
+            // Кнопка запуска/остановки
+            Button(
+                onClick = { if (isBotRunning) showExitDialog = true else startBot() },
+                modifier = Modifier.fillMaxWidth().height(60.dp),
+                shape = RoundedCornerShape(30.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isBotRunning) MaterialTheme.colorScheme.error 
+                                    else MaterialTheme.colorScheme.primary
+                )
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().clickable { showAuthDetails = !showAuthDetails }.padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("✅", fontSize = 16.sp)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    if (clientId != null) {
-                        Text("ID: ${clientId}", fontWeight = FontWeight.Medium, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
-                    } else {
-                        Text("Авторизация активна", fontWeight = FontWeight.Medium, fontSize = 13.sp)
-                    }
-                    Spacer(modifier = Modifier.weight(1f))
-                    Icon(if (showAuthDetails) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null, modifier = Modifier.size(18.dp))
-                }
+                Text(
+                    text = if (isBotRunning) "🛑 ОСТАНОВИТЬ" else "▶ ЗАПУСТИТЬ",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
 
-                if (showAuthDetails) {
-                    Divider()
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        if (clientId != null) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Client ID: ", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text("$clientId", fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, color = MaterialTheme.colorScheme.primary)
-                                Spacer(modifier = Modifier.width(4.dp))
-                                IconButton(onClick = {
-                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    clipboard.setPrimaryClip(ClipData.newPlainText("Client ID", clientId.toString()))
-                                    Toast.makeText(context, "Client ID скопирован", Toast.LENGTH_SHORT).show()
-                                }, modifier = Modifier.size(20.dp)) {
-                                    Icon(Icons.Default.ContentCopy, "Копировать", modifier = Modifier.size(12.dp))
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
-                        }
-                        Text("FSID: ${authData.fsid.take(30)}...", fontSize = 11.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
-                        Text("DeviceID: ${authData.deviceId.take(30)}...", fontSize = 11.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Row {
-                            TextButton(onClick = {
-                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                val clientIdStr = if (clientId != null) "Client ID: $clientId\n" else ""
-                                clipboard.setPrimaryClip(ClipData.newPlainText("Auth", "${clientIdStr}FSID: ${authData.fsid}\nDeviceID: ${authData.deviceId}"))
-                                Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
-                            }) { Text("📋 Копировать всё", fontSize = 11.sp) }
-                            TextButton(onClick = onNavigateToProfile) { Text("👤 Профиль", fontSize = 11.sp) }
-                        }
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Простой текст логов
+            Text("📝 Логи:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Используем простой Column с прокруткой вместо LazyColumn
+            val scrollState = rememberScrollState()
+            LaunchedEffect(logs.size) {
+                scrollState.animateScrollTo(0)
+            }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .verticalScroll(scrollState)
+            ) {
+                if (logs.isEmpty()) {
+                    Text("Нет логов", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    logs.forEach { log ->
+                        Text(
+                            text = log,
+                            fontSize = 11.sp,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            modifier = Modifier.padding(vertical = 1.dp)
+                        )
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(12.dp))
+        }
 
-            // БОТ РАБОТАЕТ
-            if (isBotRunning) {
-                Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
-                    Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("🔔", fontSize = 20.sp)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Text("Бот работает в фоновом режиме", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Text("Сверните приложение. Для выхода остановите бота.", fontSize = 12.sp)
-                        }
-                    }
+        if (showExitDialog) {
+            AlertDialog(
+                onDismissRequest = { showExitDialog = false },
+                title = { Text("Остановить бота?") },
+                text = { Text("Бот работает в фоне. Остановить?") },
+                confirmButton = {
+                    Button(
+                        onClick = { showExitDialog = false; stopBot() },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    ) { Text("Остановить") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showExitDialog = false }) { Text("Отмена") }
                 }
-                Spacer(modifier = Modifier.height(12.dp))
-            }
-
+            )
+        }
+    }
+}
 // ТАБЛИЦА АКТИВНЫХ ЭКСПРЕССОВ - ИСПРАВЛЕННАЯ ВЕРСИЯ
 // if (activeExpresses.isNotEmpty()) {
 //     Text("🎯 Активные экспрессы (${activeExpresses.size})", fontWeight = FontWeight.Bold, fontSize = 14.sp, modifier = Modifier.padding(bottom = 8.dp))
