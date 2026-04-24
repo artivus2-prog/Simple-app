@@ -1,10 +1,11 @@
-// MainActivity.kt - ЧАСТЬ 1 (до SettingsScreen)
+// MainActivity.kt
 package com.example.fonbetbot
 
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
@@ -35,8 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -251,17 +251,24 @@ fun MainBotScreen(
             }
         }
         BotForegroundService.onLogUpdate = { log ->
-            logs.add(0, log)
-            if (logs.size > 50) logs.removeLast()
+            // Безопасное обновление из фонового потока
+            kotlinx.coroutines.MainScope().launch {
+                logs.add(0, log)
+                if (logs.size > 50) logs.removeLast()
+            }
         }
         BotForegroundService.onBetsUpdate = { bets ->
-            bets.forEach { logs.add(0, "[${getCurrentTime()}] 🎯 m_id=${it.first} (${it.second})") }
-            loadActiveExpresses()
+            kotlinx.coroutines.MainScope().launch {
+                bets.forEach { logs.add(0, "[${getCurrentTime()}] 🎯 m_id=${it.first} (${it.second})") }
+                loadActiveExpresses()
+            }
         }
         BotForegroundService.onScoresUpdate = { message ->
-            logs.add(0, message)
-            if (logs.size > 50) logs.removeLast()
-            loadActiveExpresses()
+            kotlinx.coroutines.MainScope().launch {
+                logs.add(0, message)
+                if (logs.size > 50) logs.removeLast()
+                loadActiveExpresses()
+            }
         }
         BotForegroundService.authData = authData
         onDispose {}
@@ -272,6 +279,17 @@ fun MainBotScreen(
             logs.add(0, "[${getCurrentTime()}] ❌ Нет данных авторизации")
             return
         }
+        
+        // Проверка разрешения для Foreground Service
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.FOREGROUND_SERVICE_DATA_SYNC)
+                != PackageManager.PERMISSION_GRANTED) {
+                logs.add(0, "[${getCurrentTime()}] ❌ Нет разрешения на Foreground Service")
+                Toast.makeText(context, "Требуется разрешение на фоновую работу", Toast.LENGTH_LONG).show()
+                return
+            }
+        }
+        
         BotForegroundService.authData = authData
         val serviceIntent = Intent(context, BotForegroundService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
@@ -509,12 +527,19 @@ fun MainBotScreen(
                 Spacer(modifier = Modifier.height(12.dp))
             }
 
-            // ТАБЛИЦА АКТИВНЫХ ЭКСПРЕССОВ
+            // ТАБЛИЦА АКТИВНЫХ ЭКСПРЕССОВ - ИСПРАВЛЕННАЯ ВЕРСИЯ
             if (activeExpresses.isNotEmpty()) {
                 Text("🎯 Активные экспрессы (${activeExpresses.size})", fontWeight = FontWeight.Bold, fontSize = 14.sp, modifier = Modifier.padding(bottom = 8.dp))
                 Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
                     Column(modifier = Modifier.padding(8.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                        // Заголовок таблицы
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
                             Text("#", fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(30.dp))
                             Text("Лига", fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1.5f))
                             Text("Матч", fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1.8f))
@@ -523,28 +548,82 @@ fun MainBotScreen(
                             Text("Статус", fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(55.dp))
                         }
                         Divider(modifier = Modifier.padding(vertical = 4.dp))
-                        LazyColumn(modifier = Modifier.heightIn(max = 250.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            items(activeExpresses) { expressWithMatches ->
-                                Row(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f), RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        
+                        // ИСПРАВЛЕНО: каждый элемент теперь отдельный item с ключом
+                        LazyColumn(
+                            modifier = Modifier.heightIn(max = 250.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            items(
+                                items = activeExpresses,
+                                key = { it.express.id }
+                            ) { expressWithMatches ->
+                                // Заголовок экспресса
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(
+                                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                                            RoundedCornerShape(6.dp)
+                                        )
+                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                     Text("🧾 #${expressWithMatches.express.idExp}", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text("Кэф ${"%.2f".format(expressWithMatches.express.kfall)}", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text("${expressWithMatches.express.sumbet.toInt()}₽", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     Spacer(modifier = Modifier.weight(1f))
-                                    Text(when (expressWithMatches.express.stsAll) { 0 -> "🔄"; 1 -> "❌"; 2 -> "✅"; else -> "—" }, fontSize = 12.sp)
+                                    Text(
+                                        when (expressWithMatches.express.stsAll) {
+                                            0 -> "🔄"
+                                            1 -> "❌"
+                                            2 -> "✅"
+                                            else -> "—"
+                                        },
+                                        fontSize = 12.sp
+                                    )
                                 }
-                                expressWithMatches.matches.forEach { match ->
-                                    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                
+                                // Матчи - теперь каждый отдельным item
+                                items(
+                                    items = expressWithMatches.matches,
+                                    key = { "match_${it.id}" }
+                                ) { match ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 8.dp, vertical = 2.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
                                         Text("${match.mId}", fontSize = 9.sp, modifier = Modifier.width(30.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                                         Text(match.leagueName.ifEmpty { "—" }.take(12), fontSize = 9.sp, modifier = Modifier.weight(1.5f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         Text("${match.homeTeam.take(6)}–${match.awayTeam.take(6)}", fontSize = 9.sp, modifier = Modifier.weight(1.8f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         Text("${match.homeScore}:${match.awayScore}", fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(40.dp))
                                         Text(typeName(match.betType), fontSize = 9.sp, modifier = Modifier.width(55.dp), color = MaterialTheme.colorScheme.primary)
-                                        Text(when (match.status) { 1 -> "🔄 играет"; 2 -> "✅ зашёл"; else -> "⏳ ждёт" }, fontSize = 9.sp, modifier = Modifier.width(55.dp), color = when (match.status) { 1 -> Color(0xFFFF9800); 2 -> Color(0xFF4CAF50); else -> MaterialTheme.colorScheme.onSurfaceVariant })
+                                        Text(
+                                            when (match.status) {
+                                                1 -> "🔄 играет"
+                                                2 -> "✅ зашёл"
+                                                else -> "⏳ ждёт"
+                                            },
+                                            fontSize = 9.sp,
+                                            modifier = Modifier.width(55.dp),
+                                            color = when (match.status) {
+                                                1 -> Color(0xFFFF9800)
+                                                2 -> Color(0xFF4CAF50)
+                                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                            }
+                                        )
                                     }
                                 }
-                                Divider(modifier = Modifier.padding(vertical = 2.dp))
+                                
+                                // Разделитель между экспрессами
+                                item(key = "divider_${expressWithMatches.express.id}") {
+                                    Divider(modifier = Modifier.padding(vertical = 2.dp))
+                                }
                             }
                         }
                     }
@@ -576,7 +655,22 @@ fun MainBotScreen(
             Text("📝 Лог событий", fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
             Card(modifier = Modifier.fillMaxWidth().weight(1f), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
                 if (logs.isEmpty()) Box(modifier = Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) { Text("Запустите бота для отображения логов", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                else LazyColumn(modifier = Modifier.padding(12.dp), reverseLayout = true) { items(logs) { log -> Text(text = log, fontSize = 12.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, modifier = Modifier.padding(vertical = 2.dp)) } }
+                else LazyColumn(
+                    modifier = Modifier.padding(12.dp),
+                    reverseLayout = true
+                ) {
+                    items(
+                        items = logs,
+                        key = { "log_$it" }
+                    ) { log ->
+                        Text(
+                            text = log,
+                            fontSize = 12.sp,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            modifier = Modifier.padding(vertical = 2.dp)
+                        )
+                    }
+                }
             }
         }
 
@@ -699,7 +793,7 @@ fun StatsScreen(onBack: () -> Unit, dbHelper: DatabaseHelper, authData: AuthData
         topBar = { TopAppBar(title = { Text("📊 Статистика") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Назад") } }, colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) }
     ) { paddingValues ->
         LazyColumn(modifier = Modifier.fillMaxSize().padding(paddingValues).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            item {
+            item(key = "today_stats") {
                 Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text("📈 За сегодня", fontWeight = FontWeight.Bold, fontSize = 18.sp); Spacer(modifier = Modifier.height(8.dp))
@@ -707,7 +801,7 @@ fun StatsScreen(onBack: () -> Unit, dbHelper: DatabaseHelper, authData: AuthData
                     }
                 }
             }
-            item {
+            item(key = "db_stats") {
                 Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text("💾 База данных", fontWeight = FontWeight.Bold, fontSize = 18.sp); Spacer(modifier = Modifier.height(8.dp))
@@ -731,7 +825,10 @@ fun HistoryScreen(onBack: () -> Unit, dbHelper: DatabaseHelper, authData: AuthDa
     ) { paddingValues ->
         if (logs.isEmpty()) Box(modifier = Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) { Text("История пуста") }
         else LazyColumn(modifier = Modifier.fillMaxSize().padding(paddingValues).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(logs) { log ->
+            items(
+                items = logs,
+                key = { it.id }
+            ) { log ->
                 Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
                     Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Column { Text(SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault()).format(Date(log.createdAt * 1000)), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(log.message, fontSize = 14.sp, fontWeight = FontWeight.Medium) }
@@ -742,9 +839,6 @@ fun HistoryScreen(onBack: () -> Unit, dbHelper: DatabaseHelper, authData: AuthDa
         }
     }
 }
-
-// MainActivity.kt - ЧАСТЬ 2 (SettingsScreen, MatchesScreen, ExpressesScreen, вспомогательные функции)
-// Продолжение файла MainActivity.kt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -793,7 +887,7 @@ fun SettingsScreen(onBack: () -> Unit, onSave: () -> Unit, dbHelper: DatabaseHel
         LazyColumn(modifier = Modifier.fillMaxSize().padding(paddingValues).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
 
             // LEVEL НАСТРОЙКИ
-            item {
+            item(key = "level_settings") {
                 Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Row(
@@ -838,7 +932,7 @@ fun SettingsScreen(onBack: () -> Unit, onSave: () -> Unit, dbHelper: DatabaseHel
             }
 
             // TYPE 924
-            item {
+            item(key = "type_924") {
                 Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Row(
@@ -852,41 +946,13 @@ fun SettingsScreen(onBack: () -> Unit, onSave: () -> Unit, dbHelper: DatabaseHel
                         if (expandedType924) {
                             Spacer(modifier = Modifier.height(12.dp))
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedTextField(
-                                    value = type924Min,
-                                    onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type924Min = it },
-                                    label = { Text("Мин. кэф", fontSize = 11.sp) },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
-                                )
-                                OutlinedTextField(
-                                    value = type924Max,
-                                    onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type924Max = it },
-                                    label = { Text("Макс. кэф", fontSize = 11.sp) },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
-                                )
+                                OutlinedTextField(value = type924Min, onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type924Min = it }, label = { Text("Мин. кэф", fontSize = 11.sp) }, modifier = Modifier.weight(1f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+                                OutlinedTextField(value = type924Max, onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type924Max = it }, label = { Text("Макс. кэф", fontSize = 11.sp) }, modifier = Modifier.weight(1f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
                             }
                             Spacer(modifier = Modifier.height(8.dp))
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedTextField(
-                                    value = type924Start,
-                                    onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type924Start = it },
-                                    label = { Text("Мониторинг с", fontSize = 11.sp) },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                                )
-                                OutlinedTextField(
-                                    value = type924End,
-                                    onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type924End = it },
-                                    label = { Text("Мониторинг до", fontSize = 11.sp) },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                                )
+                                OutlinedTextField(value = type924Start, onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type924Start = it }, label = { Text("Мониторинг с", fontSize = 11.sp) }, modifier = Modifier.weight(1f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                                OutlinedTextField(value = type924End, onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type924End = it }, label = { Text("Мониторинг до", fontSize = 11.sp) }, modifier = Modifier.weight(1f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
                             }
                         }
                     }
@@ -894,7 +960,7 @@ fun SettingsScreen(onBack: () -> Unit, onSave: () -> Unit, dbHelper: DatabaseHel
             }
 
             // TYPE 927
-            item {
+            item(key = "type_927") {
                 Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Row(
@@ -908,41 +974,13 @@ fun SettingsScreen(onBack: () -> Unit, onSave: () -> Unit, dbHelper: DatabaseHel
                         if (expandedType927) {
                             Spacer(modifier = Modifier.height(12.dp))
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedTextField(
-                                    value = type927Min,
-                                    onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type927Min = it },
-                                    label = { Text("Мин. кэф", fontSize = 11.sp) },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
-                                )
-                                OutlinedTextField(
-                                    value = type927Max,
-                                    onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type927Max = it },
-                                    label = { Text("Макс. кэф", fontSize = 11.sp) },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
-                                )
+                                OutlinedTextField(value = type927Min, onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type927Min = it }, label = { Text("Мин. кэф", fontSize = 11.sp) }, modifier = Modifier.weight(1f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+                                OutlinedTextField(value = type927Max, onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type927Max = it }, label = { Text("Макс. кэф", fontSize = 11.sp) }, modifier = Modifier.weight(1f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
                             }
                             Spacer(modifier = Modifier.height(8.dp))
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedTextField(
-                                    value = type927Start,
-                                    onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type927Start = it },
-                                    label = { Text("Мониторинг с", fontSize = 11.sp) },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                                )
-                                OutlinedTextField(
-                                    value = type927End,
-                                    onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type927End = it },
-                                    label = { Text("Мониторинг до", fontSize = 11.sp) },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                                )
+                                OutlinedTextField(value = type927Start, onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type927Start = it }, label = { Text("Мониторинг с", fontSize = 11.sp) }, modifier = Modifier.weight(1f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                                OutlinedTextField(value = type927End, onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type927End = it }, label = { Text("Мониторинг до", fontSize = 11.sp) }, modifier = Modifier.weight(1f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
                             }
                         }
                     }
@@ -950,7 +988,7 @@ fun SettingsScreen(onBack: () -> Unit, onSave: () -> Unit, dbHelper: DatabaseHel
             }
 
             // TYPE 928
-            item {
+            item(key = "type_928") {
                 Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Row(
@@ -964,41 +1002,13 @@ fun SettingsScreen(onBack: () -> Unit, onSave: () -> Unit, dbHelper: DatabaseHel
                         if (expandedType928) {
                             Spacer(modifier = Modifier.height(12.dp))
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedTextField(
-                                    value = type928Min,
-                                    onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type928Min = it },
-                                    label = { Text("Мин. кэф", fontSize = 11.sp) },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
-                                )
-                                OutlinedTextField(
-                                    value = type928Max,
-                                    onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type928Max = it },
-                                    label = { Text("Макс. кэф", fontSize = 11.sp) },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
-                                )
+                                OutlinedTextField(value = type928Min, onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type928Min = it }, label = { Text("Мин. кэф", fontSize = 11.sp) }, modifier = Modifier.weight(1f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+                                OutlinedTextField(value = type928Max, onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type928Max = it }, label = { Text("Макс. кэф", fontSize = 11.sp) }, modifier = Modifier.weight(1f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
                             }
                             Spacer(modifier = Modifier.height(8.dp))
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedTextField(
-                                    value = type928Start,
-                                    onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type928Start = it },
-                                    label = { Text("Мониторинг с", fontSize = 11.sp) },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                                )
-                                OutlinedTextField(
-                                    value = type928End,
-                                    onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type928End = it },
-                                    label = { Text("Мониторинг до", fontSize = 11.sp) },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                                )
+                                OutlinedTextField(value = type928Start, onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type928Start = it }, label = { Text("Мониторинг с", fontSize = 11.sp) }, modifier = Modifier.weight(1f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                                OutlinedTextField(value = type928End, onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type928End = it }, label = { Text("Мониторинг до", fontSize = 11.sp) }, modifier = Modifier.weight(1f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
                             }
                         }
                     }
@@ -1006,88 +1016,41 @@ fun SettingsScreen(onBack: () -> Unit, onSave: () -> Unit, dbHelper: DatabaseHel
             }
 
             // ОБЩИЕ НАСТРОЙКИ
-            item {
+            item(key = "general_settings") {
                 Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text("🔧 Общие настройки", fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 12.dp))
-                        OutlinedTextField(
-                            value = checkInterval,
-                            onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) checkInterval = it },
-                            label = { Text("Интервал проверки (сек)") },
-                            leadingIcon = { Icon(Icons.Default.Timer, null) },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                        )
+                        OutlinedTextField(value = checkInterval, onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) checkInterval = it }, label = { Text("Интервал проверки (сек)") }, leadingIcon = { Icon(Icons.Default.Timer, null) }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
                         Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = betAmount,
-                            onValueChange = { if (it.isEmpty() || it.matches(Regex("^\\d+$"))) betAmount = it },
-                            label = { Text("Сумма ставки (₽)") },
-                            leadingIcon = { Icon(Icons.Default.AttachMoney, null) },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            supportingText = { Text("Начальная сумма для первой ставки (по умолчанию 30 ₽)", fontSize = 11.sp) }
-                        )
+                        OutlinedTextField(value = betAmount, onValueChange = { if (it.isEmpty() || it.matches(Regex("^\\d+$"))) betAmount = it }, label = { Text("Сумма ставки (₽)") }, leadingIcon = { Icon(Icons.Default.AttachMoney, null) }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), supportingText = { Text("Начальная сумма для первой ставки (по умолчанию 30 ₽)", fontSize = 11.sp) })
                         Spacer(modifier = Modifier.height(12.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text("Автозапуск бота")
-                            Switch(checked = autoStart, onCheckedChange = { autoStart = it })
-                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("Автозапуск бота"); Switch(checked = autoStart, onCheckedChange = { autoStart = it }) }
                         Divider(modifier = Modifier.padding(vertical = 8.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text("Уведомления")
-                            Switch(checked = notifications, onCheckedChange = { notifications = it })
-                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("Уведомления"); Switch(checked = notifications, onCheckedChange = { notifications = it }) }
                         Divider(modifier = Modifier.padding(vertical = 8.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Column {
-                                Text("Тестовый режим")
-                                Text("Ставки сохраняются в БД без реальной отправки", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                            Switch(checked = testMode, onCheckedChange = { testMode = it })
-                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column { Text("Тестовый режим"); Text("Ставки сохраняются в БД без реальной отправки", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }; Switch(checked = testMode, onCheckedChange = { testMode = it }) }
                     }
                 }
             }
 
             // УПРАВЛЕНИЕ ДАННЫМИ
-            item {
+            item(key = "data_management") {
                 Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
                     Column(modifier = Modifier.padding(20.dp)) {
                         Text("💾 Управление данными", fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 12.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text("Размер базы данных:")
-                            Text(dbHelper.getDatabaseSize(context), fontWeight = FontWeight.Bold)
-                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("Размер базы данных:"); Text(dbHelper.getDatabaseSize(context), fontWeight = FontWeight.Bold) }
                         Spacer(modifier = Modifier.height(12.dp))
-                        OutlinedButton(onClick = { showStatsDialog = true }, modifier = Modifier.fillMaxWidth()) {
-                            Icon(Icons.Default.Info, null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Статистика базы данных")
-                        }
+                        OutlinedButton(onClick = { showStatsDialog = true }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Info, null); Spacer(modifier = Modifier.width(8.dp)); Text("Статистика базы данных") }
                         Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedButton(onClick = {
-                            val deleted = dbHelper.cleanupOldLogs(30)
-                            Toast.makeText(context, "Удалено $deleted старых записей", Toast.LENGTH_SHORT).show()
-                        }, modifier = Modifier.fillMaxWidth()) {
-                            Icon(Icons.Default.Delete, null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Очистить старые логи")
-                        }
+                        OutlinedButton(onClick = { val deleted = dbHelper.cleanupOldLogs(30); Toast.makeText(context, "Удалено $deleted старых записей", Toast.LENGTH_SHORT).show() }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Delete, null); Spacer(modifier = Modifier.width(8.dp)); Text("Очистить старые логи") }
                         Spacer(modifier = Modifier.height(8.dp))
-                        Button(onClick = { showClearDialog = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
-                            Icon(Icons.Default.DeleteForever, null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("ОЧИСТИТЬ ВСЕ ДАННЫЕ")
-                        }
+                        Button(onClick = { showClearDialog = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) { Icon(Icons.Default.DeleteForever, null); Spacer(modifier = Modifier.width(8.dp)); Text("ОЧИСТИТЬ ВСЕ ДАННЫЕ") }
                     }
                 }
             }
 
             // КНОПКИ СОХРАНИТЬ/ОТМЕНА
-            item {
+            item(key = "save_buttons") {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedButton(onClick = onBack, modifier = Modifier.weight(1f)) { Text("Отмена") }
                     Button(onClick = {
@@ -1184,7 +1147,10 @@ fun MatchesScreen(onBack: () -> Unit, dbHelper: DatabaseHelper) {
         if (isLoading) Box(modifier = Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         else if (matches.isEmpty()) Box(modifier = Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) { Text("Нет матчей в базе данных") }
         else LazyColumn(modifier = Modifier.fillMaxSize().padding(paddingValues).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(matches) { match -> MatchCard(match = match) }
+            items(
+                items = matches,
+                key = { it.id }
+            ) { match -> MatchCard(match = match) }
         }
     }
 }
@@ -1253,7 +1219,10 @@ fun ExpressesScreen(onBack: () -> Unit, dbHelper: DatabaseHelper) {
         if (isLoading) Box(modifier = Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         else if (expresses.isEmpty()) Box(modifier = Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) { Text("Нет экспрессов в базе данных") }
         else LazyColumn(modifier = Modifier.fillMaxSize().padding(paddingValues).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(expresses) { express -> ExpressCard(express = express, matches = dbHelper.getMatchesByExpressId(express.id)) }
+            items(
+                items = expresses,
+                key = { it.id }
+            ) { express -> ExpressCard(express = express, matches = dbHelper.getMatchesByExpressId(express.id)) }
         }
     }
 }
