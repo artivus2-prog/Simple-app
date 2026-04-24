@@ -527,109 +527,109 @@ fun MainBotScreen(
                 Spacer(modifier = Modifier.height(12.dp))
             }
 
-            // ТАБЛИЦА АКТИВНЫХ ЭКСПРЕССОВ - ИСПРАВЛЕННАЯ ВЕРСИЯ
-            if (activeExpresses.isNotEmpty()) {
-                Text("🎯 Активные экспрессы (${activeExpresses.size})", fontWeight = FontWeight.Bold, fontSize = 14.sp, modifier = Modifier.padding(bottom = 8.dp))
-                Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
-                    Column(modifier = Modifier.padding(8.dp)) {
-                        // Заголовок таблицы
+// ТАБЛИЦА АКТИВНЫХ ЭКСПРЕССОВ - ИСПРАВЛЕННАЯ ВЕРСИЯ
+if (activeExpresses.isNotEmpty()) {
+    Text("🎯 Активные экспрессы (${activeExpresses.size})", fontWeight = FontWeight.Bold, fontSize = 14.sp, modifier = Modifier.padding(bottom = 8.dp))
+    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
+        Column(modifier = Modifier.padding(8.dp)) {
+            // Заголовок таблицы
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("#", fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(30.dp))
+                Text("Лига", fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1.5f))
+                Text("Матч", fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1.8f))
+                Text("Счёт", fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(40.dp))
+                Text("Тип", fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(55.dp))
+                Text("Статус", fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(55.dp))
+            }
+            Divider(modifier = Modifier.padding(vertical = 4.dp))
+            
+            // ИСПРАВЛЕНО: Плоский список, без вложенных items
+            LazyColumn(
+                modifier = Modifier.heightIn(max = 250.dp),
+                verticalArrangement = Arrangement.spacedBy(0.dp)
+            ) {
+                activeExpresses.forEachIndexed { index, expressWithMatches ->
+                    // Заголовок экспресса
+                    item(key = "header_${expressWithMatches.express.id}") {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
-                                .padding(horizontal = 8.dp, vertical = 6.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                                .background(
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                                    RoundedCornerShape(6.dp)
+                                )
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("#", fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(30.dp))
-                            Text("Лига", fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1.5f))
-                            Text("Матч", fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1.8f))
-                            Text("Счёт", fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(40.dp))
-                            Text("Тип", fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(55.dp))
-                            Text("Статус", fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(55.dp))
+                            Text("🧾 #${expressWithMatches.express.idExp}", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Кэф ${"%.2f".format(expressWithMatches.express.kfall)}", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("${expressWithMatches.express.sumbet.toInt()}₽", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(modifier = Modifier.weight(1f))
+                            Text(
+                                when (expressWithMatches.express.stsAll) {
+                                    0 -> "🔄"
+                                    1 -> "❌"
+                                    2 -> "✅"
+                                    else -> "—"
+                                },
+                                fontSize = 12.sp
+                            )
                         }
-                        Divider(modifier = Modifier.padding(vertical = 4.dp))
-                        
-                        // ИСПРАВЛЕНО: каждый элемент теперь отдельный item с ключом
-                        LazyColumn(
-                            modifier = Modifier.heightIn(max = 250.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            items(
-                                items = activeExpresses,
-                                key = { it.express.id }
-                            ) { expressWithMatches ->
-                                // Заголовок экспресса
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(
-                                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-                                            RoundedCornerShape(6.dp)
-                                        )
-                                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text("🧾 #${expressWithMatches.express.idExp}", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Кэф ${"%.2f".format(expressWithMatches.express.kfall)}", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("${expressWithMatches.express.sumbet.toInt()}₽", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Spacer(modifier = Modifier.weight(1f))
-                                    Text(
-                                        when (expressWithMatches.express.stsAll) {
-                                            0 -> "🔄"
-                                            1 -> "❌"
-                                            2 -> "✅"
-                                            else -> "—"
-                                        },
-                                        fontSize = 12.sp
-                                    )
-                                }
-                                
-                                // Матчи - теперь каждый отдельным item
-                                items(
-                                    items = expressWithMatches.matches,
-                                    key = { "match_${it.id}" }
-                                ) { match ->
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 8.dp, vertical = 2.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text("${match.mId}", fontSize = 9.sp, modifier = Modifier.width(30.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        Text(match.leagueName.ifEmpty { "—" }.take(12), fontSize = 9.sp, modifier = Modifier.weight(1.5f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Text("${match.homeTeam.take(6)}–${match.awayTeam.take(6)}", fontSize = 9.sp, modifier = Modifier.weight(1.8f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Text("${match.homeScore}:${match.awayScore}", fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(40.dp))
-                                        Text(typeName(match.betType), fontSize = 9.sp, modifier = Modifier.width(55.dp), color = MaterialTheme.colorScheme.primary)
-                                        Text(
-                                            when (match.status) {
-                                                1 -> "🔄 играет"
-                                                2 -> "✅ зашёл"
-                                                else -> "⏳ ждёт"
-                                            },
-                                            fontSize = 9.sp,
-                                            modifier = Modifier.width(55.dp),
-                                            color = when (match.status) {
-                                                1 -> Color(0xFFFF9800)
-                                                2 -> Color(0xFF4CAF50)
-                                                else -> MaterialTheme.colorScheme.onSurfaceVariant
-                                            }
-                                        )
+                    }
+                    
+                    // Матчи экспресса
+                    expressWithMatches.matches.forEach { match ->
+                        item(key = "match_${match.id}") {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("${match.mId}", fontSize = 9.sp, modifier = Modifier.width(30.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(match.leagueName.ifEmpty { "—" }.take(12), fontSize = 9.sp, modifier = Modifier.weight(1.5f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("${match.homeTeam.take(6)}–${match.awayTeam.take(6)}", fontSize = 9.sp, modifier = Modifier.weight(1.8f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("${match.homeScore}:${match.awayScore}", fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(40.dp))
+                                Text(typeName(match.betType), fontSize = 9.sp, modifier = Modifier.width(55.dp), color = MaterialTheme.colorScheme.primary)
+                                Text(
+                                    when (match.status) {
+                                        1 -> "🔄 играет"
+                                        2 -> "✅ зашёл"
+                                        else -> "⏳ ждёт"
+                                    },
+                                    fontSize = 9.sp,
+                                    modifier = Modifier.width(55.dp),
+                                    color = when (match.status) {
+                                        1 -> Color(0xFFFF9800)
+                                        2 -> Color(0xFF4CAF50)
+                                        else -> MaterialTheme.colorScheme.onSurfaceVariant
                                     }
-                                }
-                                
-                                // Разделитель между экспрессами
-                                item(key = "divider_${expressWithMatches.express.id}") {
-                                    Divider(modifier = Modifier.padding(vertical = 2.dp))
-                                }
+                                )
                             }
                         }
                     }
+                    
+                    // Разделитель (кроме последнего)
+                    if (index < activeExpresses.size - 1) {
+                        item(key = "divider_${expressWithMatches.express.id}") {
+                            Divider(modifier = Modifier.padding(vertical = 2.dp))
+                        }
+                    }
                 }
-                Spacer(modifier = Modifier.height(16.dp))
             }
+        }
+    }
+    Spacer(modifier = Modifier.height(16.dp))
+}
 
             // КНОПКА ЗАПУСКА/ОСТАНОВКИ
             Button(
