@@ -140,23 +140,16 @@ fun MainBotScreen(
                 if (sessionInfo != null && sessionInfo.saldo != null) {
                     val saldo = sessionInfo.saldo; val oldBalance = balance; balance = saldo
                     logs.add(0, "[${getCurrentTime()}] 💰 Баланс обновлён: %.2f ₽".format(saldo))
-
-// ЗАМЕНИТЬ на:
-scope.launch {
-    try {
-        val user = dbHelper.getUser(authData.fsid, authData.deviceId)
-        user?.let { u ->
-            dbHelper.saveBalance(u.id, saldo)
-            dbHelper.updateUserInfo(u.id, sessionInfo.clientId, sessionInfo.userName)
-            if (saldo > oldBalance && oldBalance > 0) {
-                dbHelper.addLog(u.id, "profit", "Профит: +%.2f ₽".format(saldo - oldBalance))
-            } else if (saldo < oldBalance && oldBalance > 0) {
-                dbHelper.addLog(u.id, "loss", "Убыток: %.2f ₽".format(saldo - oldBalance))
-            }
-        }
-    } catch (e: Exception) {}
-}
-
+                    scope.launch {
+                        try {
+                            val user = dbHelper.getUser(authData.fsid, authData.deviceId)
+                            user?.let {
+                                dbHelper.saveBalance(it.id, saldo)
+                                dbHelper.updateUserInfo(it.id, sessionInfo.clientId, sessionInfo.userName)
+                                if (saldo > oldBalance && oldBalance > 0) dbHelper.addLog(it.id, "profit", "Профит: +%.2f ₽".format(saldo - oldBalance))
+                                else if (saldo < oldBalance && oldBalance > 0) dbHelper.addLog(it.id, "loss", "Убыток: %.2f ₽".format(saldo - oldBalance))
+                            }
+                        } catch (e: Exception) {}
                     }
                 }
             },
@@ -664,7 +657,7 @@ fun ExpressCard(express: ExpressInfo, matches: List<MatchInfo>) {
             Text("Стратегия: ${express.strategy}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text("Создан: ${formatTimestamp(express.ct)}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (expanded && matches.isNotEmpty()) {
-                Divider(modifier = Modifier.padding(vertical = 12.dp))
+                Divider(modifier = Modifier.padding(vertical = width = 12.dp))
                 Text("📋 Матчи в экспрессе:", fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
                 matches.forEach { match -> MatchInExpressCard(match = match); Spacer(modifier = Modifier.height(8.dp)) }
             }
