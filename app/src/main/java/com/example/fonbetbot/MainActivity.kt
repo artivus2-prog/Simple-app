@@ -130,6 +130,49 @@ fun MainBotScreen(
         } catch (e: Exception) {}
     }
 
+fun fetchBalanceFromApi() {
+    if (authData == null) {
+        logs.add(0, "[${getCurrentTime()}] ❌ Нет данных авторизации")
+        return
+    }
+    isLoadingBalance = true
+    ApiClient().getSaldo(
+        cookies = emptyMap(),
+        fsid = authData.fsid,
+        deviceId = authData.deviceId,
+        onSuccess = { sessionInfo ->
+            isLoadingBalance = false
+            if (sessionInfo != null && sessionInfo.saldo != null) {
+                val saldo = sessionInfo.saldo
+                val oldBalance = balance
+                balance = saldo
+                logs.add(0, "[${getCurrentTime()}] 💰 Баланс обновлён: %.2f ₽".format(saldo))
+                scope.launch {
+                    try {
+                        val user = dbHelper.getUser(authData.fsid, authData.deviceId)
+                        user?.let { u ->
+                            dbHelper.saveBalance(u.id, saldo)
+                            dbHelper.updateUserInfo(u.id, sessionInfo.clientId, sessionInfo.userName)
+                            val profit = saldo - oldBalance
+                            if (profit > 0 && oldBalance > 0) {
+                                dbHelper.addLog(u.id, "profit", "Профит: +%.2f ₽".format(profit))
+                            } else if (profit < 0 && oldBalance > 0) {
+                                dbHelper.addLog(u.id, "loss", "Убыток: %.2f ₽".format(-profit))
+                            }
+                        }
+                    } catch (e: Exception) {
+                    }
+                }
+            }
+        },
+        onError = { error ->
+            isLoadingBalance = false
+            logs.add(0, "[${getCurrentTime()}] ❌ Ошибка API: $error")
+        }
+    )
+}
+
+
     LaunchedEffect(authData, isBotRunning) {
         authData?.let {
             try { val user = dbHelper.getUser(it.fsid, it.deviceId); user?.let { userId -> val stats = dbHelper.getBalanceStats(userId.id); if (stats.currentBalance > 0) balance = stats.currentBalance } } catch (e: Exception) {}
