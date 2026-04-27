@@ -701,14 +701,16 @@ fun getActiveUser(): User? {
         return matches
     }
     
-    // Получить все экспрессы
-    fun getAllExpresses(): List<ExpressInfo> {
-        val db = readableDatabase
-        val expresses = mutableListOf<ExpressInfo>()
-        
+// Получить все экспрессы
+fun getAllExpresses(): List<ExpressInfo> {
+    val db = readableDatabase
+    val expresses = mutableListOf<ExpressInfo>()
+    
+    try {
         val cursor = db.rawQuery("""
             SELECT 
-                id, id_exp, COALESCE(kfall, 1.0) as kfall,
+                id, id_exp, 
+                COALESCE(kfall, 1.0) as kfall,
                 COALESCE(profloss, 0.0) as profloss,
                 COALESCE(balans, 0.0) as balans,
                 COALESCE(sumbet, 0.0) as sumbet,
@@ -719,35 +721,52 @@ fun getActiveUser(): User? {
                 COALESCE(total_odds, 1.0) as total_odds,
                 COALESCE(bet_amount, 0.0) as bet_amount,
                 COALESCE(potential_win, 0.0) as potential_win,
+                COALESCE(balance, 0.0) as balance,
+                COALESCE(profit_loss, 0.0) as profit_loss,
+                COALESCE(is_bet_placed, 0) as is_bet_placed,
+                COALESCE(created_time, 0) as created_time,
                 created_at, updated_at
             FROM express_bets
             ORDER BY ct DESC
         """, null)
         
+        // Логируем количество колонок для отладки
+        Log.d(TAG, "getAllExpresses: columnCount=${cursor.columnCount}")
+        
         while (cursor.moveToNext()) {
-            expresses.add(ExpressInfo(
-                id = cursor.getLong(0),
-                idExp = cursor.getInt(1),
-                kfall = cursor.getDouble(3),
-                profLoss = cursor.getDouble(4),
-                balans = cursor.getDouble(5),
-                sumbet = cursor.getDouble(6),
-                stsAll = cursor.getInt(7),
-                ct = cursor.getLong(8),
-                strategy = cursor.getString(9),
-                idExpReplace = cursor.getInt(10),
-                eventsCount = cursor.getInt(11),
-                totalOdds = cursor.getDouble(12),
-                betAmount = cursor.getDouble(13),
-                potentialWin = cursor.getDouble(14),
-                createdAt = cursor.getLong(15),
-                updatedAt = cursor.getLong(16)
-            ))
+            try {
+                expresses.add(ExpressInfo(
+                    id = cursor.getLong(0),
+                    idExp = cursor.getInt(1),
+                    userId = 0L,
+                    kfall = cursor.getDouble(2),
+                    profLoss = cursor.getDouble(3),
+                    balans = cursor.getDouble(4),
+                    sumbet = cursor.getDouble(5),
+                    stsAll = cursor.getInt(6),
+                    ct = cursor.getLong(7),
+                    strategy = cursor.getString(8),
+                    idExpReplace = cursor.getInt(9),
+                    eventsCount = cursor.getInt(10),
+                    totalOdds = cursor.getDouble(11),
+                    betAmount = cursor.getDouble(12),
+                    potentialWin = cursor.getDouble(13),
+                    createdAt = cursor.getLong(18),
+                    updatedAt = cursor.getLong(19)
+                ))
+            } catch (e: Exception) {
+                Log.e(TAG, "Ошибка чтения строки в getAllExpresses: ${e.message}")
+            }
         }
         cursor.close()
         
-        return expresses
+    } catch (e: Exception) {
+        Log.e(TAG, "Ошибка getAllExpresses: ${e.message}")
     }
+    
+    Log.d(TAG, "getAllExpresses: загружено ${expresses.size} экспрессов")
+    return expresses
+}
     
     // Получить матчи по ID экспресса
     fun getMatchesByExpressId(expressId: Long): List<MatchInfo> {
