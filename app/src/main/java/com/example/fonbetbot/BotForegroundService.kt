@@ -1,4 +1,4 @@
-// BotForegroundService.kt - ПОЛНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ С ДИАГНОСТИКОЙ
+// BotForegroundService.kt - ИСПРАВЛЕНО: ЛОГИРОВАНИЕ, ПРАВИЛЬНЫЙ userId, ПРОВЕРКА ВСЕХ ЭТАПОВ
 package com.example.fonbetbot
 
 import android.app.Notification
@@ -11,7 +11,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.ServiceInfo
-import android.database.Cursor
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
@@ -39,16 +38,8 @@ class BotForegroundService : Service() {
         var onLogUpdate: ((String) -> Unit)? = null
         var onBetsUpdate: ((List<Pair<Int, Int>>) -> Unit)? = null
         var onScoresUpdate: ((String) -> Unit)? = null
-        var onDiagnosticUpdate: ((String) -> Unit)? = null  // НОВЫЙ КОЛЛБЭК ДЛЯ ДИАГНОСТИКИ
         var authData: AuthData? = null
         var lastBalance: Double = 0.0
-    }
-    
-    private fun diagLog(message: String) {
-        Log.d(TAG, "🔬 $message")
-        val timestamp = getCurrentTime()
-        onDiagnosticUpdate?.invoke("[$timestamp] 🔬 $message")
-        onLogUpdate?.invoke("[$timestamp] 🔬 $message")
     }
     
     override fun onCreate() {
@@ -67,12 +58,10 @@ class BotForegroundService : Service() {
                         balance = stats.currentBalance
                         lastBalance = stats.currentBalance
                     }
-                    diagLog("✅ Пользователь загружен: id=${it.id}, clientId=${it.clientId}, username=${it.username}")
-                } ?: run {
-                    diagLog("❌ Пользователь не найден в БД! fsid=${data.fsid.take(15)}...")
-                }
+                    Log.d(TAG, "✅ Пользователь загружен: id=${it.id}, clientId=${it.clientId}, username=${it.username}")
+                } ?: Log.e(TAG, "❌ Пользователь не найден в БД!")
             } catch (e: Exception) { 
-                diagLog("❌ Ошибка загрузки пользователя: ${e.message}")
+                Log.e(TAG, "Ошибка загрузки пользователя: ${e.message}")
             }
         }
     }
@@ -110,7 +99,6 @@ class BotForegroundService : Service() {
         }
         
         onLogUpdate?.invoke("[${getCurrentTime()}] 🚀 Бот запущен в фоновом режиме")
-        diagLog("🚀 Бот запущен")
         
         authData?.let { data ->
             try {
@@ -118,12 +106,10 @@ class BotForegroundService : Service() {
                 user?.let {
                     dbHelper.startBotSession(it.id, balance)
                     dbHelper.addLog(it.id, "start", "Бот запущен")
-                    diagLog("✅ Сессия бота начата для userId=${it.id}")
-                } ?: run {
-                    diagLog("❌ Не удалось начать сессию - пользователь не найден")
-                }
+                    Log.d(TAG, "✅ Сессия бота начата для userId=${it.id}")
+                } ?: Log.e(TAG, "❌ Не удалось начать сессию - пользователь не найден")
             } catch (e: Exception) { 
-                diagLog("❌ Ошибка старта сессии: ${e.message}")
+                Log.e(TAG, "Ошибка старта сессии: ${e.message}")
             }
         }
         
@@ -138,7 +124,7 @@ class BotForegroundService : Service() {
         // Цикл получения ставок (каждые 30 секунд)
         serviceScope.launch {
             delay(5000) // Первичная задержка 5 секунд
-            diagLog("🔄 Запуск цикла получения ставок")
+            Log.d(TAG, "🔄 Запуск цикла получения ставок")
             while (isRunning) {
                 authData?.let { data -> fetchBets(data) }
                 delay(30000)
@@ -167,7 +153,6 @@ class BotForegroundService : Service() {
     // ==================== МЕТОДЫ ПОЛУЧЕНИЯ ДАННЫХ ====================
     
     private fun fetchBalance(data: AuthData) {
-        // ... (без изменений, тот же код что и раньше)
         val cookieManager = CookieManager.getInstance()
         val cookieString = cookieManager.getCookie("https://www.fon.bet") ?: ""
         
@@ -180,6 +165,8 @@ class BotForegroundService : Service() {
             emptyMap()
         }
         
+        Log.d(TAG, "💰 Запрос баланса...")
+        
         apiClient.getSaldo(
             cookies = cookies,
             fsid = data.fsid,
@@ -189,7 +176,8 @@ class BotForegroundService : Service() {
                     val newBalance = sessionInfo.saldo
                     val oldBalance = balance
                     
-                    // ... остальной код без изменений
+                    Log.d(TAG, "✅ Баланс получен: saldo=$newBalance, clientId=${sessionInfo.clientId}, userName=${sessionInfo.userName}")
+                    
                     if (newBalance != null) {
                         val difference = newBalance - oldBalance
                         balance = newBalance
@@ -206,6 +194,7 @@ class BotForegroundService : Service() {
                                 val userDisplayName = sessionInfo.userName
                                 
                                 if (userClientId != null || userDisplayName != null) {
+                                    Log.d(TAG, "Обновление пользователя: clientId=$userClientId, userName=$userDisplayName")
                                     dbHelper.updateUserInfo(userData.id, userClientId, userDisplayName)
                                 }
                                 
@@ -229,49 +218,50 @@ class BotForegroundService : Service() {
                         
                         val notification = createNotification("Бот активен", displayText)
                         (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(NOTIFICATION_ID, notification)
+                        
+                        val timestamp = getCurrentTime()
+                        if (difference > 0 && oldBalance > 0) {
+                            onLogUpdate?.invoke("[$timestamp] 💰 Профит: +%.2f ₽".format(difference))
+                        } else if (difference < 0 && oldBalance > 0) {
+                            onLogUpdate?.invoke("[$timestamp] 📉 Убыток: %.2f ₽".format(difference))
+                        }
                     }
                 }
             },
             onError = { error: String ->
                 Log.e(TAG, "❌ Ошибка получения баланса: $error")
                 onLogUpdate?.invoke("[${getCurrentTime()}] ❌ Ошибка API: $error")
+                try {
+                    val user = dbHelper.getUser(data.fsid, data.deviceId)
+                    user?.let { dbHelper.addLog(it.id, "error", "Ошибка API: $error", "ERROR") }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Ошибка логирования: ${e.message}")
+                }
             }
         )
     }
     
-    // ==================== ПОЛНОСТЬЮ ПЕРЕПИСАННЫЙ fetchBets С ДИАГНОСТИКОЙ ====================
+    // ==================== ИСПРАВЛЕННЫЙ МЕТОД fetchBets ====================
     
     private fun fetchBets(data: AuthData) {
-        diagLog("===== fetchBets: НАЧАЛО =====")
+        Log.d(TAG, "🎲 ===== fetchBets: НАЧАЛО =====")
         
         try {
-            // ШАГ 1: Получаем пользователя
             val user = dbHelper.getUser(data.fsid, data.deviceId)
             if (user == null) {
-                diagLog("❌ ШАГ 1: Пользователь не найден в БД!")
+                Log.e(TAG, "❌ fetchBets: Пользователь не найден в БД!")
                 onLogUpdate?.invoke("[${getCurrentTime()}] ❌ Ошибка: пользователь не найден")
                 return
             }
             
             val userData = user
-            diagLog("✅ ШАГ 1: Пользователь найден: id=${userData.id}, clientId=${userData.clientId}, fsid=${userData.fsid.take(15)}..., username=${userData.username}")
+            Log.d(TAG, "📊 fetchBets: userId=${userData.id}, clientId=${userData.clientId}, username=${userData.username}")
             
-            // ШАГ 2: Проверяем всех пользователей в БД
-            val db = dbHelper.readableDatabase
-            val allUsersCursor = db.query("users", arrayOf("id", "fsid", "device_id", "client_id", "username"), null, null, null, null, null)
-            val allUsers = mutableListOf<String>()
-            while (allUsersCursor.moveToNext()) {
-                allUsers.add("id=${allUsersCursor.getLong(0)}, fsid=${allUsersCursor.getString(1)?.take(15)}..., deviceId=${allUsersCursor.getString(2)?.take(15)}..., clientId=${allUsersCursor.getLong(3)}")
-            }
-            allUsersCursor.close()
-            diagLog("📊 ШАГ 2: Всего пользователей в БД: ${allUsers.size}")
-            allUsers.forEach { diagLog("  $it") }
+            // ИСПРАВЛЕНО: Используем clientId из Фонбет, а не внутренний userId
+            // Если clientId не установлен, используем userId как запасной вариант
+            val apiUserId = if (userData.clientId > 0) userData.clientId else userData.id
+            Log.d(TAG, "📊 fetchBets: отправляем user_id=$apiUserId на сервер")
             
-            // ШАГ 3: Определяем apiUserId
-            val apiUserId = if (userData.clientId > 0 && userData.clientId != 18845703L) userData.clientId else userData.id
-            diagLog("📊 ШАГ 3: apiUserId для запроса = $apiUserId (clientId=${userData.clientId}, userId=${userData.id})")
-            
-            // ШАГ 4: Формируем настройки
             val settings = ApiClient.BetSettings(
                 maxMatchesPerExpress = prefs.getInt("max_matches_per_express", 2),
                 multiply = prefs.getInt("multiply", 2),
@@ -298,111 +288,128 @@ class BotForegroundService : Service() {
                 )
             )
             
-            diagLog("📤 ШАГ 4: Отправляем запрос getBets с user_id=$apiUserId")
-            diagLog("  Настройки: maxMatches=${settings.maxMatchesPerExpress}, multiply=${settings.multiply}, allMinKef=${settings.allMinKef}")
+            Log.d(TAG, "📤 Отправляем запрос getBets с настройками:")
+            Log.d(TAG, "  maxMatchesPerExpress: ${settings.maxMatchesPerExpress}")
+            Log.d(TAG, "  multiply: ${settings.multiply}")
+            Log.d(TAG, "  allMinKef: ${settings.allMinKef}")
             
             apiClient.getBets(
-                userId = apiUserId,
+                userId = apiUserId,  // ИСПРАВЛЕНО: передаем правильный ID
                 settings = settings,
                 onSuccess = { betDataList: List<ApiClient.BetData> ->
-                    diagLog("📥 ШАГ 5: getBets ответ: получено ${betDataList.size} матчей")
+                    Log.d(TAG, "📥 getBets ответ: получено ${betDataList.size} матчей")
                     
                     if (betDataList.isNotEmpty()) {
                         // Логируем каждый матч
-                        betDataList.forEachIndexed { index, bet ->
-                            diagLog("  Матч #${index + 1}: mId=${bet.mId}, type=${bet.type}(${typeName(bet.type)}), home=${bet.home}, away=${bet.away}, kef=${bet.startKf}, liga=${bet.ligaName}")
+                        betDataList.forEach { bet ->
+                            Log.d(TAG, "  📊 mId=${bet.mId}, type=${bet.type}, home=${bet.home}, away=${bet.away}, kef=${bet.startKf}")
                         }
                         
                         val matchIds = betDataList.map { it.mId }.sorted()
                         val matchIdsKey = matchIds.joinToString(",")
                         
-                        diagLog("🎯 ШАГ 6: Экспресс из матчей: $matchIdsKey (${betDataList.size} матчей)")
+                        Log.d(TAG, "🎯 Экспресс из матчей: $matchIdsKey (${betDataList.size} матчей)")
                         
-                        // ШАГ 7: Проверяем дубликаты
-                        val alreadyExists = isExpressAlreadyExistsWithLog(userData.id, matchIds)
-                        diagLog("🔍 ШАГ 7: Проверка дубликата: exists=$alreadyExists")
+                        // Проверяем, существует ли уже такой экспресс
+                        val alreadyExists = isExpressAlreadyExists(userData.id, matchIds)
+                        Log.d(TAG, "🔍 Проверка дубликата: exists=$alreadyExists")
                         
                         if (alreadyExists) {
-                            diagLog("⏭ ШАГ 7: Экспресс с матчами $matchIdsKey уже существует, пропускаем")
+                            Log.d(TAG, "⏭ Экспресс с матчами $matchIdsKey уже существует, пропускаем")
                             onLogUpdate?.invoke("[${getCurrentTime()}] ⏭ Экспресс уже обработан: $matchIdsKey")
                             return@getBets
                         }
                         
                         onLogUpdate?.invoke("[${getCurrentTime()}] 🎲 Получен готовый экспресс (${betDataList.size} матчей)")
                         
+                        betDataList.forEach { betData: ApiClient.BetData ->
+                            val matchInfo = buildString {
+                                append("📊 Матч #${betData.mId}: ")
+                                if (betData.home.isNotEmpty() || betData.away.isNotEmpty()) {
+                                    append("${betData.home} vs ${betData.away} | ")
+                                }
+                                if (betData.ligaName.isNotEmpty()) {
+                                    append("${betData.ligaName} | ")
+                                }
+                                append("Кэф: ${"%.2f".format(betData.startKf)} | ")
+                                append("Тип: ${typeName(betData.type)}")
+                            }
+                            onLogUpdate?.invoke("[${getCurrentTime()}] $matchInfo")
+                        }
+                        
                         val newExpId = (System.currentTimeMillis() / 1000).toInt()
                         
-                        // ШАГ 8: Сохраняем в БД
-                        diagLog("💾 ШАГ 8: Сохраняем экспресс в БД с userId=${userData.id}, expId=$newExpId")
-                        val expressDbId = saveExpressToDbWithLog(
+                        onLogUpdate?.invoke("[${getCurrentTime()}] 🎯 Создаем экспресс #$newExpId")
+                        onBetsUpdate?.invoke(betDataList.map { Pair(it.mId, it.type) })
+                        
+                        // 1. Сохраняем экспресс в БД
+                        Log.d(TAG, "💾 Сохраняем экспресс в БД...")
+                        val expressDbId = saveExpressToDb(
                             userId = userData.id,
                             expId = newExpId,
                             betDataList = betDataList
                         )
                         
-                        diagLog("💾 ШАГ 8 РЕЗУЛЬТАТ: expressDbId=$expressDbId")
+                        Log.d(TAG, "💾 Результат сохранения: expressDbId=$expressDbId")
                         
                         if (expressDbId > 0) {
-                            diagLog("✅ ШАГ 9: Экспресс сохранен (dbId=$expressDbId), размещаем ставку...")
-                            
-                            // ШАГ 9: Проверяем что реально в БД
-                            checkExpressInDb(expressDbId)
-                            
-                            // ШАГ 10: Размещаем ставку
+                            Log.d(TAG, "✅ Экспресс сохранен успешно, размещаем ставку...")
+                            // 2. Размещаем ставку
                             val betPlaced = placeBet(
                                 expressDbId = expressDbId,
                                 expId = newExpId,
                                 userId = userData.id,
                                 betDataList = betDataList
                             )
-                            diagLog("🎰 ШАГ 10: Результат размещения: $betPlaced")
+                            Log.d(TAG, "🎰 Результат размещения ставки: $betPlaced")
                         } else {
-                            diagLog("❌ ШАГ 8: Ошибка сохранения экспресса! expressDbId = $expressDbId")
-                            onLogUpdate?.invoke("[${getCurrentTime()}] ❌ Ошибка сохранения экспресса в БД!")
+                            Log.e(TAG, "❌ Ошибка сохранения экспресса в БД!")
+                            onLogUpdate?.invoke("[${getCurrentTime()}] ❌ Ошибка сохранения экспресса!")
                         }
                         
                     } else {
-                        diagLog("📭 ШАГ 5: Пустой список матчей от сервера")
+                        Log.d(TAG, "📭 getBets: пустой список матчей")
                         onLogUpdate?.invoke("[${getCurrentTime()}] 📭 Нет подходящих матчей")
                     }
                 },
                 onError = { error: String ->
-                    diagLog("❌ Ошибка получения ставок: $error")
+                    Log.e(TAG, "❌ Ошибка получения ставок: $error")
                     onLogUpdate?.invoke("[${getCurrentTime()}] ❌ Ошибка получения ставок: $error")
                 }
             )
         } catch (e: Exception) {
-            diagLog("❌ ИСКЛЮЧЕНИЕ в fetchBets: ${e.message}")
             Log.e(TAG, "❌ Исключение в fetchBets: ${e.message}", e)
         }
         
-        diagLog("===== fetchBets: КОНЕЦ =====")
+        Log.d(TAG, "🎲 ===== fetchBets: КОНЕЦ =====")
     }
     
-    // Новая версия с логами
-    private fun isExpressAlreadyExistsWithLog(userId: Long, matchIds: List<Int>): Boolean {
+    // ==================== МЕТОДЫ ДЛЯ РАБОТЫ С ЭКСПРЕССАМИ ====================
+    
+    // Проверка существования экспресса по набору m_id
+    private fun isExpressAlreadyExists(userId: Long, matchIds: List<Int>): Boolean {
         val db = dbHelper.readableDatabase
         
-        diagLog("🔍 isExpressAlreadyExists: userId=$userId, matchIds=$matchIds")
+        Log.d(TAG, "🔍 isExpressAlreadyExists: userId=$userId, проверяем matchIds=$matchIds")
         
+        // Получаем все активные экспрессы пользователя
         val cursor = db.query(
             "express_bets",
-            arrayOf("id", "id_exp", "sts_all"),
+            arrayOf("id"),
             "user_id = ? AND sts_all IN (0, 1, 2)",
             arrayOf(userId.toString()),
             null, null, null
         )
         
-        val expressIds = mutableListOf<Triple<Long, Int, Int>>()
+        val expressIds = mutableListOf<Long>()
         while (cursor.moveToNext()) {
-            expressIds.add(Triple(cursor.getLong(0), cursor.getInt(1), cursor.getInt(2)))
+            expressIds.add(cursor.getLong(0))
         }
         cursor.close()
         
-        diagLog("🔍 Найдено активных экспрессов для userId=$userId: ${expressIds.size}")
-        expressIds.forEach { diagLog("  expressDbId=${it.first}, expId=${it.second}, stsAll=${it.third}") }
+        Log.d(TAG, "🔍 Найдено активных экспрессов: ${expressIds.size}")
         
-        for ((expressId, expId, stsAll) in expressIds) {
+        for (expressId in expressIds) {
             val eventsCursor = db.query(
                 "express_events",
                 arrayOf("m_id"),
@@ -417,19 +424,20 @@ class BotForegroundService : Service() {
             }
             eventsCursor.close()
             
-            diagLog("  Экспресс #$expId (dbId=$expressId): матчи=$existingMatchIds")
+            Log.d(TAG, "🔍 Экспресс $expressId: existingMatchIds=$existingMatchIds")
             
             if (existingMatchIds.sorted() == matchIds.sorted()) {
-                diagLog("🔍 НАЙДЕН ДУБЛИКАТ: экспресс #$expId (dbId=$expressId)")
+                Log.d(TAG, "🔍 НАЙДЕН ДУБЛИКАТ: экспресс $expressId")
                 return true
             }
         }
         
-        diagLog("🔍 Дубликатов не найдено")
+        Log.d(TAG, "🔍 Дубликатов не найдено")
         return false
     }
     
-    private fun saveExpressToDbWithLog(
+    // Сохранение экспресса в БД
+    private fun saveExpressToDb(
         userId: Long,
         expId: Int,
         betDataList: List<ApiClient.BetData>
@@ -445,29 +453,13 @@ class BotForegroundService : Service() {
         
         val potentialWin = betAmount * totalKef
         
-        diagLog("💾 saveExpressToDb:")
-        diagLog("  userId: $userId")
-        diagLog("  expId: $expId")
-        diagLog("  Матчей: ${betDataList.size}")
-        diagLog("  Общий кэф: ${"%.2f".format(totalKef)}")
-        diagLog("  Ставка: ${betAmount.toInt()} ₽")
-        diagLog("  Выигрыш: ${"%.2f".format(potentialWin)} ₽")
-        diagLog("  timeUtc: $currentTimeUtc")
-        
-        // Проверяем существование пользователя
-        val userCheck = db.query("users", arrayOf("id"), "id = ?", arrayOf(userId.toString()), null, null, null)
-        val userExists = userCheck.moveToFirst()
-        userCheck.close()
-        diagLog("  Пользователь с id=$userId существует в БД: $userExists")
-        
-        // Проверяем структуру таблицы
-        val tableInfo = db.rawQuery("PRAGMA table_info(express_bets)", null)
-        val columns = mutableListOf<String>()
-        while (tableInfo.moveToNext()) {
-            columns.add("${tableInfo.getString(1)}(${tableInfo.getString(2)})")
-        }
-        tableInfo.close()
-        diagLog("  Колонки express_bets: ${columns.joinToString(", ")}")
+        Log.d(TAG, "💾 saveExpressToDb #$expId:")
+        Log.d(TAG, "  userId: $userId")
+        Log.d(TAG, "  Матчей: ${betDataList.size}")
+        Log.d(TAG, "  Общий кэф: ${"%.2f".format(totalKef)}")
+        Log.d(TAG, "  Ставка: ${betAmount.toInt()} ₽")
+        Log.d(TAG, "  Выигрыш: ${"%.2f".format(potentialWin)} ₽")
+        Log.d(TAG, "  Время создания: $currentTimeUtc")
         
         val expressValues = ContentValues().apply {
             put("user_id", userId)
@@ -476,7 +468,7 @@ class BotForegroundService : Service() {
             put("profloss", 0.0)
             put("balans", balance)
             put("sumbet", betAmount)
-            put("sts_all", 0)
+            put("sts_all", 0)  // 0 = активен
             put("is_bet_placed", 0)
             put("ct", currentTimeUtc)
             put("strategy", "standard")
@@ -491,55 +483,17 @@ class BotForegroundService : Service() {
             put("updated_at", currentTimeUtc)
         }
         
-        diagLog("  ContentValues: ${expressValues.toString().take(200)}...")
-        
         val expressId = db.insert("express_bets", null, expressValues)
         
-        diagLog("  db.insert результат: $expressId")
-        
         if (expressId == -1L) {
-            diagLog("❌ ОШИБКА ВСТАВКИ В express_bets! expressId = -1")
-            
-            // Пробуем вставить без внешних ключей
-            try {
-                db.execSQL("PRAGMA foreign_keys = OFF")
-                val retryId = db.insertOrThrow("express_bets", null, expressValues)
-                diagLog("  Повторная вставка (foreign_keys=OFF): $retryId")
-                db.execSQL("PRAGMA foreign_keys = ON")
-                
-                if (retryId > 0) {
-                    // Продолжаем с retryId
-                    saveEventsToDb(db, retryId, expId, userId, betDataList, currentTimeUtc)
-                    return retryId
-                }
-            } catch (e: Exception) {
-                diagLog("❌ Ошибка повторной вставки: ${e.message}")
-            }
-            
+            Log.e(TAG, "❌ Ошибка вставки в express_bets!")
             return -1
         }
         
+        Log.d(TAG, "✅ Экспресс #$expId сохранен: expressId=$expressId")
+        
         // Сохраняем матчи
-        saveEventsToDb(db, expressId, expId, userId, betDataList, currentTimeUtc)
-        
-        // Проверяем что все сохранилось
-        checkExpressInDb(expressId)
-        
-        dbHelper.addLog(userId, "express_created", 
-            "Экспресс #$expId: ${betDataList.size} матчей, кэф ${"%.2f".format(totalKef)}, ставка ${betAmount.toInt()} ₽")
-        
-        return expressId
-    }
-    
-    private fun saveEventsToDb(
-        db: android.database.sqlite.SQLiteDatabase,
-        expressId: Long,
-        expId: Int,
-        userId: Long,
-        betDataList: List<ApiClient.BetData>,
-        currentTimeUtc: Long
-    ) {
-        betDataList.forEachIndexed { index, betData ->
+        betDataList.forEach { betData ->
             val initialStatus = if (betData.sh > 0 || betData.sa > 0) {
                 checkMatchStatus(betData.type, betData.sh, betData.sa)
             } else {
@@ -575,62 +529,30 @@ class BotForegroundService : Service() {
             
             val eventInsertId = db.insert("express_events", null, eventValues)
             if (eventInsertId == -1L) {
-                diagLog("  ❌ Ошибка вставки матча #${index + 1} (mId=${betData.mId})!")
+                Log.e(TAG, "❌ Ошибка вставки матча #${betData.mId}!")
             } else {
-                diagLog("  ✅ Матч #${index + 1} (mId=${betData.mId}) сохранен: eventId=$eventInsertId, status=$initialStatus")
+                Log.d(TAG, "  ✅ Матч #${betData.mId} сохранен (id=$eventInsertId, status=$initialStatus)")
             }
         }
+        
+        // Проверяем, что все сохранилось
+        val checkCursor = db.query("express_events", arrayOf("COUNT(*)"), 
+            "express_id = ?", arrayOf(expressId.toString()), null, null, null)
+        var savedEventsCount = 0
+        if (checkCursor.moveToFirst()) {
+            savedEventsCount = checkCursor.getInt(0)
+        }
+        checkCursor.close()
+        
+        Log.d(TAG, "📊 Проверка: сохранено $savedEventsCount из ${betDataList.size} матчей")
+        
+        dbHelper.addLog(userId, "express_created", 
+            "Экспресс #$expId: ${betDataList.size} матчей, кэф ${"%.2f".format(totalKef)}, ставка ${betAmount.toInt()} ₽")
+        
+        return expressId
     }
     
-    private fun checkExpressInDb(expressId: Long) {
-        val db = dbHelper.readableDatabase
-        
-        // Проверяем экспресс
-        val expressCursor = db.query("express_bets", null, "id = ?", arrayOf(expressId.toString()), null, null, null)
-        if (expressCursor.moveToFirst()) {
-            diagLog("📊 ПРОВЕРКА БД: Экспресс dbId=$expressId существует в БД")
-            diagLog("  id_exp=${expressCursor.getInt(expressCursor.getColumnIndexOrThrow("id_exp"))}")
-            diagLog("  user_id=${expressCursor.getLong(expressCursor.getColumnIndexOrThrow("user_id"))}")
-            diagLog("  sts_all=${expressCursor.getInt(expressCursor.getColumnIndexOrThrow("sts_all"))}")
-            diagLog("  sumbet=${expressCursor.getDouble(expressCursor.getColumnIndexOrThrow("sumbet"))}")
-            diagLog("  kfall=${expressCursor.getDouble(expressCursor.getColumnIndexOrThrow("kfall"))}")
-        } else {
-            diagLog("❌ ПРОВЕРКА БД: Экспресс dbId=$expressId НЕ НАЙДЕН в БД!")
-        }
-        expressCursor.close()
-        
-        // Проверяем матчи
-        val eventsCursor = db.query("express_events", arrayOf("COUNT(*)"), "express_id = ?", arrayOf(expressId.toString()), null, null, null)
-        var eventsCount = 0
-        if (eventsCursor.moveToFirst()) {
-            eventsCount = eventsCursor.getInt(0)
-        }
-        eventsCursor.close()
-        diagLog("📊 ПРОВЕРКА БД: Матчей для экспресса dbId=$expressId: $eventsCount")
-        
-        // Общий подсчет всех записей в таблицах
-        val totalExpressesCursor = db.rawQuery("SELECT COUNT(*) FROM express_bets", null)
-        if (totalExpressesCursor.moveToFirst()) {
-            diagLog("📊 ВСЕГО ЗАПИСЕЙ В express_bets: ${totalExpressesCursor.getInt(0)}")
-        }
-        totalExpressesCursor.close()
-        
-        val totalEventsCursor = db.rawQuery("SELECT COUNT(*) FROM express_events", null)
-        if (totalEventsCursor.moveToFirst()) {
-            diagLog("📊 ВСЕГО ЗАПИСЕЙ В express_events: ${totalEventsCursor.getInt(0)}")
-        }
-        totalEventsCursor.close()
-        
-        // Проверяем всех пользователей
-        val allUsersCursor = db.rawQuery("SELECT COUNT(*) FROM users", null)
-        if (allUsersCursor.moveToFirst()) {
-            diagLog("📊 ВСЕГО ЗАПИСЕЙ В users: ${allUsersCursor.getInt(0)}")
-        }
-        allUsersCursor.close()
-    }
-    
-    // ... (placeBet, simulatePlaceBet, updateActiveMatchesScores и остальные методы без изменений)
-    
+    // Размещение ставки
     private fun placeBet(
         expressDbId: Long,
         expId: Int,
@@ -649,7 +571,7 @@ class BotForegroundService : Service() {
             )
             
             if (!cursor.moveToFirst()) {
-                diagLog("❌ placeBet: Экспресс #$expId (dbId=$expressDbId) не найден в БД!")
+                Log.e(TAG, "❌ placeBet: Экспресс #$expId (dbId=$expressDbId) не найден в БД!")
                 return false
             }
             
@@ -662,13 +584,14 @@ class BotForegroundService : Service() {
                 "${betData.home.take(15)} vs ${betData.away.take(15)} (${typeName(betData.type)})"
             }
             
-            diagLog("🎲 РАЗМЕЩЕНИЕ СТАВКИ #$expId:")
-            diagLog("  expressDbId: $expressDbId")
-            diagLog("  Матчи: $matchesInfo")
-            diagLog("  Сумма: ${betAmount.toInt()} ₽")
-            diagLog("  Кэф: ${"%.2f".format(totalKef)}")
-            diagLog("  Выигрыш: ${"%.2f".format(potentialWin)} ₽")
+            Log.d(TAG, "🎲 РАЗМЕЩЕНИЕ СТАВКИ #$expId:")
+            Log.d(TAG, "  expressDbId: $expressDbId")
+            Log.d(TAG, "  Матчи: $matchesInfo")
+            Log.d(TAG, "  Сумма: ${betAmount.toInt()} ₽")
+            Log.d(TAG, "  Кэф: ${"%.2f".format(totalKef)}")
+            Log.d(TAG, "  Выигрыш: ${"%.2f".format(potentialWin)} ₽")
             
+            // ЗАГЛУШКА: всегда возвращает true
             val betSuccess = simulatePlaceBet(userId, expId, betAmount, totalKef)
             
             if (betSuccess) {
@@ -677,7 +600,7 @@ class BotForegroundService : Service() {
                     put("updated_at", System.currentTimeMillis() / 1000)
                 }
                 val updatedRows = db.update("express_bets", values, "id = ?", arrayOf(expressDbId.toString()))
-                diagLog("  Обновлено строк в express_bets: $updatedRows")
+                Log.d(TAG, "  Обновлено строк в express_bets: $updatedRows")
                 
                 val notification = createBetNotification(
                     "✅ Ставка принята!",
@@ -695,28 +618,33 @@ class BotForegroundService : Service() {
                 
                 return true
             } else {
-                diagLog("❌ Ставка #$expId НЕ ПРИНЯТА!")
+                Log.e(TAG, "❌ Ставка #$expId НЕ ПРИНЯТА!")
                 onLogUpdate?.invoke("[${getCurrentTime()}] ❌ Ставка #$expId НЕ ПРИНЯТА!")
                 dbHelper.addLog(userId, "bet_error", "Ошибка ставки #$expId", "ERROR")
                 return false
             }
             
         } catch (e: Exception) {
-            diagLog("❌ Исключение в placeBet: ${e.message}")
+            Log.e(TAG, "❌ Исключение в placeBet: ${e.message}", e)
             return false
         }
     }
     
+    // Заглушка размещения ставки
     private fun simulatePlaceBet(
         userId: Long,
         expId: Int,
         amount: Double,
         kef: Double
     ): Boolean {
-        diagLog("🎲 PLACE BET (заглушка): userId=$userId, expId=$expId, amount=${amount.toInt()}₽, kef=${"%.2f".format(kef)}")
+        Log.d(TAG, "🎲 PLACE BET (заглушка): userId=$userId, expId=$expId, amount=${amount.toInt()}₽, kef=${"%.2f".format(kef)}")
         Thread.sleep(300)
         return true
     }
+    
+    // ... (остальные методы без изменений)
+    
+    // ==================== МЕТОДЫ ОБНОВЛЕНИЯ СЧЕТА ====================
     
     private fun updateActiveMatchesScores() {
         try {
@@ -727,6 +655,8 @@ class BotForegroundService : Service() {
             val activeExpresses = mutableListOf<Triple<Long, Int, Long>>()
             while (cursor.moveToNext()) activeExpresses.add(Triple(cursor.getLong(0), cursor.getInt(1), cursor.getLong(2)))
             cursor.close()
+            
+            Log.d(TAG, "📊 updateActiveMatchesScores: активных экспрессов: ${activeExpresses.size}")
             
             activeExpresses.forEach { (expressId: Long, expId: Int, userId: Long) ->
                 val eventsCursor = db.query("express_events",
@@ -747,7 +677,6 @@ class BotForegroundService : Service() {
     }
     
     private fun updateMatchScore(event: EventInfo, expressId: Long, expId: Int, userId: Long) {
-        // ... без изменений
         apiClient.getMatchScore(matchId = event.mId,
             onSuccess = { matchFactors: ApiClient.MatchFactors? ->
                 if (matchFactors != null) {
@@ -797,7 +726,6 @@ class BotForegroundService : Service() {
     }
     
     private fun checkMatchTimeout(event: EventInfo, expressId: Long, expId: Int, userId: Long) {
-        // ... без изменений
         val db = dbHelper.writableDatabase
         val currentTime = System.currentTimeMillis() / 1000
         
@@ -846,7 +774,6 @@ class BotForegroundService : Service() {
     }
     
     private fun checkExpressStatus(expressId: Long, expId: Int, userId: Long) {
-        // ... без изменений
         val db = dbHelper.writableDatabase
         val cursor = db.query("express_events", arrayOf("status", "is_finalized"),
             "express_id = ?", arrayOf(expressId.toString()), null, null, null)
@@ -889,8 +816,9 @@ class BotForegroundService : Service() {
         }
     }
     
+    // ==================== МЕТОД ЗАМЕНЫ ЭКСПРЕССА ====================
+    
     private fun checkAndCreateReplacementExpress() {
-        // ... без изменений
         val db = dbHelper.writableDatabase
         val currentTime = System.currentTimeMillis() / 1000
         val twelveHoursAgo = currentTime - (12 * 3600)
@@ -1018,6 +946,7 @@ class BotForegroundService : Service() {
     
     override fun onBind(intent: Intent?): IBinder? = null
     
+    // Data classes
     data class EventInfo(val id: Long, val mId: Int, val betType: Int, var status: Int,
                          var homeScore: Int, var awayScore: Int, var matchTime: Int = 0)
     
@@ -1026,4 +955,7 @@ class BotForegroundService : Service() {
                                  val leagueName: String = "", val homeTeam: String = "", val awayTeam: String = "",
                                  val idLiga: Int = 0, val idHome: Int = 0, val idAway: Int = 0,
                                  val url: String = "", val uzh: String = "0.0", val tbType: Int = 0)
+    
+    data class ActiveMatch(val id: Long, val expressId: Long, val mId: Int, val createdAt: Long,
+                           val homeScore: Int, val awayScore: Int, val betType: Int, val status: Int, val matchTime: Int)
 }
