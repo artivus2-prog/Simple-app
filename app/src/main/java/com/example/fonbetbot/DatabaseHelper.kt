@@ -728,7 +728,6 @@ fun getActiveUser(): User? {
             expresses.add(ExpressInfo(
                 id = cursor.getLong(0),
                 idExp = cursor.getInt(1),
-                userId = cursor.getLong(2),
                 kfall = cursor.getDouble(3),
                 profLoss = cursor.getDouble(4),
                 balans = cursor.getDouble(5),
