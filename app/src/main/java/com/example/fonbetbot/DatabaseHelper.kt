@@ -305,7 +305,7 @@ companion object {
             return db.insertWithOnConflict("users", null, values, 
                 SQLiteDatabase.CONFLICT_REPLACE)
         }
-        
+
         // В DatabaseHelper.kt, после метода getUser
     fun updateUserInfo(userId: Long, clientId: Long?, username: String?) {
         val db = writableDatabase
@@ -865,7 +865,6 @@ data class MatchInfo(
 data class ExpressInfo(
     val id: Long,
     val idExp: Int,
-    val userId: Long,
     val kfall: Double,
     val profLoss: Double,
     val balans: Double,
