@@ -1378,6 +1378,10 @@ fun SettingsScreen(
     var expandedType927 by remember { mutableStateOf(false) }
     var expandedType928 by remember { mutableStateOf(false) }
     
+    // test_mode
+    var testMode by remember { mutableStateOf(prefs.getBoolean("test_mode", true)) }
+    var testBalance by remember { mutableStateOf(prefs.getString("test_balance", "1000") ?: "1000") }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -1773,6 +1777,64 @@ fun SettingsScreen(
                 }
             }
             
+
+            // Внутри LazyColumn после блока общих настроек (перед "Управление данными"):
+            // Тестовый режим
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (testMode) 
+                            MaterialTheme.colorScheme.tertiaryContainer 
+                        else 
+                            MaterialTheme.colorScheme.errorContainer
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "🧪 Тестовый режим",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Switch(
+                                checked = testMode,
+                                onCheckedChange = { testMode = it }
+                            )
+                        }
+                        
+                        Spacer(modifier = Modifier.height(4.dp))
+                        
+                        Text(
+                            if (testMode) 
+                                "✅ Ставки не размещаются реально\nБаланс виртуальный"
+                            else 
+                                "⚠️ Ставки размещаются на реальные деньги!",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        
+                        if (testMode) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            
+                            OutlinedTextField(
+                                value = testBalance,
+                                onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) testBalance = it },
+                                label = { Text("Виртуальный баланс (₽)") },
+                                leadingIcon = { Icon(Icons.Default.AccountBalanceWallet, null) },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                            )
+                        }
+                    }
+                }
+            }
             // Управление данными
             item {
                 Card(
@@ -1870,6 +1932,8 @@ fun SettingsScreen(
                                 .putString("bet_amount", betAmount)
                                 .putBoolean("auto_start", autoStart)
                                 .putBoolean("notifications", notifications)
+                                .putBoolean("test_mode", testMode)
+                                .putString("test_balance", testBalance)
                                 .apply()
                             
                             Toast.makeText(context, "Настройки сохранены", Toast.LENGTH_SHORT).show()
