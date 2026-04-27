@@ -289,9 +289,7 @@ fun MainBotScreen(
                         balance = stats.currentBalance
                     }
                 }
-            } catch (e: Exception) {
-                // Игнорируем
-            }
+            } catch (e: Exception) { }
         }
         
         if (isBotRunning && authData != null) {
@@ -473,6 +471,15 @@ fun MainBotScreen(
                             onClick = { showMenu = false; onNavigateToSettings() },
                             enabled = !isBotRunning
                         )
+                        
+                        if (authData == null) {
+                            Divider()
+                            DropdownMenuItem(
+                                text = { Text("🔐 Авторизоваться") },
+                                onClick = { showMenu = false; onNavigateToWebAuth() }
+                            )
+                        }
+                        
                         Divider()
                         DropdownMenuItem(
                             text = { Text("🚪 Выйти") },
@@ -496,62 +503,10 @@ fun MainBotScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(16.dp)
+                .padding(12.dp)
         ) {
-            if (authData != null) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer
-                    )
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                "✅ Данные авторизации получены",
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
-                            )
-                            Row {
-                                IconButton(onClick = {
-                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    val clip = ClipData.newPlainText(
-                                        "Auth Data",
-                                        "FSID: ${authData.fsid}\nDeviceID: ${authData.deviceId}"
-                                    )
-                                    clipboard.setPrimaryClip(clip)
-                                    Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
-                                }) {
-                                    Icon(Icons.Default.ContentCopy, "Копировать", modifier = Modifier.size(18.dp))
-                                }
-                                if (!isBotRunning) {
-                                    IconButton(onClick = { onNavigateToWebAuth() }) {
-                                        Icon(Icons.Default.Refresh, "Обновить", modifier = Modifier.size(18.dp))
-                                    }
-                                }
-                            }
-                        }
-                        Text(
-                            "FSID: ${authData.fsid.take(25)}...",
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-                        Text(
-                            "DeviceID: ${authData.deviceId.take(25)}...",
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-            } else {
+            // Если нет авторизации - показываем кнопку
+            if (authData == null) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
@@ -564,7 +519,7 @@ fun MainBotScreen(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            "⚠️ Требуется авторизация на сайте Фонбет",
+                            "⚠️ Требуется авторизация",
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onTertiaryContainer
                         )
@@ -588,11 +543,11 @@ fun MainBotScreen(
                     .fillMaxWidth()
                     .weight(1f)
             ) {
-                // Карточка с экспрессами
+                // Карточка с экспрессами (большая часть)
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(0.55f),
+                        .weight(0.65f),  // 65% под экспрессы
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
@@ -605,17 +560,38 @@ fun MainBotScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "🎯 Экспрессы (за 2 часа)",
+                                text = "🎯 Активные экспрессы",
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(bottom = 8.dp)
                             )
-                            if (activeExpresses.isNotEmpty()) {
-                                Text(
-                                    text = "${activeExpresses.size} шт.",
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (activeExpresses.isNotEmpty()) {
+                                    Text(
+                                        text = "${activeExpresses.size}",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "шт.",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                IconButton(
+                                    onClick = { loadActiveExpresses() },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Refresh,
+                                        "Обновить",
+                                        modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
                             }
                         }
                         
@@ -628,17 +604,18 @@ fun MainBotScreen(
                             ) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Text(
-                                        text = if (isBotRunning) "Ожидание экспрессов..." else "Запустите бота для отображения экспрессов",
+                                        text = if (isBotRunning) "Ожидание экспрессов..." 
+                                               else "Запустите бота",
+                                        fontSize = 16.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
-                                    if (isBotRunning) {
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Text(
-                                            text = "Отображаются экспрессы не старше 2 часов",
-                                            fontSize = 12.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                                        )
-                                    }
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = if (isBotRunning) "Экспрессы появятся после анализа матчей"
+                                               else "Нажмите ▶ для запуска",
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                    )
                                 }
                             }
                         } else {
@@ -666,11 +643,11 @@ fun MainBotScreen(
                 
                 Spacer(modifier = Modifier.height(8.dp))
                 
-                // КАРТОЧКА С ЛОГАМИ
+                // КАРТОЧКА С ЛОГАМИ (меньшая часть)
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(0.45f),
+                        .weight(0.35f),  // 35% под логи
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(
                         containerColor = Color(0xFF1E1E1E)
@@ -697,19 +674,35 @@ fun MainBotScreen(
                                 )
                             }
                             
-                            IconButton(
-                                onClick = {
-                                    logs.clear()
-                                    logs.add("[${getCurrentTime()}] 🗑 Логи очищены")
-                                },
-                                modifier = Modifier.size(28.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.Delete,
-                                    "Очистить логи",
-                                    tint = Color.Gray,
-                                    modifier = Modifier.size(16.dp)
-                                )
+                            Row {
+                                // Кнопка автоскролла
+                                var autoScroll by remember { mutableStateOf(true) }
+                                IconButton(
+                                    onClick = { autoScroll = !autoScroll },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        if (autoScroll) Icons.Default.VerticalAlignBottom else Icons.Default.VerticalAlignTop,
+                                        "Автоскролл",
+                                        tint = if (autoScroll) Color(0xFF4CAF50) else Color.Gray,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                
+                                IconButton(
+                                    onClick = {
+                                        logs.clear()
+                                        logs.add("[${getCurrentTime()}] 🗑 Логи очищены")
+                                    },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        "Очистить логи",
+                                        tint = Color.Gray,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
                             }
                         }
                         

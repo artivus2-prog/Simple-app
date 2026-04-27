@@ -597,7 +597,6 @@ fun getActiveUser(): User? {
             db.execSQL("DELETE FROM bot_logs")
             db.execSQL("DELETE FROM bot_sessions")
             db.execSQL("DELETE FROM balance_history")
-            db.execSQL("DELETE FROM users")
             db.execSQL("DELETE FROM sqlite_sequence")
             
             context.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
