@@ -305,7 +305,23 @@ companion object {
             return db.insertWithOnConflict("users", null, values, 
                 SQLiteDatabase.CONFLICT_REPLACE)
         }
-    
+        
+        // В DatabaseHelper.kt, после метода getUser
+    fun updateUserInfo(userId: Long, clientId: Long?, username: String?) {
+        val db = writableDatabase
+        val values = ContentValues()
+        
+        Log.d(TAG, "updateUserInfo: userId=$userId, clientId=$clientId, username=$username")
+        
+        clientId?.let { values.put("client_id", it) }
+        username?.let { values.put("username", it) }
+        
+        if (values.size() > 0) {
+            values.put("updated_at", System.currentTimeMillis() / 1000)
+            val rows = db.update("users", values, "id = ?", arrayOf(userId.toString()))
+            Log.d(TAG, "Обновлено строк: $rows")
+        }
+    }
     // Получение пользователя
         fun getUser(fsid: String, deviceId: String): User? {
             val db = readableDatabase
