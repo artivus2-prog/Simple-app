@@ -738,7 +738,6 @@ fun getAllExpresses(): List<ExpressInfo> {
                 expresses.add(ExpressInfo(
                     id = cursor.getLong(0),
                     idExp = cursor.getInt(1),
-                    userId = 0L,
                     kfall = cursor.getDouble(2),
                     profLoss = cursor.getDouble(3),
                     balans = cursor.getDouble(4),
