@@ -708,7 +708,7 @@ fun getActiveUser(): User? {
         
         val cursor = db.rawQuery("""
             SELECT 
-                id, id_exp, user_id, COALESCE(kfall, 1.0) as kfall,
+                id, id_exp, COALESCE(kfall, 1.0) as kfall,
                 COALESCE(profloss, 0.0) as profloss,
                 COALESCE(balans, 0.0) as balans,
                 COALESCE(sumbet, 0.0) as sumbet,
