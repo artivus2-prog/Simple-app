@@ -252,7 +252,8 @@ fun MainBotScreen(
                                 dbHelper.saveBalance(it.id, saldo)
                                 if (saldo > oldBalance && oldBalance > 0) {
                                     dbHelper.addLog(it.id, "profit", "Профит: +%.2f ₽".format(saldo - oldBalance))
-                                } else if (saldo < oldBalance && oldBalance > 0) {
+                                }
+                                if (saldo < oldBalance && oldBalance > 0) {
                                     dbHelper.addLog(it.id, "loss", "Убыток: %.2f ₽".format(saldo - oldBalance))
                                 }
                             }
