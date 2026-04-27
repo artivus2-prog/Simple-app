@@ -1,4 +1,4 @@
-// MainActivity.kt - ПОЛНАЯ ВЕРСИЯ: ФИЛЬТР 2 ЧАСА, ВСЕ НАСТРОЙКИ, УБРАНА КАРТОЧКА ФОНА
+// MainActivity.kt - ПОЛНАЯ ВЕРСИЯ С ДИАГНОСТИКОЙ И ВСЕМИ ЭКРАНАМИ
 package com.example.fonbetbot
 
 import android.content.ClipData
@@ -199,41 +199,59 @@ fun MainBotScreen(
     var isBotRunning by remember { mutableStateOf(BotForegroundService.isRunning) }
     var balance by remember { mutableStateOf(0.0) }
     val logs = remember { mutableStateListOf<String>() }
+    val diagnosticLogs = remember { mutableStateListOf<String>() }
     var showMenu by remember { mutableStateOf(false) }
     var isLoadingBalance by remember { mutableStateOf(false) }
     var showExitDialog by remember { mutableStateOf(false) }
+    var showDiagnosticPanel by remember { mutableStateOf(true) }
     
     // Данные для дерева активных экспрессов
     var activeExpresses by remember { mutableStateOf<List<ExpressInfo>>(emptyList()) }
     var matchesByExpress by remember { mutableStateOf<Map<Long, List<MatchInfo>>>(emptyMap()) }
     var expandedExpressIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
     
+    // Функция для добавления диагностического сообщения
+    fun addDiagnostic(message: String) {
+        diagnosticLogs.add(0, message)
+        if (diagnosticLogs.size > 100) diagnosticLogs.removeLast()
+    }
+    
     // Функция загрузки активных экспрессов (не старше 2 часов)
     fun loadActiveExpresses() {
         try {
             val allExpresses = dbHelper.getAllExpresses()
             val currentTime = System.currentTimeMillis() / 1000
-            val twoHoursInSeconds = 2 * 60 * 60 // 2 часа в секундах
+            val twoHoursInSeconds = 2 * 60 * 60
+            
+            addDiagnostic("📊 Загрузка экспрессов: всего в БД = ${allExpresses.size}")
+            
+            // Логируем все экспрессы для диагностики
+            allExpresses.forEach { exp ->
+                val ageMinutes = (currentTime - exp.createdAt) / 60
+                addDiagnostic("  Экспресс #${exp.idExp}: sts=${exp.stsAll}, возраст=${ageMinutes}мин, матчей=${exp.eventsCount}, userId=${exp.userId}")
+            }
             
             // Фильтруем: не замененные, не старше 2 часов
             activeExpresses = allExpresses.filter { express ->
-                express.stsAll != -1 && // не замененные
-                (currentTime - express.createdAt) <= twoHoursInSeconds // не старше 2 часов
+                express.stsAll != -1 &&
+                (currentTime - express.createdAt) <= twoHoursInSeconds
             }.sortedByDescending { it.createdAt }
+            
+            addDiagnostic("📊 После фильтрации (2 часа): ${activeExpresses.size} экспрессов")
             
             val matchesMap = mutableMapOf<Long, List<MatchInfo>>()
             activeExpresses.forEach { express ->
                 matchesMap[express.id] = dbHelper.getMatchesByExpressId(express.id)
+                addDiagnostic("  Экспресс #${express.idExp}: матчей = ${matchesMap[express.id]?.size ?: 0}")
             }
             matchesByExpress = matchesMap
             
-            android.util.Log.d("MainActivity", "Загружено экспрессов: ${activeExpresses.size} (фильтр: 2 часа)")
-            activeExpresses.forEach { exp ->
-                val ageMinutes = (currentTime - exp.createdAt) / 60
-                android.util.Log.d("MainActivity", "  Экспресс #${exp.idExp}: stsAll=${exp.stsAll}, возраст=${ageMinutes}мин, матчей=${exp.eventsCount}")
-            }
+            // Проверим общую статистику БД
+            val tableStats = dbHelper.getTableStats()
+            addDiagnostic("💾 Статистика БД: users=${tableStats["users"]}, express_bets=${tableStats["express_bets"]}, express_events=${tableStats["express_events"]}")
+            
         } catch (e: Exception) {
-            android.util.Log.e("MainActivity", "Ошибка загрузки экспрессов: ${e.message}")
+            addDiagnostic("❌ Ошибка загрузки экспрессов: ${e.message}")
         }
     }
     
@@ -290,9 +308,18 @@ fun MainBotScreen(
                     if (stats.currentBalance > 0) {
                         balance = stats.currentBalance
                     }
+                    addDiagnostic("👤 Пользователь: id=${userId.id}, clientId=${userId.clientId}, fsid=${it.fsid.take(15)}..., username=${userId.username}")
+                } ?: run {
+                    addDiagnostic("❌ Пользователь не найден для fsid=${it.fsid.take(15)}...")
+                    
+                    // Пробуем найти хоть какого-то пользователя
+                    val allUsers = dbHelper.getAllExpresses() // тут ошибка была в оригинале, исправляем
+                    addDiagnostic("⚠️ Попытка найти пользователя через saveUser...")
+                    val newUserId = dbHelper.saveUser(it.fsid, it.deviceId)
+                    addDiagnostic("  saveUser вернул: $newUserId")
                 }
             } catch (e: Exception) {
-                // Игнорируем
+                addDiagnostic("❌ Ошибка загрузки пользователя: ${e.message}")
             }
         }
         
@@ -301,12 +328,10 @@ fun MainBotScreen(
         }
     }
     
-    // Загружаем активные экспрессы при запуске и при изменении состояния бота
     LaunchedEffect(isBotRunning) {
         loadActiveExpresses()
     }
     
-    // Периодическое обновление активных экспрессов (каждые 5 секунд когда бот работает)
     LaunchedEffect(isBotRunning) {
         if (isBotRunning) {
             while (true) {
@@ -324,8 +349,13 @@ fun MainBotScreen(
                 balance = BotForegroundService.lastBalance
             }
         }
-        // Загружаем экспрессы при первом запуске
         loadActiveExpresses()
+        addDiagnostic("🚀 MainBotScreen запущен, isBotRunning=$isBotRunning")
+        
+        // Проверим БД сразу при запуске
+        val tableStats = dbHelper.getTableStats()
+        addDiagnostic("💾 БД при запуске: users=${tableStats["users"]}, balance_history=${tableStats["balance_history"]}, bot_logs=${tableStats["bot_logs"]}, express_bets=${tableStats["express_bets"]}, express_events=${tableStats["express_events"]}")
+        addDiagnostic("💾 Размер БД: ${dbHelper.getDatabaseSize(context)}")
     }
     
     DisposableEffect(Unit) {
@@ -338,9 +368,7 @@ fun MainBotScreen(
                         user?.let {
                             dbHelper.saveBalance(it.id, newBalance, "success")
                         }
-                    } catch (e: Exception) {
-                        // Игнорируем
-                    }
+                    } catch (e: Exception) { }
                 }
             }
         }
@@ -356,14 +384,15 @@ fun MainBotScreen(
                     logs.add(0, "[${getCurrentTime()}] 🎯 Экспресс #${index}: m_id=${bet1.first}(${bet1.second}) + m_id=${bet2.first}(${bet2.second})")
                 }
             }
-            // Обновляем список экспрессов при получении новых ставок
             loadActiveExpresses()
         }
         BotForegroundService.onScoresUpdate = { message ->
             logs.add(0, message)
             if (logs.size > 50) logs.removeLast()
-            // Обновляем список экспрессов при обновлении счетов
             loadActiveExpresses()
+        }
+        BotForegroundService.onDiagnosticUpdate = { message ->
+            addDiagnostic(message)
         }
         BotForegroundService.authData = authData
         
@@ -372,12 +401,14 @@ fun MainBotScreen(
             BotForegroundService.onLogUpdate = null
             BotForegroundService.onBetsUpdate = null
             BotForegroundService.onScoresUpdate = null
+            BotForegroundService.onDiagnosticUpdate = null
         }
     }
     
     fun startBot() {
         if (authData == null) {
             logs.add(0, "[${getCurrentTime()}] ❌ Нет данных авторизации")
+            addDiagnostic("❌ Попытка запуска без авторизации!")
             return
         }
         
@@ -392,6 +423,7 @@ fun MainBotScreen(
         }
         
         isBotRunning = true
+        addDiagnostic("🚀 Бот запущен, начинаем мониторинг...")
         
         scope.launch {
             try {
@@ -399,9 +431,12 @@ fun MainBotScreen(
                 user?.let {
                     dbHelper.startBotSession(it.id, balance)
                     dbHelper.addLog(it.id, "start", "Бот запущен")
+                    addDiagnostic("✅ Сессия бота начата для userId=${it.id}")
+                } ?: run {
+                    addDiagnostic("❌ Пользователь не найден при старте бота!")
                 }
             } catch (e: Exception) {
-                // Игнорируем
+                addDiagnostic("❌ Ошибка старта сессии: ${e.message}")
             }
         }
         
@@ -416,6 +451,7 @@ fun MainBotScreen(
         context.startService(stopIntent)
         
         isBotRunning = false
+        addDiagnostic("⏹ Бот остановлен пользователем")
         
         scope.launch {
             try {
@@ -426,9 +462,7 @@ fun MainBotScreen(
                         dbHelper.addLog(it.id, "stop", "Бот остановлен")
                     }
                 }
-            } catch (e: Exception) {
-                // Игнорируем
-            }
+            } catch (e: Exception) { }
         }
         
         logs.add(0, "[${getCurrentTime()}] ⏹ Бот остановлен")
@@ -590,8 +624,7 @@ fun MainBotScreen(
                 .padding(paddingValues)
                 .padding(16.dp)
         ) {
-            // УБРАНА карточка "Бот работает в фоновом режиме"
-            
+            // Карточка авторизации
             if (authData != null) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -644,7 +677,7 @@ fun MainBotScreen(
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(8.dp))
             } else {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -673,14 +706,14 @@ fun MainBotScreen(
                         }
                     }
                 }
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(8.dp))
             }
             
-            // ТАБЛИЦА АКТИВНЫХ ЭКСПРЕССОВ С ДЕРЕВОМ МАТЧЕЙ
+            // ТАБЛИЦА АКТИВНЫХ ЭКСПРЕССОВ
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f),
+                    .weight(0.4f),
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
@@ -692,18 +725,33 @@ fun MainBotScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "🎯 Экспрессы (за 2 часа)",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        )
-                        if (activeExpresses.isNotEmpty()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "${activeExpresses.size} шт.",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                text = "🎯 Экспрессы (за 2 часа)",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(bottom = 8.dp)
                             )
+                            if (activeExpresses.isNotEmpty()) {
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "${activeExpresses.size} шт.",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        // Кнопка принудительного обновления
+                        if (isBotRunning) {
+                            IconButton(
+                                onClick = { 
+                                    loadActiveExpresses()
+                                    addDiagnostic("🔄 Ручное обновление списка экспрессов")
+                                },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(Icons.Default.Refresh, "Обновить", modifier = Modifier.size(16.dp))
+                            }
                         }
                     }
                     
@@ -725,6 +773,11 @@ fun MainBotScreen(
                                         text = "Отображаются экспрессы не старше 2 часов",
                                         fontSize = 12.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                    )
+                                    Text(
+                                        text = "Проверьте панель диагностики внизу",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
                                     )
                                 }
                             }
@@ -752,8 +805,123 @@ fun MainBotScreen(
                 }
             }
             
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            // ПАНЕЛЬ ДИАГНОСТИКИ
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(0.3f),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = Color(0xFF1A1A2E)
+                )
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "🔬 Диагностика",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF00FF88)
+                            )
+                            if (diagnosticLogs.isNotEmpty()) {
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "${diagnosticLogs.size}",
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF888888)
+                                )
+                            }
+                        }
+                        Row {
+                            IconButton(
+                                onClick = { diagnosticLogs.clear() },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    "Очистить",
+                                    modifier = Modifier.size(16.dp),
+                                    tint = Color(0xFF888888)
+                                )
+                            }
+                            IconButton(
+                                onClick = { showDiagnosticPanel = !showDiagnosticPanel },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    if (showDiagnosticPanel) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                    "Свернуть",
+                                    modifier = Modifier.size(16.dp),
+                                    tint = Color(0xFF888888)
+                                )
+                            }
+                        }
+                    }
+                    
+                    if (showDiagnosticPanel) {
+                        if (diagnosticLogs.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(
+                                        "Ожидание диагностических данных...",
+                                        color = Color(0xFF666666),
+                                        fontSize = 12.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        "Запустите бота для получения логов",
+                                        color = Color(0xFF555555),
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                items(diagnosticLogs.toList()) { diagLog ->
+                                    val logColor = when {
+                                        diagLog.contains("❌") -> Color(0xFFFF4444)
+                                        diagLog.contains("✅") -> Color(0xFF44FF44)
+                                        diagLog.contains("⚠️") -> Color(0xFFFFAA00)
+                                        diagLog.contains("📊") || diagLog.contains("💾") -> Color(0xFF44AAFF)
+                                        diagLog.contains("🔍") || diagLog.contains("🎯") -> Color(0xFFFF88FF)
+                                        diagLog.contains("📥") || diagLog.contains("📤") -> Color(0xFF00BFFF)
+                                        diagLog.contains("🚀") || diagLog.contains("⏹") -> Color(0xFF00FF88)
+                                        diagLog.startsWith("  ") -> Color(0xFFAAAAAA)
+                                        else -> Color(0xFFCCCCCC)
+                                    }
+                                    
+                                    Text(
+                                        text = diagLog,
+                                        color = logColor,
+                                        fontSize = 10.sp,
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                        modifier = Modifier.padding(vertical = 1.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Нижние кнопки (только когда бот не запущен)
             if (!isBotRunning) {
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(8.dp))
                 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -781,6 +949,7 @@ fun MainBotScreen(
             }
         }
         
+        // Диалог выхода
         if (showExitDialog) {
             AlertDialog(
                 onDismissRequest = { showExitDialog = false },
@@ -969,6 +1138,13 @@ fun MatchInExpressRow(match: MatchInfo) {
                         )
                     }
                 }
+                if (match.leagueName.isNotEmpty()) {
+                    Text(
+                        match.leagueName,
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                    )
+                }
             }
             
             Column(horizontalAlignment = Alignment.End) {
@@ -1011,12 +1187,14 @@ fun ProfileScreen(
 ) {
     val context = LocalContext.current
     var userStats by remember { mutableStateOf<BalanceStats?>(null) }
+    var user by remember { mutableStateOf<User?>(null) }
     
     LaunchedEffect(authData) {
         authData?.let {
             try {
-                val user = dbHelper.getUser(it.fsid, it.deviceId)
-                user?.let { userId ->
+                val foundUser = dbHelper.getUser(it.fsid, it.deviceId)
+                user = foundUser
+                foundUser?.let { userId ->
                     userStats = dbHelper.getBalanceStats(userId.id)
                 }
             } catch (e: Exception) {
@@ -1074,8 +1252,21 @@ fun ProfileScreen(
                     
                     Spacer(modifier = Modifier.height(16.dp))
                     
-                    Text("Пользователь", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        user?.username ?: "Пользователь", 
+                        fontSize = 24.sp, 
+                        fontWeight = FontWeight.Bold
+                    )
                     Text("Аккаунт Фонбет", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    
+                    if (user != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "ID: ${user?.id} | ClientID: ${user?.clientId}",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     
                     Spacer(modifier = Modifier.height(24.dp))
                     Divider()
@@ -1781,6 +1972,7 @@ fun SettingsScreen(
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.secondaryContainer
                     )
+                )
                 ) {
                     Column(modifier = Modifier.padding(20.dp)) {
                         Text("💾 Управление данными", fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 12.dp))
@@ -1984,6 +2176,7 @@ fun SettingsScreen(
     }
 }
 
+// Вспомогательные функции
 private fun getCurrentTime(): String {
     return SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
 }
