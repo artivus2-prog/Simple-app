@@ -12,85 +12,173 @@ import kotlinx.coroutines.withContext
 class DatabaseHelper(context: Context) : 
     SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
     
-    companion object {
+companion object {
     private const val DATABASE_NAME = "fonbet_bot.db"
-    private const val DATABASE_VERSION = 3  // было 2
+    private const val DATABASE_VERSION = 4  // Было 3, стало 4
     private const val TAG = "DatabaseHelper"
 }
     
     override fun onCreate(db: SQLiteDatabase) {
-        Log.d(TAG, "Creating database...")
+    Log.d(TAG, "Creating database...")
+    
+    try {
+        // Таблица пользователей
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fsid TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                client_id INTEGER DEFAULT 18845703,
+                sys_id INTEGER DEFAULT 21,
+                username TEXT,
+                is_active INTEGER DEFAULT 1,
+                created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+                last_login INTEGER,
+                UNIQUE(fsid, device_id)
+            )
+        """)
         
+        // Таблица истории баланса
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS balance_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                balance REAL NOT NULL,
+                previous_balance REAL,
+                check_time INTEGER DEFAULT (strftime('%s', 'now')),
+                status TEXT DEFAULT 'success',
+                error_message TEXT,
+                raw_response TEXT,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+        
+        // Таблица логов
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS bot_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                log_level TEXT DEFAULT 'INFO',
+                log_type TEXT NOT NULL,
+                message TEXT NOT NULL,
+                context TEXT,
+                created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+            )
+        """)
+        
+        // Таблица сессий
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS bot_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                start_time INTEGER DEFAULT (strftime('%s', 'now')),
+                end_time INTEGER,
+                start_balance REAL,
+                end_balance REAL,
+                checks_count INTEGER DEFAULT 0,
+                errors_count INTEGER DEFAULT 0,
+                stop_reason TEXT,
+                device_info TEXT,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+        
+        // Таблица экспрессов (БЕЗ user_id)
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS express_bets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id_exp INTEGER NOT NULL,
+                kfall REAL,
+                profloss REAL DEFAULT 0,
+                balans REAL,
+                sumbet REAL,
+                sts_all INTEGER DEFAULT 0,
+                ct INTEGER,
+                strategy TEXT,
+                id_exp_replace INTEGER DEFAULT 0,
+                events_count INTEGER DEFAULT 0,
+                total_odds REAL,
+                bet_amount REAL,
+                potential_win REAL,
+                balance REAL,
+                profit_loss REAL,
+                is_bet_placed INTEGER DEFAULT 0,
+                created_time INTEGER,
+                created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+            )
+        """)
+        
+        // Таблица событий/матчей (БЕЗ user_id)
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS express_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                express_id INTEGER NOT NULL,
+                id_exp INTEGER NOT NULL,
+                m_id INTEGER NOT NULL,
+                id_liga INTEGER,
+                league_name TEXT,
+                id_home INTEGER,
+                home_team TEXT,
+                id_away INTEGER,
+                away_team TEXT,
+                start_odds REAL,
+                current_odds REAL,
+                match_time INTEGER DEFAULT 0,
+                home_score INTEGER DEFAULT 0,
+                away_score INTEGER DEFAULT 0,
+                bet_type INTEGER,
+                status INTEGER DEFAULT 0,
+                is_finalized INTEGER DEFAULT 0,
+                match_url TEXT,
+                uzh TEXT,
+                total_type INTEGER,
+                created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+                FOREIGN KEY (express_id) REFERENCES express_bets(id) ON DELETE CASCADE
+            )
+        """)
+        
+        // Создаем индексы
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_users_fsid ON users(fsid)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_balance_user_time ON balance_history(user_id, check_time)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_logs_user_time ON bot_logs(user_id, created_at)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_sessions_user ON bot_sessions(user_id, start_time)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_express_exp ON express_bets(id_exp)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_express_sts ON express_bets(sts_all)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_express ON express_events(express_id)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_mid ON express_events(m_id)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_status ON express_events(status)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_finalized ON express_events(is_finalized)")
+        
+        Log.d(TAG, "Database created successfully")
+    } catch (e: Exception) {
+        Log.e(TAG, "Error creating database: ${e.message}")
+    }
+}
+    
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+    Log.d(TAG, "Upgrading database from $oldVersion to $newVersion")
+    
+    if (oldVersion < 2) {
+        db.execSQL("ALTER TABLE express_events ADD COLUMN is_finalized INTEGER DEFAULT 0")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_finalized ON express_events(is_finalized)")
+    }
+    
+    if (oldVersion < 3) {
+        db.execSQL("ALTER TABLE users ADD COLUMN username TEXT")
+    }
+    
+    if (oldVersion < 4) {
+        // Удаляем user_id из express_bets и express_events
         try {
-            // Таблица пользователей
+            // Создаем новые таблицы без user_id
             db.execSQL("""
-                CREATE TABLE IF NOT EXISTS users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    fsid TEXT NOT NULL,
-                    device_id TEXT NOT NULL,
-                    client_id INTEGER DEFAULT 18845703,
-                    sys_id INTEGER DEFAULT 21,
-                    username TEXT,
-                    is_active INTEGER DEFAULT 1,
-                    created_at INTEGER DEFAULT (strftime('%s', 'now')),
-                    updated_at INTEGER DEFAULT (strftime('%s', 'now')),
-                    last_login INTEGER,
-                    UNIQUE(fsid, device_id)
-                )
-            """)
-            
-            // Таблица истории баланса
-            db.execSQL("""
-                CREATE TABLE IF NOT EXISTS balance_history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    balance REAL NOT NULL,
-                    previous_balance REAL,
-                    check_time INTEGER DEFAULT (strftime('%s', 'now')),
-                    status TEXT DEFAULT 'success',
-                    error_message TEXT,
-                    raw_response TEXT,
-                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-                )
-            """)
-            
-            // Таблица логов
-            db.execSQL("""
-                CREATE TABLE IF NOT EXISTS bot_logs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
-                    log_level TEXT DEFAULT 'INFO',
-                    log_type TEXT NOT NULL,
-                    message TEXT NOT NULL,
-                    context TEXT,
-                    created_at INTEGER DEFAULT (strftime('%s', 'now')),
-                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
-                )
-            """)
-            
-            // Таблица сессий
-            db.execSQL("""
-                CREATE TABLE IF NOT EXISTS bot_sessions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    start_time INTEGER DEFAULT (strftime('%s', 'now')),
-                    end_time INTEGER,
-                    start_balance REAL,
-                    end_balance REAL,
-                    checks_count INTEGER DEFAULT 0,
-                    errors_count INTEGER DEFAULT 0,
-                    stop_reason TEXT,
-                    device_info TEXT,
-                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-                )
-            """)
-            
-            // Таблица экспрессов
-            db.execSQL("""
-                CREATE TABLE IF NOT EXISTS express_bets (
+                CREATE TABLE express_bets_new (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     id_exp INTEGER NOT NULL,
-                    user_id INTEGER,
                     kfall REAL,
                     profloss REAL DEFAULT 0,
                     balans REAL,
@@ -105,20 +193,34 @@ class DatabaseHelper(context: Context) :
                     potential_win REAL,
                     balance REAL,
                     profit_loss REAL,
+                    is_bet_placed INTEGER DEFAULT 0,
                     created_time INTEGER,
                     created_at INTEGER DEFAULT (strftime('%s', 'now')),
-                    updated_at INTEGER DEFAULT (strftime('%s', 'now')),
-                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+                    updated_at INTEGER DEFAULT (strftime('%s', 'now'))
                 )
             """)
             
-            // Таблица событий (матчей)
+            // Копируем данные
             db.execSQL("""
-                CREATE TABLE IF NOT EXISTS express_events (
+                INSERT INTO express_bets_new (id, id_exp, kfall, profloss, balans, sumbet, sts_all, ct, 
+                    strategy, id_exp_replace, events_count, total_odds, bet_amount, potential_win, 
+                    balance, profit_loss, is_bet_placed, created_time, created_at, updated_at)
+                SELECT id, id_exp, kfall, profloss, balans, sumbet, sts_all, ct, 
+                    strategy, id_exp_replace, events_count, total_odds, bet_amount, potential_win, 
+                    balance, profit_loss, is_bet_placed, created_time, created_at, updated_at
+                FROM express_bets
+            """)
+            
+            // Удаляем старую таблицу
+            db.execSQL("DROP TABLE express_bets")
+            db.execSQL("ALTER TABLE express_bets_new RENAME TO express_bets")
+            
+            // Создаем новую таблицу express_events без user_id
+            db.execSQL("""
+                CREATE TABLE express_events_new (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     express_id INTEGER NOT NULL,
                     id_exp INTEGER NOT NULL,
-                    user_id INTEGER,
                     m_id INTEGER NOT NULL,
                     id_liga INTEGER,
                     league_name TEXT,
@@ -139,54 +241,39 @@ class DatabaseHelper(context: Context) :
                     total_type INTEGER,
                     created_at INTEGER DEFAULT (strftime('%s', 'now')),
                     updated_at INTEGER DEFAULT (strftime('%s', 'now')),
-                    FOREIGN KEY (express_id) REFERENCES express_bets(id) ON DELETE CASCADE,
-                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+                    FOREIGN KEY (express_id) REFERENCES express_bets(id) ON DELETE CASCADE
                 )
             """)
             
-            // Создаем индексы
-            db.execSQL("CREATE INDEX IF NOT EXISTS idx_users_fsid ON users(fsid)")
-            db.execSQL("CREATE INDEX IF NOT EXISTS idx_balance_user_time ON balance_history(user_id, check_time)")
-            db.execSQL("CREATE INDEX IF NOT EXISTS idx_logs_user_time ON bot_logs(user_id, created_at)")
-            db.execSQL("CREATE INDEX IF NOT EXISTS idx_sessions_user ON bot_sessions(user_id, start_time)")
-            db.execSQL("CREATE INDEX IF NOT EXISTS idx_express_user ON express_bets(user_id)")
+            // Копируем данные
+            db.execSQL("""
+                INSERT INTO express_events_new (id, express_id, id_exp, m_id, id_liga, league_name, 
+                    id_home, home_team, id_away, away_team, start_odds, current_odds, match_time, 
+                    home_score, away_score, bet_type, status, is_finalized, match_url, uzh, 
+                    total_type, created_at, updated_at)
+                SELECT id, express_id, id_exp, m_id, id_liga, league_name, 
+                    id_home, home_team, id_away, away_team, start_odds, current_odds, match_time, 
+                    home_score, away_score, bet_type, status, is_finalized, match_url, uzh, 
+                    total_type, created_at, updated_at
+                FROM express_events
+            """)
+            
+            // Удаляем старую таблицу
+            db.execSQL("DROP TABLE express_events")
+            db.execSQL("ALTER TABLE express_events_new RENAME TO express_events")
+            
+            // Создаем индексы заново
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_express_exp ON express_bets(id_exp)")
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_express_sts ON express_bets(sts_all)")
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_express ON express_events(express_id)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_mid ON express_events(m_id)")
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_status ON express_events(status)")
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_finalized ON express_events(is_finalized)")
             
-            Log.d(TAG, "Database created successfully")
+            Log.d(TAG, "✅ Migration to version 4: removed user_id from express tables")
         } catch (e: Exception) {
-            Log.e(TAG, "Error creating database: ${e.message}")
+            Log.e(TAG, "Error during migration to version 4: ${e.message}")
         }
-    }
-    
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-    Log.d(TAG, "Upgrading database from $oldVersion to $newVersion")
-    
-    if (oldVersion < 2) {
-        db.execSQL("ALTER TABLE express_events ADD COLUMN is_finalized INTEGER DEFAULT 0")
-        db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_finalized ON express_events(is_finalized)")
-    }
-    
-    if (oldVersion < 3) {
-        db.execSQL("ALTER TABLE users ADD COLUMN username TEXT")
-    }
-}
-        // Обновление clientId и username пользователя
-    fun updateUserInfo(userId: Long, clientId: Long?, username: String?) {
-    val db = writableDatabase
-    val values = ContentValues()
-    
-    Log.d("DatabaseHelper", "updateUserInfo: userId=$userId, clientId=$clientId, username=$username")
-    
-    clientId?.let { values.put("client_id", it) }
-    username?.let { values.put("username", it) }
-    
-    if (values.size() > 0) {
-        values.put("updated_at", System.currentTimeMillis() / 1000)
-        val rows = db.update("users", values, "id = ?", arrayOf(userId.toString()))
-        Log.d("DatabaseHelper", "Обновлено строк: $rows")
     }
 }
 
