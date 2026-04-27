@@ -36,6 +36,9 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import java.util.*
 
 class MainActivity : ComponentActivity() {
@@ -753,7 +756,86 @@ fun MainBotScreen(
                     }
                 }
             }
-            
+            Spacer(modifier = Modifier.height(8.dp))
+    
+        // КАРТОЧКА С ЛОГАМИ
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(0.4f),  // 40% высоты под логи
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = Color(0xFF1E1E1E)  // Темный фон для логов
+            )
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                // Заголовок логов с кнопками
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "📋 Логи",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "${logs.size}",
+                            fontSize = 11.sp,
+                            color = Color.Gray
+                        )
+                    }
+                    
+                    // Кнопка очистки логов
+                    IconButton(
+                        onClick = { 
+                            logs.clear()
+                            logs.add("[${getCurrentTime()}] 🗑 Логи очищены")
+                        },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Delete,
+                            "Очистить логи",
+                            tint = Color.Gray,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(4.dp))
+                Divider(color = Color.DarkGray)
+                Spacer(modifier = Modifier.height(4.dp))
+                
+                // Список логов
+                if (logs.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Логи появятся здесь...",
+                            color = Color.Gray
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        items(logs.take(100)) { log ->
+                            LogItem(log = log)
+                        }
+                    }
+                }
+            }
+        }
+    }
             if (!isBotRunning) {
                 Spacer(modifier = Modifier.height(16.dp))
                 
@@ -808,6 +890,38 @@ fun MainBotScreen(
                 }
             )
         }
+    }
+}
+@Composable
+fun LogItem(log: String) {
+    // Определяем цвет в зависимости от содержимого
+    val logColor = when {
+        log.contains("❌") || log.contains("Ошибка") || log.contains("ERROR") -> Color(0xFFFF6B6B)
+        log.contains("✅") || log.contains("УСПЕШНО") || log.contains("ПРИНЯТА") -> Color(0xFF4CAF50)
+        log.contains("⚠️") || log.contains("ВНИМАНИЕ") -> Color(0xFFFFD93D)
+        log.contains("💰") || log.contains("Профит") -> Color(0xFF4CAF50)
+        log.contains("📉") || log.contains("Убыток") -> Color(0xFFFF6B6B)
+        log.contains("📊") || log.contains("Матч") -> Color(0xFF64B5F6)
+        log.contains("🎯") || log.contains("Экспресс") -> Color(0xFFCE93D8)
+        log.contains("📤") || log.contains("Отправляем") -> Color(0xFFFFB74D)
+        log.contains("📥") || log.contains("Получен") -> Color(0xFF81C784)
+        log.contains("💾") || log.contains("Сохранен") -> Color(0xFF7986CB)
+        log.contains("🔍") || log.contains("Проверка") -> Color(0xFFB0BEC5)
+        else -> Color(0xFFE0E0E0)
+    }
+    
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 2.dp)
+    ) {
+        Text(
+            text = log,
+            fontSize = 10.sp,
+            color = logColor,
+            lineHeight = 14.sp,
+            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+        )
     }
 }
 
