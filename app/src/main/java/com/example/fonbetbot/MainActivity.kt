@@ -1,4 +1,4 @@
-// MainActivity.kt - ПОЛНАЯ ВЕРСИЯ С ТАБЛИЦАМИ
+// MainActivity.kt - ПОЛНАЯ ВЕРСИЯ: КНОПКА В APPBAR, УБРАНЫ ТАБЛИЦЫ, ДОБАВЛЕНО ДЕРЕВО ЭКСПРЕССОВ
 package com.example.fonbetbot
 
 import android.content.ClipData
@@ -33,6 +33,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -144,8 +145,6 @@ fun FonbetBotApp(dbHelper: DatabaseHelper) {
             onNavigateToHistory = { currentScreen = "history" },
             onNavigateToProfile = { currentScreen = "profile" },
             onNavigateToWebAuth = { currentScreen = "webAuth" },
-            onNavigateToMatches = { currentScreen = "matches" },
-            onNavigateToExpresses = { currentScreen = "expresses" },
             onLogout = {
                 currentScreen = "main"
                 clearAuthData()
@@ -179,14 +178,6 @@ fun FonbetBotApp(dbHelper: DatabaseHelper) {
             onBack = { currentScreen = "main" },
             dbHelper = dbHelper
         )
-        "matches" -> MatchesScreen(
-            onBack = { currentScreen = "main" },
-            dbHelper = dbHelper
-        )
-        "expresses" -> ExpressesScreen(
-            onBack = { currentScreen = "main" },
-            dbHelper = dbHelper
-        )
     }
 }
 
@@ -199,8 +190,6 @@ fun MainBotScreen(
     onNavigateToHistory: () -> Unit,
     onNavigateToProfile: () -> Unit,
     onNavigateToWebAuth: () -> Unit,
-    onNavigateToMatches: () -> Unit,
-    onNavigateToExpresses: () -> Unit,
     onLogout: () -> Unit,
     dbHelper: DatabaseHelper
 ) {
@@ -214,51 +203,70 @@ fun MainBotScreen(
     var isLoadingBalance by remember { mutableStateOf(false) }
     var showExitDialog by remember { mutableStateOf(false) }
     
-    fun fetchBalanceFromApi() {
-    if (authData == null) {
-        logs.add(0, "[${getCurrentTime()}] ❌ Нет данных авторизации")
-        return
+    // Данные для дерева активных экспрессов
+    var activeExpresses by remember { mutableStateOf<List<ExpressInfo>>(emptyList()) }
+    var matchesByExpress by remember { mutableStateOf<Map<Long, List<MatchInfo>>>(emptyMap()) }
+    var expandedExpressIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    
+    // Функция загрузки активных экспрессов
+    fun loadActiveExpresses() {
+        try {
+            val allExpresses = dbHelper.getAllExpresses()
+            activeExpresses = allExpresses.filter { it.stsAll == 1 } // Только активные (sts_all = 1)
+            
+            val matchesMap = mutableMapOf<Long, List<MatchInfo>>()
+            activeExpresses.forEach { express ->
+                matchesMap[express.id] = dbHelper.getMatchesByExpressId(express.id)
+            }
+            matchesByExpress = matchesMap
+        } catch (e: Exception) {
+            // Игнорируем ошибки загрузки
+        }
     }
     
-    isLoadingBalance = true
-    
-    val apiClient = ApiClient()
-    apiClient.getSaldo(
-        cookies = emptyMap(),
-        fsid = authData.fsid,
-        deviceId = authData.deviceId,
-        onSuccess = { sessionInfo: ApiClient.SessionInfo? ->
-            isLoadingBalance = false
-            if (sessionInfo != null && sessionInfo.saldo != null) {
-                val saldo = sessionInfo.saldo
-                val oldBalance = balance
-                balance = saldo
-                logs.add(0, "[${getCurrentTime()}] 💰 Баланс обновлён: %.2f ₽".format(saldo))
-                
-                scope.launch {
-                    try {
-                        val user = dbHelper.getUser(authData.fsid, authData.deviceId)
-                        user?.let {
-                            dbHelper.saveBalance(it.id, saldo)
-                            if (saldo > oldBalance && oldBalance > 0) {
-                                dbHelper.addLog(it.id, "profit", "Профит: +%.2f ₽".format(saldo - oldBalance))
-                            } else if (saldo < oldBalance && oldBalance > 0) {
-                                dbHelper.addLog(it.id, "loss", "Убыток: %.2f ₽".format(saldo - oldBalance))
-                            } else {dbHelper.addLog(it.id, "loss", "Убыток: %.2f ₽".format(saldo - oldBalance))}
-                        }
-                    } catch (e: Exception) { }
-                }
-            }
-        },
-        onError = { error: String ->
-            isLoadingBalance = false
-            logs.add(0, "[${getCurrentTime()}] ❌ Ошибка API: $error")
+    fun fetchBalanceFromApi() {
+        if (authData == null) {
+            logs.add(0, "[${getCurrentTime()}] ❌ Нет данных авторизации")
+            return
         }
-    )
-}
-
-
-
+        
+        isLoadingBalance = true
+        
+        val apiClient = ApiClient()
+        apiClient.getSaldo(
+            cookies = emptyMap(),
+            fsid = authData.fsid,
+            deviceId = authData.deviceId,
+            onSuccess = { sessionInfo: ApiClient.SessionInfo? ->
+                isLoadingBalance = false
+                if (sessionInfo != null && sessionInfo.saldo != null) {
+                    val saldo = sessionInfo.saldo
+                    val oldBalance = balance
+                    balance = saldo
+                    logs.add(0, "[${getCurrentTime()}] 💰 Баланс обновлён: %.2f ₽".format(saldo))
+                    
+                    scope.launch {
+                        try {
+                            val user = dbHelper.getUser(authData.fsid, authData.deviceId)
+                            user?.let {
+                                dbHelper.saveBalance(it.id, saldo)
+                                if (saldo > oldBalance && oldBalance > 0) {
+                                    dbHelper.addLog(it.id, "profit", "Профит: +%.2f ₽".format(saldo - oldBalance))
+                                } else if (saldo < oldBalance && oldBalance > 0) {
+                                    dbHelper.addLog(it.id, "loss", "Убыток: %.2f ₽".format(saldo - oldBalance))
+                                }
+                            }
+                        } catch (e: Exception) { }
+                    }
+                }
+            },
+            onError = { error: String ->
+                isLoadingBalance = false
+                logs.add(0, "[${getCurrentTime()}] ❌ Ошибка API: $error")
+            }
+        )
+    }
+    
     LaunchedEffect(authData, isBotRunning) {
         authData?.let {
             try {
@@ -276,6 +284,19 @@ fun MainBotScreen(
         
         if (isBotRunning && authData != null) {
             fetchBalanceFromApi()
+        }
+    }
+    
+    // Загружаем активные экспрессы при запуске и при изменении состояния бота
+    LaunchedEffect(isBotRunning) {
+        loadActiveExpresses()
+    }
+    
+    // Периодическое обновление активных экспрессов (каждые 10 секунд)
+    LaunchedEffect(isBotRunning) {
+        while (isBotRunning) {
+            delay(10000)
+            loadActiveExpresses()
         }
     }
     
@@ -317,10 +338,14 @@ fun MainBotScreen(
                     logs.add(0, "[${getCurrentTime()}] 🎯 Экспресс #${index}: m_id=${bet1.first}(${bet1.second}) + m_id=${bet2.first}(${bet2.second})")
                 }
             }
+            // Обновляем список экспрессов при получении новых ставок
+            loadActiveExpresses()
         }
         BotForegroundService.onScoresUpdate = { message ->
             logs.add(0, message)
             if (logs.size > 50) logs.removeLast()
+            // Обновляем список экспрессов при обновлении счетов
+            loadActiveExpresses()
         }
         BotForegroundService.authData = authData
         
@@ -400,9 +425,25 @@ fun MainBotScreen(
                     }
                 },
                 actions = {
+                    // КНОПКА ЗАПУСКА/ОСТАНОВКИ БОТА В APPBAR
                     if (isBotRunning) {
                         IconButton(onClick = { showExitDialog = true }) {
-                            Icon(Icons.Default.Stop, "Остановить бота")
+                            Icon(
+                                Icons.Default.Stop, 
+                                "Остановить бота",
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    } else {
+                        IconButton(
+                            onClick = { startBot() },
+                            enabled = authData != null
+                        ) {
+                            Icon(
+                                Icons.Default.PlayArrow, 
+                                "Запустить бота",
+                                tint = if (authData != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                     
@@ -434,22 +475,6 @@ fun MainBotScreen(
                             onClick = {
                                 showMenu = false
                                 onNavigateToHistory()
-                            },
-                            enabled = !isBotRunning
-                        )
-                        DropdownMenuItem(
-                            text = { Text("📋 Таблица матчей") },
-                            onClick = {
-                                showMenu = false
-                                onNavigateToMatches()
-                            },
-                            enabled = !isBotRunning
-                        )
-                        DropdownMenuItem(
-                            text = { Text("🎯 Таблица экспрессов") },
-                            onClick = {
-                                showMenu = false
-                                onNavigateToExpresses()
                             },
                             enabled = !isBotRunning
                         )
@@ -669,31 +694,57 @@ fun MainBotScreen(
             
             Spacer(modifier = Modifier.height(20.dp))
             
-            Button(
-                onClick = {
-                    if (isBotRunning) {
-                        showExitDialog = true
-                    } else {
-                        startBot()
-                    }
-                },
+            // ТАБЛИЦА АКТИВНЫХ ЭКСПРЕССОВ С ДЕРЕВОМ МАТЧЕЙ
+            Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(60.dp),
-                shape = RoundedCornerShape(30.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isBotRunning) 
-                        MaterialTheme.colorScheme.error 
-                    else 
-                        MaterialTheme.colorScheme.primary
-                ),
-                enabled = authData != null || isBotRunning
-            ) {
-                Text(
-                    text = if (isBotRunning) "🛑 ОСТАНОВИТЬ БОТА" else "▶ ЗАПУСТИТЬ БОТА",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
+                    .weight(1f),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                 )
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = "🎯 Активные экспрессы",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    
+                    if (activeExpresses.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(16.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (isBotRunning) "Ожидание экспрессов..." else "Запустите бота для отображения экспрессов",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(activeExpresses) { express ->
+                                ActiveExpressCard(
+                                    express = express,
+                                    matches = matchesByExpress[express.id] ?: emptyList(),
+                                    isExpanded = expandedExpressIds.contains(express.id),
+                                    onToggleExpand = {
+                                        expandedExpressIds = if (expandedExpressIds.contains(express.id)) {
+                                            expandedExpressIds - express.id
+                                        } else {
+                                            expandedExpressIds + express.id
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
             }
             
             if (!isBotRunning) {
@@ -721,73 +772,6 @@ fun MainBotScreen(
                         onClick = onNavigateToSettings,
                         modifier = Modifier.weight(1f)
                     )
-                }
-                
-                Spacer(modifier = Modifier.height(8.dp))
-                
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    QuickActionButton(
-                        icon = Icons.Default.List,
-                        text = "Матчи",
-                        onClick = onNavigateToMatches,
-                        modifier = Modifier.weight(1f)
-                    )
-                    QuickActionButton(
-                        icon = Icons.Default.ViewList,
-                        text = "Экспрессы",
-                        onClick = onNavigateToExpresses,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-            
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            Text(
-                text = "📝 Лог событий",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-            
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                )
-            ) {
-                if (logs.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "Запустите бота для отображения логов",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.padding(12.dp),
-                        reverseLayout = true
-                    ) {
-                        items(logs) { log ->
-                            Text(
-                                text = log,
-                                fontSize = 12.sp,
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                modifier = Modifier.padding(vertical = 2.dp)
-                            )
-                        }
-                    }
                 }
             }
         }
@@ -820,32 +804,145 @@ fun MainBotScreen(
     }
 }
 
-private fun getCurrentTime(): String {
-    return SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+@Composable
+fun ActiveExpressCard(
+    express: ExpressInfo,
+    matches: List<MatchInfo>,
+    isExpanded: Boolean,
+    onToggleExpand: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onToggleExpand() },
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "🎯 #${express.idExp}",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        "Матчей: ${express.eventsCount}",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Кэф: ${"%.2f".format(express.kfall)}",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Icon(
+                        if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        null,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(4.dp))
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    "Ставка: ${express.sumbet.toInt()} ₽",
+                    fontSize = 12.sp
+                )
+                Text(
+                    "Выигрыш: ${"%.2f".format(express.potentialWin)} ₽",
+                    fontSize = 12.sp,
+                    color = Color(0xFF4CAF50),
+                    fontWeight = FontWeight.Medium
+                )
+            }
+            
+            if (isExpanded && matches.isNotEmpty()) {
+                Divider(modifier = Modifier.padding(vertical = 8.dp))
+                
+                matches.forEach { match ->
+                    MatchInExpressRow(match = match)
+                    if (match != matches.last()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
-fun QuickActionButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
+fun MatchInExpressRow(match: MatchInfo) {
     Card(
-        modifier = modifier,
-        shape = RoundedCornerShape(12.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        onClick = onClick
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
     ) {
-        Column(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+                .padding(10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(icon, text, modifier = Modifier.size(24.dp))
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(text = text, fontSize = 12.sp)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "${match.homeTeam} vs ${match.awayTeam}",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "Счет: ${match.homeScore}-${match.awayScore}",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "${match.matchTime}'",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            
+            Column(horizontalAlignment = Alignment.End) {
+                val matchStatus = when (match.status) {
+                    1 -> Pair("🔄", "Активен")
+                    2 -> Pair("✅", "Зашёл")
+                    else -> Pair("❌", "Не зашёл")
+                }
+                Text(
+                    "${matchStatus.first} ${typeName(match.betType)}",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    "Кэф: ${"%.2f".format(match.startOdds)}",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
@@ -1816,384 +1913,44 @@ fun SettingsScreen(
     }
 }
 
-// НОВЫЕ ЭКРАНЫ
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun MatchesScreen(
-    onBack: () -> Unit,
-    dbHelper: DatabaseHelper
-) {
-    var matches by remember { mutableStateOf<List<MatchInfo>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
-    
-    LaunchedEffect(Unit) {
-        isLoading = true
-        matches = dbHelper.getAllMatches()
-        isLoading = false
-    }
-    
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("📋 Таблица матчей") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, "Назад")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                )
-            )
-        }
-    ) { paddingValues ->
-        if (isLoading) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator()
-            }
-        } else if (matches.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("Нет матчей в базе данных")
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues)
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(matches) { match ->
-                    MatchCard(match = match)
-                }
-            }
-        }
-    }
+private fun getCurrentTime(): String {
+    return SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
 }
 
 @Composable
-fun MatchCard(match: MatchInfo) {
-    var expanded by remember { mutableStateOf(false) }
-    
+fun QuickActionButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { expanded = !expanded },
+        modifier = modifier,
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = when (match.status) {
-                1 -> MaterialTheme.colorScheme.surfaceVariant
-                2 -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
-                else -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
-            }
-        )
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        onClick = onClick
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "ID: ${match.mId}",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
-                )
-                Row {
-                    val statusText = when (match.status) {
-                        1 -> "🔄 Активен"
-                        2 -> "✅ Зашёл"
-                        else -> "❌ Не зашёл"
-                    }
-                    Text(statusText, fontSize = 12.sp)
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Icon(
-                        if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                        null,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-            
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(icon, text, modifier = Modifier.size(24.dp))
             Spacer(modifier = Modifier.height(4.dp))
-            
-            Text("${match.homeTeam} vs ${match.awayTeam}", fontSize = 15.sp, fontWeight = FontWeight.Medium)
-            Text("Лига: ${match.leagueName.ifEmpty { "—" }}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("Счет: ${match.homeScore} - ${match.awayScore}", fontSize = 13.sp)
-                Text("Кэф: ${"%.2f".format(match.startOdds)}", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            }
-            
-            Text("Тип ставки: ${typeName(match.betType)}", fontSize = 12.sp)
-            
-            if (expanded) {
-                Divider(modifier = Modifier.padding(vertical = 8.dp))
-                
-                DetailRow("ID матча", match.mId.toString())
-                DetailRow("ID лиги", match.idLiga?.toString() ?: "—")
-                DetailRow("ID экспресса", match.idExp.toString())
-                DetailRow("Текущий кэф", "%.2f".format(match.currentOdds ?: match.startOdds))
-                DetailRow("Время матча", "${match.matchTime} мин")
-                DetailRow("URL", match.matchUrl.ifEmpty { "—" })
-                DetailRow("Создан", formatTimestamp(match.createdAt))
-                DetailRow("Обновлен", formatTimestamp(match.updatedAt))
-            }
+            Text(text = text, fontSize = 12.sp)
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ExpressesScreen(
-    onBack: () -> Unit,
-    dbHelper: DatabaseHelper
-) {
-    var expresses by remember { mutableStateOf<List<ExpressInfo>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
-    
-    LaunchedEffect(Unit) {
-        isLoading = true
-        expresses = dbHelper.getAllExpresses()
-        isLoading = false
-    }
-    
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("🎯 Таблица экспрессов") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, "Назад")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                )
-            )
-        }
-    ) { paddingValues ->
-        if (isLoading) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator()
-            }
-        } else if (expresses.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("Нет экспрессов в базе данных")
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues)
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(expresses) { express ->
-                    ExpressCard(
-                        express = express,
-                        matches = dbHelper.getMatchesByExpressId(express.id)
-                    )
-                }
-            }
-        }
-    }
+fun typeName(type: Int): String = when (type) {
+    924 -> "1X"
+    927 -> "Ф1(+1.5)"
+    928 -> "Ф2(+1.5)"
+    else -> "Тип $type"
 }
-
-@Composable
-fun ExpressCard(express: ExpressInfo, matches: List<MatchInfo>) {
-    var expanded by remember { mutableStateOf(false) }
-    
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { expanded = !expanded },
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = when (express.stsAll) {
-                1 -> MaterialTheme.colorScheme.surfaceVariant
-                2 -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
-                else -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
-            }
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "🎯 Экспресс #${express.idExp}",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    val (statusText, statusColor) = when (express.stsAll) {
-                        1 -> Pair("🔄 Активен", Color(0xFFFF9800))
-                        2 -> Pair("🏆 Выиграл", Color(0xFF4CAF50))
-                        -1 -> Pair("🔄 Заменён", Color(0xFF2196F3))
-                        else -> Pair("❌ Проиграл", Color(0xFFF44336))
-                    }
-                    Text(
-                        statusText,
-                        fontSize = 12.sp,
-                        color = statusColor,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                Icon(
-                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    null,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-            
-            Spacer(modifier = Modifier.height(8.dp))
-            
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("Матчей: ${express.eventsCount}", fontSize = 13.sp)
-                Text("Общий кэф: ${"%.2f".format(express.kfall)}", fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            }
-            
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("Ставка: ${express.sumbet.toInt()} ₽", fontSize = 13.sp)
-                Text(
-                    "Выигрыш: ${"%.2f".format(express.potentialWin)} ₽",
-                    fontSize = 13.sp,
-                    color = Color(0xFF4CAF50)
-                )
-            }
-            
-            if (express.stsAll != 1) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("Результат:", fontSize = 13.sp)
-                    Text(
-                        "${if (express.profLoss >= 0) "+" else ""}${"%.2f".format(express.profLoss)} ₽",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (express.profLoss >= 0) Color(0xFF4CAF50) else Color(0xFFF44336)
-                    )
-                }
-            }
-            
-            Text("Стратегия: ${express.strategy}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("Создан: ${formatTimestamp(express.ct)}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            
-            if (expanded && matches.isNotEmpty()) {
-                Divider(modifier = Modifier.padding(vertical = 12.dp))
-                
-                Text(
-                    "📋 Матчи в экспрессе:",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
-                
-                matches.forEach { match ->
-                    MatchInExpressCard(match = match)
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun MatchInExpressCard(match: MatchInfo) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        )
-    ) {
-        Column(modifier = Modifier.padding(10.dp)) {
-            Text(
-                "${match.homeTeam} vs ${match.awayTeam}",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium
-            )
-            
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("Счет: ${match.homeScore} - ${match.awayScore}", fontSize = 12.sp)
-                
-                val matchStatus = when (match.status) {
-                    1 -> "🔄"
-                    2 -> "✅"
-                    else -> "❌"
-                }
-                Text("$matchStatus ${typeName(match.betType)}", fontSize = 12.sp)
-                Text("Кэф: ${"%.2f".format(match.startOdds)}", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-    }
-}
-
-@Composable
-fun DetailRow(label: String, value: String) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 2.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(label, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, fontSize = 11.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
-    }
-}
-
-// fun typeName(type: Int): String {
-//     return when (type) {
-//         924 -> "1X"
-//         927 -> "Ф1(+1.5)"
-//         928 -> "Ф2(+1.5)"
-//         else -> "Тип $type"
-//     }
-// }
 
 fun formatTimestamp(timestamp: Long): String {
     if (timestamp == 0L) return "—"
     return SimpleDateFormat("dd.MM.yy HH:mm", Locale.getDefault()).format(Date(timestamp * 1000))
-}
-    fun typeName(type: Int): String = when (type) {
-    924 -> "1X"; 927 -> "Ф1(+1.5)"; 928 -> "Ф2(+1.5)"; else -> "Тип $type"
 }
