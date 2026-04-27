@@ -212,7 +212,7 @@ fun MainBotScreen(
     fun loadActiveExpresses() {
         try {
             val allExpresses = dbHelper.getAllExpresses()
-            activeExpresses = allExpresses.filter { it.stsAll == 1 } // Только активные (sts_all = 1)
+            activeExpresses = allExpresses.filter { it.stsAll == 0 || it.stsAll == 1 || it.stsAll == 2 }
             
             val matchesMap = mutableMapOf<Long, List<MatchInfo>>()
             activeExpresses.forEach { express ->
@@ -350,7 +350,12 @@ fun MainBotScreen(
         }
         BotForegroundService.authData = authData
         
-        onDispose { }
+        onDispose {
+            BotForegroundService.onBalanceUpdate = null
+            BotForegroundService.onLogUpdate = null
+            BotForegroundService.onBetsUpdate = null
+            BotForegroundService.onScoresUpdate = null
+        }
     }
     
     fun startBot() {
@@ -419,18 +424,74 @@ fun MainBotScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { 
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("🤖 ", fontSize = 24.sp)
-                        Text("Fonbet Bot", fontWeight = FontWeight.Bold)
+                title = {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        // Верхняя строка: индикатор статуса + баланс
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Статус бота (слева)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .background(
+                                            if (isBotRunning) Color(0xFF4CAF50) else Color(0xFFF44336),
+                                            shape = RoundedCornerShape(5.dp)
+                                        )
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (isBotRunning) "Активен" else "Остановлен",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = if (isBotRunning) Color(0xFF4CAF50) else Color(0xFFF44336)
+                                )
+                            }
+                            
+                            // Баланс с кнопкой обновления (справа)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (isLoadingBalance) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                } else {
+                                    val balanceText = if (balance > 0) "💰 ${String.format("%.0f", balance)} ₽" else "— ₽"
+                                    Text(
+                                        text = balanceText,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                                
+                                if (authData != null && !isBotRunning && !isLoadingBalance) {
+                                    IconButton(
+                                        onClick = { fetchBalanceFromApi() },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Refresh,
+                                            contentDescription = "Обновить баланс",
+                                            modifier = Modifier.size(18.dp),
+                                            tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 },
                 actions = {
-                    // КНОПКА ЗАПУСКА/ОСТАНОВКИ БОТА В APPBAR
+                    // Кнопка запуска/остановки бота
                     if (isBotRunning) {
                         IconButton(onClick = { showExitDialog = true }) {
                             Icon(
-                                Icons.Default.Stop, 
+                                Icons.Default.Stop,
                                 "Остановить бота",
                                 tint = MaterialTheme.colorScheme.error
                             )
@@ -441,7 +502,7 @@ fun MainBotScreen(
                             enabled = authData != null
                         ) {
                             Icon(
-                                Icons.Default.PlayArrow, 
+                                Icons.Default.PlayArrow,
                                 "Запустить бота",
                                 tint = if (authData != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -627,73 +688,6 @@ fun MainBotScreen(
                 }
                 Spacer(modifier = Modifier.height(12.dp))
             }
-            
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = if (isBotRunning) 
-                        MaterialTheme.colorScheme.primaryContainer 
-                    else 
-                        MaterialTheme.colorScheme.surfaceVariant
-                )
-            ) {
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(
-                            text = if (isBotRunning) "🟢" else "🔴",
-                            fontSize = 24.sp
-                        )
-                        Text(
-                            text = if (isBotRunning) "БОТ АКТИВЕН" else "БОТ ОСТАНОВЛЕН",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp
-                        )
-                    }
-                    
-                    Spacer(modifier = Modifier.height(16.dp))
-                    
-                    Text(
-                        text = "Текущий баланс",
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    
-                    if (isLoadingBalance) {
-                        CircularProgressIndicator(modifier = Modifier.size(32.dp))
-                    } else {
-                        val balanceText = if (balance > 0) String.format("%.2f ₽", balance) else "—"
-                        val balanceColor = if (balance >= 10000) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurface
-                        
-                        Text(
-                            text = balanceText,
-                            fontSize = 42.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = balanceColor
-                        )
-                    }
-                    
-                    if (authData != null && !isLoadingBalance) {
-                        TextButton(
-                            onClick = { fetchBalanceFromApi() },
-                            modifier = Modifier.padding(top = 8.dp)
-                        ) {
-                            Icon(Icons.Default.Refresh, null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Обновить баланс", fontSize = 12.sp)
-                        }
-                    }
-                }
-            }
-            
-            Spacer(modifier = Modifier.height(20.dp))
             
             // ТАБЛИЦА АКТИВНЫХ ЭКСПРЕССОВ С ДЕРЕВОМ МАТЧЕЙ
             Card(
@@ -929,14 +923,24 @@ fun MatchInExpressRow(match: MatchInfo) {
             
             Column(horizontalAlignment = Alignment.End) {
                 val matchStatus = when (match.status) {
-                    1 -> Pair("🔄", "Активен")
+                    0 -> Pair("🔄", "Активен")
+                    1 -> Pair("❌", "Не зашёл")
                     2 -> Pair("✅", "Зашёл")
-                    else -> Pair("❌", "Не зашёл")
+                    else -> Pair("🔄", "Активен")
                 }
+                
+                val statusColor = when (match.status) {
+                    0 -> MaterialTheme.colorScheme.primary
+                    1 -> MaterialTheme.colorScheme.error
+                    2 -> Color(0xFF4CAF50)
+                    else -> MaterialTheme.colorScheme.primary
+                }
+                
                 Text(
                     "${matchStatus.first} ${typeName(match.betType)}",
                     fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium
+                    fontWeight = FontWeight.Medium,
+                    color = statusColor
                 )
                 Text(
                     "Кэф: ${"%.2f".format(match.startOdds)}",
