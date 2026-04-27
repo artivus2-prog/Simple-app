@@ -209,28 +209,30 @@ fun MainBotScreen(
     var expandedExpressIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
     
     // Функция загрузки активных экспрессов (не старше 2 часов)
+    // Функция загрузки активных экспрессов (не старше 2 часов)
     fun loadActiveExpresses() {
         try {
             val allExpresses = dbHelper.getAllExpresses()
             val currentTime = System.currentTimeMillis() / 1000
-            val twoHoursInSeconds = 2 * 60 * 60 // 2 часа в секундах
+            val twoHoursInSeconds = 2 * 60 * 60
             
-            // Фильтруем: не замененные, не старше 2 часов
+            // Фильтруем: не замененные (sts_all != -1), не старше 2 часов
             activeExpresses = allExpresses.filter { express ->
-                express.stsAll != -1 && // не замененные
-                (currentTime - express.createdAt) <= twoHoursInSeconds // не старше 2 часов
+                express.stsAll != -1 &&
+                (currentTime - express.createdAt) <= twoHoursInSeconds
             }.sortedByDescending { it.createdAt }
             
             val matchesMap = mutableMapOf<Long, List<MatchInfo>>()
             activeExpresses.forEach { express ->
-                matchesMap[express.id] = dbHelper.getMatchesByExpressId(express.id)
+                val matches = dbHelper.getMatchesByExpressId(express.id)
+                matchesMap[express.id] = matches
             }
             matchesByExpress = matchesMap
             
             android.util.Log.d("MainActivity", "Загружено экспрессов: ${activeExpresses.size} (фильтр: 2 часа)")
             activeExpresses.forEach { exp ->
                 val ageMinutes = (currentTime - exp.createdAt) / 60
-                android.util.Log.d("MainActivity", "  Экспресс #${exp.idExp}: stsAll=${exp.stsAll}, возраст=${ageMinutes}мин, матчей=${exp.eventsCount}")
+                android.util.Log.d("MainActivity", "  Экспресс #${exp.idExp}: stsAll=${exp.stsAll}, возраст=${ageMinutes}мин, матчей=${exp.eventsCount}, стратегия=${exp.strategy}")
             }
         } catch (e: Exception) {
             android.util.Log.e("MainActivity", "Ошибка загрузки экспрессов: ${e.message}")
@@ -821,16 +823,30 @@ fun ActiveExpressCard(
         2 -> Triple(Color(0xFF4CAF50), "✅", "ВЫИГРАЛ")
         1 -> Triple(Color(0xFFF44336), "❌", "ПРОИГРАЛ")
         0 -> Triple(MaterialTheme.colorScheme.primary, "🔄", "АКТИВЕН")
+        -1 -> Triple(Color(0xFF9E9E9E), "🔄", "ЗАМЕНЁН")
         else -> Triple(MaterialTheme.colorScheme.onSurfaceVariant, "❓", "НЕИЗВЕСТНО")
     }
     
     // Вычисляем возраст экспресса
     val currentTime = System.currentTimeMillis() / 1000
-    val ageMinutes = (currentTime - express.createdAt) / 60
+    val ageSeconds = currentTime - express.createdAt
+    val ageMinutes = ageSeconds / 60
     val ageText = when {
-        ageMinutes < 1 -> "только что"
+        ageSeconds < 60 -> "только что"
         ageMinutes < 60 -> "${ageMinutes}мин"
         else -> "${ageMinutes / 60}ч ${ageMinutes % 60}мин"
+    }
+    
+    // Формируем стратегию для отображения
+    val strategyDisplay = when {
+        express.strategy.contains("1x") -> "1X"
+        express.strategy.contains("f(") || express.strategy.contains("ф(") -> {
+            if (express.strategy.contains("ф1") || express.strategy.contains("f1")) "Ф1(+1.5)"
+            else if (express.strategy.contains("ф2") || express.strategy.contains("f2")) "Ф2(+1.5)"
+            else express.strategy
+        }
+        express.strategy.length > 10 -> express.strategy.take(10) + "..."
+        else -> express.strategy
     }
     
     Card(
@@ -844,6 +860,7 @@ fun ActiveExpressCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
+            // Верхняя строка: номер экспресса + статус + возраст
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -884,35 +901,78 @@ fun ActiveExpressCard(
                 }
             }
             
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(6.dp))
             
+            // Вторая строка: ставка + матчи + стратегия
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    "Ставка: ${express.sumbet.toInt()} ₽ | Матчей: ${express.eventsCount}",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    "${if (express.stsAll == 2) "+" else if (express.stsAll == 1) "" else ""}${"%.2f".format(express.potentialWin)} ₽",
-                    fontSize = 12.sp,
-                    color = if (express.stsAll == 2) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = FontWeight.Medium
-                )
+                Column {
+                    Text(
+                        "Ставка: ${express.sumbet.toInt()} ₽",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "Матчей: ${express.eventsCount}",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        "${if (express.stsAll == 2) "+" else if (express.stsAll == 1) "–" else ""}${"%.2f".format(express.potentialWin)} ₽",
+                        fontSize = 13.sp,
+                        color = when {
+                            express.stsAll == 2 -> Color(0xFF4CAF50)
+                            express.stsAll == 1 -> Color(0xFFF44336)
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        strategyDisplay,
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                    )
+                }
             }
             
-            // Показываем результат если экспресс завершен
+            // Третья строка: результат + баланс
             if (express.stsAll == 1 || express.stsAll == 2) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Результат: ${if (express.profLoss > 0) "+" else ""}${"%.2f".format(express.profLoss)} ₽",
+                        fontSize = 12.sp,
+                        color = if (express.profLoss > 0) Color(0xFF4CAF50) else Color(0xFFF44336),
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = "Баланс: ${"%.2f".format(express.balans)} ₽",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            
+            // Четвертая строка: замена (если есть)
+            if (express.idExpReplace > 0) {
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = "Результат: ${if (express.profLoss > 0) "+" else ""}${"%.2f".format(express.profLoss)} ₽",
-                    fontSize = 12.sp,
-                    color = if (express.profLoss > 0) Color(0xFF4CAF50) else Color(0xFFF44336),
-                    fontWeight = FontWeight.Medium
+                    text = "🔄 Заменён на #${express.idExpReplace}",
+                    fontSize = 10.sp,
+                    color = Color(0xFFFF9800)
                 )
             }
             
+            // Раскрытый список матчей
             if (isExpanded && matches.isNotEmpty()) {
                 Divider(modifier = Modifier.padding(vertical = 8.dp))
                 
@@ -943,7 +1003,9 @@ fun MatchInExpressRow(match: MatchInfo) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Левая часть: команды, лига, счет, время
             Column(modifier = Modifier.weight(1f)) {
+                // Команды
                 Text(
                     if (match.homeTeam.isNotEmpty() && match.awayTeam.isNotEmpty()) 
                         "${match.homeTeam} vs ${match.awayTeam}"
@@ -952,7 +1014,22 @@ fun MatchInExpressRow(match: MatchInfo) {
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium
                 )
+                
                 Spacer(modifier = Modifier.height(2.dp))
+                
+                // Лига
+                if (match.leagueName.isNotEmpty()) {
+                    Text(
+                        match.leagueName,
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        maxLines = 1
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(2.dp))
+                
+                // Счет + время
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -967,10 +1044,19 @@ fun MatchInExpressRow(match: MatchInfo) {
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    } else {
+                        Text(
+                            "0'",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                        )
                     }
                 }
             }
             
+            Spacer(modifier = Modifier.width(8.dp))
+            
+            // Правая часть: статус + кэф
             Column(horizontalAlignment = Alignment.End) {
                 val matchStatus = when (match.status) {
                     0 -> Triple("🔄", "Активен", MaterialTheme.colorScheme.primary)
@@ -985,16 +1071,26 @@ fun MatchInExpressRow(match: MatchInfo) {
                     fontWeight = FontWeight.Medium,
                     color = matchStatus.third
                 )
+                
                 Text(
                     "Кэф: ${"%.2f".format(match.startOdds)}",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                
+                if (match.currentOdds != null && match.currentOdds != match.startOdds) {
+                    Text(
+                        "Тек: ${"%.2f".format(match.currentOdds)}",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                    )
+                }
+                
                 if (match.isFinalized == 1) {
                     Text(
                         "Завершен",
                         fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                     )
                 }
             }
@@ -2082,6 +2178,13 @@ fun typeName(type: Int): String = when (type) {
     924 -> "1X"
     927 -> "Ф1(+1.5)"
     928 -> "Ф2(+1.5)"
+    921 -> "П1"
+    930 -> "ТБ(0.5)"
+    1696 -> "ТБ"
+    1793 -> "ТБ"
+    1796 -> "ТБ"
+    1799 -> "ТБ"
+    4241 -> "ОЗ ДА"
     else -> "Тип $type"
 }
 
