@@ -999,6 +999,26 @@ class DatabaseHelper(context: Context) :
         
         return false
     }
+data class ExpressEventData(
+    val mId: Int,
+    val idLiga: Int? = null,
+    val leagueName: String = "",
+    val idHome: Int? = null,
+    val homeTeam: String = "",
+    val idAway: Int? = null,
+    val awayTeam: String = "",
+    val startOdds: Double,
+    val currentOdds: Double? = null,
+    val matchTime: Int = 0,
+    val homeScore: Int = 0,
+    val awayScore: Int = 0,
+    val betType: Int,
+    val status: Int = 0,
+    val isFinalized: Int = 0,
+    val matchUrl: String = "",
+    val uzh: String = "0.0",
+    val totalType: Int? = null
+)
 }
 
 // ==================== DATA CLASSES ====================
@@ -1080,23 +1100,3 @@ data class ExpressInfo(
 /**
  * Data class для данных матча при сохранении
  */
-data class ExpressEventData(
-    val mId: Int,
-    val idLiga: Int? = null,
-    val leagueName: String = "",
-    val idHome: Int? = null,
-    val homeTeam: String = "",
-    val idAway: Int? = null,
-    val awayTeam: String = "",
-    val startOdds: Double,
-    val currentOdds: Double? = null,
-    val matchTime: Int = 0,
-    val homeScore: Int = 0,
-    val awayScore: Int = 0,
-    val betType: Int,
-    val status: Int = 0,
-    val isFinalized: Int = 0,
-    val matchUrl: String = "",
-    val uzh: String = "0.0",
-    val totalType: Int? = null
-)
