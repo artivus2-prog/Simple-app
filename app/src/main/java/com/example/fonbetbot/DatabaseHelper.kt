@@ -802,96 +802,97 @@ class DatabaseHelper(context: Context) :
      * Сохранить экспресс с матчами
      */
     fun saveExpressWithMatches(
-        expId: Int,
-        kfall: Double,
-        sumbet: Double,
-        potentialWin: Double,
-        balance: Double,
-        strategy: String,
-        eventsCount: Int,
-        matches: List<ExpressEventData>
-    ): Long {
-        val db = writableDatabase
-        val currentTime = System.currentTimeMillis() / 1000
+    expId: Int,
+    kfall: Double,
+    sumbet: Double,
+    potentialWin: Double,
+    balance: Double,
+    strategy: String,
+    eventsCount: Int,
+    matches: List<ExpressEventData>
+): Long {
+    val db = writableDatabase
+    val currentTime = System.currentTimeMillis() / 1000
+    var expressRowId = -1L
+    
+    db.beginTransaction()
+    try {
+        // Сохраняем экспресс
+        val expressValues = ContentValues().apply {
+            put("id_exp", expId)
+            put("kfall", kfall)
+            put("profloss", 0.0)
+            put("balans", balance)
+            put("sumbet", sumbet)
+            put("sts_all", 0)
+            put("is_bet_placed", 0)
+            put("ct", currentTime)
+            put("strategy", strategy)
+            put("id_exp_replace", 0)
+            put("events_count", eventsCount)
+            put("total_odds", kfall)
+            put("bet_amount", sumbet)
+            put("potential_win", potentialWin)
+            put("profit_loss", 0.0)
+            put("created_at", currentTime)
+            put("updated_at", currentTime)
+        }
         
-        db.beginTransaction()
-        try {
-            // Сохраняем экспресс
-            val expressValues = ContentValues().apply {
+        expressRowId = db.insertWithOnConflict("express_bets", null, expressValues,
+            SQLiteDatabase.CONFLICT_REPLACE)
+        
+        if (expressRowId == -1L) {
+            Log.e(TAG, "❌ Ошибка вставки в express_bets")
+            db.endTransaction()
+            return -1
+        }
+        
+        // Сохраняем матчи
+        matches.forEach { match ->
+            val eventValues = ContentValues().apply {
                 put("id_exp", expId)
-                put("kfall", kfall)
-                put("profloss", 0.0)
-                put("balans", balance)
-                put("sumbet", sumbet)
-                put("sts_all", 0)
-                put("is_bet_placed", 0)
-                put("ct", currentTime)
-                put("strategy", strategy)
-                put("id_exp_replace", 0)
-                put("events_count", eventsCount)
-                put("total_odds", kfall)
-                put("bet_amount", sumbet)
-                put("potential_win", potentialWin)
-                put("profit_loss", 0.0)
+                put("m_id", match.mId)
+                match.idLiga?.let { put("id_liga", it) }
+                put("league_name", match.leagueName)
+                match.idHome?.let { put("id_home", it) }
+                put("home_team", match.homeTeam)
+                match.idAway?.let { put("id_away", it) }
+                put("away_team", match.awayTeam)
+                put("start_odds", match.startOdds)
+                match.currentOdds?.let { put("current_odds", it) }
+                put("match_time", match.matchTime)
+                put("home_score", match.homeScore)
+                put("away_score", match.awayScore)
+                put("bet_type", match.betType)
+                put("status", match.status)
+                put("is_finalized", match.isFinalized)
+                put("match_url", match.matchUrl)
+                put("uzh", match.uzh)
+                match.totalType?.let { put("total_type", it) }
                 put("created_at", currentTime)
                 put("updated_at", currentTime)
             }
             
-            val expressRowId = db.insertWithOnConflict("express_bets", null, expressValues,
+            val eventInsertId = db.insertWithOnConflict("express_events", null, eventValues,
                 SQLiteDatabase.CONFLICT_REPLACE)
-            
-            if (expressRowId == -1L) {
-                Log.e(TAG, "❌ Ошибка вставки в express_bets")
-                db.endTransaction()
-                return -1
-            }
-            
-            // Сохраняем матчи
-            matches.forEach { match ->
-                val eventValues = ContentValues().apply {
-                    put("id_exp", expId)
-                    put("m_id", match.mId)
-                    put("id_liga", match.idLiga)
-                    put("league_name", match.leagueName)
-                    put("id_home", match.idHome)
-                    put("home_team", match.homeTeam)
-                    put("id_away", match.idAway)
-                    put("away_team", match.awayTeam)
-                    put("start_odds", match.startOdds)
-                    put("current_odds", match.currentOdds)
-                    put("match_time", match.matchTime)
-                    put("home_score", match.homeScore)
-                    put("away_score", match.awayScore)
-                    put("bet_type", match.betType)
-                    put("status", match.status)
-                    put("is_finalized", match.isFinalized)
-                    put("match_url", match.matchUrl)
-                    put("uzh", match.uzh)
-                    put("total_type", match.totalType)
-                    put("created_at", currentTime)
-                    put("updated_at", currentTime)
-                }
                 
-                val eventInsertId = db.insertWithOnConflict("express_events", null, eventValues,
-                    SQLiteDatabase.CONFLICT_REPLACE)
-                    
-                if (eventInsertId == -1L) {
-                    Log.e(TAG, "❌ Ошибка вставки матча #${match.mId}")
-                }
+            if (eventInsertId == -1L) {
+                Log.e(TAG, "❌ Ошибка вставки матча #${match.mId}")
             }
-            
-            db.setTransactionSuccessful()
-            Log.d(TAG, "✅ Экспресс #$expId сохранен с ${matches.size} матчами")
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "Ошибка сохранения экспресса: ${e.message}")
-            return -1
-        } finally {
-            db.endTransaction()
         }
         
-        return expressRowId
+        db.setTransactionSuccessful()
+        Log.d(TAG, "✅ Экспресс #$expId сохранен с ${matches.size} матчами")
+        
+    } catch (e: Exception) {
+        Log.e(TAG, "Ошибка сохранения экспресса: ${e.message}")
+        return -1
+    } finally {
+        db.endTransaction()
     }
+    
+    return expressRowId
+}
     
     /**
      * Обновить статус матча по m_id

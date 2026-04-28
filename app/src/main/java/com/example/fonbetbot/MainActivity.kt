@@ -210,7 +210,10 @@ fun MainBotScreen(
 var expandedExpressIds by remember { mutableStateOf<Set<Int>>(emptySet()) }  // Было Set<Long>
     // Функция загрузки активных экспрессов (не старше 2 часов)
     
-    fun loadActiveExpresses() {
+    // В MainBotScreen:
+
+// Функция загрузки активных экспрессов
+fun loadActiveExpresses() {
     try {
         val allExpresses = dbHelper.getAllExpresses()
         val currentTime = System.currentTimeMillis() / 1000
@@ -221,7 +224,7 @@ var expandedExpressIds by remember { mutableStateOf<Set<Int>>(emptySet()) }  // 
             (currentTime - express.createdAt) <= twoHoursInSeconds
         }.sortedByDescending { it.createdAt }
         
-        val matchesMap = mutableMapOf<Int, List<MatchInfo>>()  // Ключ - id_exp
+        val matchesMap = mutableMapOf<Int, List<MatchInfo>>()
         activeExpresses.forEach { express ->
             matchesMap[express.idExp] = dbHelper.getMatchesByExpId(express.idExp)
         }
@@ -621,20 +624,21 @@ var expandedExpressIds by remember { mutableStateOf<Set<Int>>(emptySet()) }  // 
                             LazyColumn(
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                items(activeExpresses) { express ->
-                                    ActiveExpressCard(
-                                        express = express,
-                                        matches = matchesByExpress[express.id] ?: emptyList(),
-                                        isExpanded = expandedExpressIds.contains(express.id),
-                                        onToggleExpand = {
-                                            expandedExpressIds = if (expandedExpressIds.contains(express.id)) {
-                                                expandedExpressIds - express.id
-                                            } else {
-                                                expandedExpressIds + express.id
-                                            }
-                                        }
-                                    )
-                                }
+                                // Исправленный LazyColumn с экспрессами:
+items(activeExpresses, key = { it.idExp }) { express ->
+    ActiveExpressCard(
+        express = express,
+        matches = matchesByExpress[express.idExp] ?: emptyList(),
+        isExpanded = expandedExpressIds.contains(express.idExp),
+        onToggleExpand = {
+            expandedExpressIds = if (expandedExpressIds.contains(express.idExp)) {
+                expandedExpressIds - express.idExp
+            } else {
+                expandedExpressIds + express.idExp
+            }
+        }
+    )
+}
                             }
                         }
                     }
