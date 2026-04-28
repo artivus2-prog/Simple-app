@@ -824,7 +824,7 @@ class BotForegroundService : Service() {
         
         val remainingMinutes = totalMatchDuration + halftimeBreak + extraTime - effectiveMinute
         
-        val seconds = (remainingMinutes * 60) + 300
+        val seconds: Long = (remainingMinutes * 60).toLong() + 300L
         
         Log.d(TAG, "⏰ Расчет времени: начало=${matchStartMinute}', текущее=${currentMatchTime}', эффективное=${effectiveMinute}', осталось=${remainingMinutes}мин, секунд=$seconds")
         
