@@ -206,35 +206,34 @@ fun MainBotScreen(
     
     // Данные для дерева активных экспрессов
     var activeExpresses by remember { mutableStateOf<List<ExpressInfo>>(emptyList()) }
-    var matchesByExpress by remember { mutableStateOf<Map<Long, List<MatchInfo>>>(emptyMap()) }
-    var expandedExpressIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
-    
+    var matchesByExpress by remember { mutableStateOf<Map<Int, List<MatchInfo>>>(emptyMap()) }  // Было Map<Long, List<MatchInfo>>
+var expandedExpressIds by remember { mutableStateOf<Set<Int>>(emptySet()) }  // Было Set<Long>
     // Функция загрузки активных экспрессов (не старше 2 часов)
-    fun loadActiveExpresses() {
-        try {
-            val allExpresses = dbHelper.getAllExpresses()
-            val currentTime = System.currentTimeMillis() / 1000
-            val twoHoursInSeconds = 2 * 60 * 60
-            
-            activeExpresses = allExpresses.filter { express ->
-                express.stsAll != -1 &&
-                (currentTime - express.createdAt) <= twoHoursInSeconds
-            }.sortedByDescending { it.createdAt }
-            
-            val matchesMap = mutableMapOf<Long, List<MatchInfo>>()
-            activeExpresses.forEach { express ->
-                matchesMap[express.id] = dbHelper.getMatchesByExpressId(express.id)
-            }
-            matchesByExpress = matchesMap
-            
-            android.util.Log.d("MainActivity", "Загружено экспрессов: ${activeExpresses.size} (фильтр: 2 часа)")
-            logs.add(0, "[${getCurrentTime()}] 📊 Загружено экспрессов: ${activeExpresses.size}")
-        } catch (e: Exception) {
-            android.util.Log.e("MainActivity", "Ошибка загрузки экспрессов: ${e.message}")
-            logs.add(0, "[${getCurrentTime()}] ❌ Ошибка загрузки экспрессов: ${e.message}")
-        }
-    }
     
+    fun loadActiveExpresses() {
+    try {
+        val allExpresses = dbHelper.getAllExpresses()
+        val currentTime = System.currentTimeMillis() / 1000
+        val twoHoursInSeconds = 2 * 60 * 60
+        
+        activeExpresses = allExpresses.filter { express ->
+            express.stsAll != -1 &&
+            (currentTime - express.createdAt) <= twoHoursInSeconds
+        }.sortedByDescending { it.createdAt }
+        
+        val matchesMap = mutableMapOf<Int, List<MatchInfo>>()  // Ключ - id_exp
+        activeExpresses.forEach { express ->
+            matchesMap[express.idExp] = dbHelper.getMatchesByExpId(express.idExp)
+        }
+        matchesByExpress = matchesMap
+        
+        android.util.Log.d("MainActivity", "Загружено экспрессов: ${activeExpresses.size} (фильтр: 2 часа)")
+        logs.add(0, "[${getCurrentTime()}] 📊 Загружено экспрессов: ${activeExpresses.size}")
+    } catch (e: Exception) {
+        android.util.Log.e("MainActivity", "Ошибка загрузки экспрессов: ${e.message}")
+        logs.add(0, "[${getCurrentTime()}] ❌ Ошибка загрузки экспрессов: ${e.message}")
+    }
+}
     fun fetchBalanceFromApi() {
         if (authData == null) {
             logs.add(0, "[${getCurrentTime()}] ❌ Нет данных авторизации")

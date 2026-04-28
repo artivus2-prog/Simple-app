@@ -1,4 +1,4 @@
-// BotForegroundService.kt - ИСПРАВЛЕНО: ОДИН МЕТОД placeBet, ТЕСТОВЫЙ/РЕАЛЬНЫЙ РЕЖИМ
+// BotForegroundService.kt - ИСПРАВЛЕНО: все методы используют id_exp
 package com.example.fonbetbot
 
 import android.app.Notification
@@ -49,7 +49,6 @@ class BotForegroundService : Service() {
         dbHelper = DatabaseHelper(this)
         prefs = getSharedPreferences("settings_prefs", Context.MODE_PRIVATE)
         
-        // Загружаем тестовый баланс если нужно
         if (prefs.getBoolean("test_mode", true)) {
             balance = prefs.getString("test_balance", "1000")?.toDoubleOrNull() ?: 1000.0
             lastBalance = balance
@@ -122,7 +121,7 @@ class BotForegroundService : Service() {
             }
         }
         
-        // Цикл проверки баланса (каждые 60 секунд)
+        // Цикл проверки баланса
         serviceScope.launch {
             while (isRunning) {
                 delay(60000)
@@ -130,7 +129,7 @@ class BotForegroundService : Service() {
             }
         }
         
-        // Цикл получения ставок (каждые 30 секунд)
+        // Цикл получения ставок
         serviceScope.launch {
             delay(5000)
             Log.d(TAG, "🔄 Запуск цикла получения ставок")
@@ -140,9 +139,9 @@ class BotForegroundService : Service() {
             }
         }
         
-        // Цикл обновления счета матчей (каждые 60 секунд)
+        // Цикл обновления счета матчей
         serviceScope.launch {
-            delay(10000)  // Первая задержка 10 секунд
+            delay(10000)
             Log.d(TAG, "🔄 Запущен цикл обновления счетов")
             while (isRunning) {
                 try {
@@ -150,11 +149,11 @@ class BotForegroundService : Service() {
                 } catch (e: Exception) {
                     Log.e(TAG, "Ошибка в цикле обновления счетов: ${e.message}")
                 }
-                delay(60000)  // Проверяем каждые 60 секунд
+                delay(60000)
             }
         }
         
-        // Цикл проверки замены экспрессов (каждый час)
+        // Цикл проверки замены экспрессов
         serviceScope.launch {
             delay(60000)
             while (isRunning) {
@@ -262,8 +261,6 @@ class BotForegroundService : Service() {
         )
     }
     
-    // ==================== ИСПРАВЛЕННЫЙ МЕТОД fetchBets ====================
-    
     private fun fetchBets(data: AuthData) {
         Log.d(TAG, "🎲 ===== fetchBets: НАЧАЛО =====")
         
@@ -328,7 +325,8 @@ class BotForegroundService : Service() {
                         
                         Log.d(TAG, "🎯 Экспресс из матчей: $matchIdsKey (${betDataList.size} матчей)")
                         
-                        val alreadyExists = isExpressAlreadyExists(userData.id, matchIds)
+                        // Проверяем, существует ли уже такой экспресс
+                        val alreadyExists = dbHelper.isExpressExists(matchIds)
                         Log.d(TAG, "🔍 Проверка дубликата: exists=$alreadyExists")
                         
                         if (alreadyExists) {
@@ -360,18 +358,17 @@ class BotForegroundService : Service() {
                         onBetsUpdate?.invoke(betDataList.map { Pair(it.mId, it.type) })
                         
                         Log.d(TAG, "💾 Сохраняем экспресс в БД...")
-                        val expressDbId = saveExpressToDb(
+                        val saved = saveExpressToDb(
                             userId = userData.id,
                             expId = newExpId,
                             betDataList = betDataList
                         )
                         
-                        Log.d(TAG, "💾 Результат сохранения: expressDbId=$expressDbId")
+                        Log.d(TAG, "💾 Результат сохранения: $saved")
                         
-                        if (expressDbId > 0) {
+                        if (saved) {
                             Log.d(TAG, "✅ Экспресс сохранен успешно, размещаем ставку...")
                             val betPlaced = placeBet(
-                                expressDbId = expressDbId,
                                 expId = newExpId,
                                 userId = userData.id,
                                 betDataList = betDataList
@@ -399,250 +396,123 @@ class BotForegroundService : Service() {
         Log.d(TAG, "🎲 ===== fetchBets: КОНЕЦ =====")
     }
     
-    // ==================== МЕТОДЫ ДЛЯ РАБОТЫ С ЭКСПРЕССАМИ ====================
+    // ==================== МЕТОДЫ СОХРАНЕНИЯ И РАЗМЕЩЕНИЯ ====================
     
-private fun isExpressAlreadyExists(userId: Long, matchIds: List<Int>): Boolean {
-    val db = dbHelper.readableDatabase
-    
-    Log.d(TAG, "🔍 isExpressAlreadyExists: проверяем matchIds=$matchIds")
-    
-    // Получаем все НЕзамененные экспрессы
-    val cursor = db.query(
-        "express_bets",
-        arrayOf("id", "id_exp"),
-        "sts_all != -1",  // Без user_id
-        null,
-        null, null, "id_exp DESC"
-    )
-    
-    val expressIds = mutableListOf<Pair<Long, Int>>()
-    while (cursor.moveToNext()) {
-        expressIds.add(Pair(cursor.getLong(0), cursor.getInt(1)))
-    }
-    cursor.close()
-    
-    Log.d(TAG, "🔍 Найдено активных экспрессов: ${expressIds.size}")
-    
-    for ((expressId, idExp) in expressIds) {
-        val eventsCursor = db.query(
-            "express_events",
-            arrayOf("m_id"),
-            "express_id = ?",
-            arrayOf(expressId.toString()),
-            null, null, null
+    private fun saveExpressToDb(
+        userId: Long,
+        expId: Int,
+        betDataList: List<ApiClient.BetData>
+    ): Boolean {
+        val currentTimeUtc = System.currentTimeMillis() / 1000
+        val betAmount = prefs.getString("bet_amount", "30")?.toDoubleOrNull() ?: 30.0
+        
+        var totalKef = 1.0
+        betDataList.forEach { betData ->
+            totalKef *= betData.startKf
+        }
+        
+        val potentialWin = betAmount * totalKef
+        
+        val strategyStr = betDataList.joinToString("+") { betData ->
+            when (betData.type) {
+                924 -> "1x"
+                927 -> "f1(+1.5)"
+                928 -> "f2(+1.5)"
+                else -> "type${betData.type}"
+            }
+        }
+        
+        Log.d(TAG, "💾 saveExpressToDb #$expId:")
+        Log.d(TAG, "  Матчей: ${betDataList.size}")
+        Log.d(TAG, "  Общий кэф: ${"%.2f".format(totalKef)}")
+        Log.d(TAG, "  Ставка: ${betAmount.toInt()} ₽")
+        Log.d(TAG, "  Выигрыш: ${"%.2f".format(potentialWin)} ₽")
+        Log.d(TAG, "  Стратегия: $strategyStr")
+        Log.d(TAG, "  Баланс: $balance")
+        
+        // Подготавливаем данные матчей
+        val matchesData = betDataList.map { betData ->
+            DatabaseHelper.ExpressEventData(
+                mId = betData.mId,
+                idLiga = if (betData.idLiga > 0) betData.idLiga else null,
+                leagueName = betData.ligaName,
+                idHome = if (betData.comand1Id > 0) betData.comand1Id else null,
+                homeTeam = betData.home,
+                idAway = if (betData.comand2Id > 0) betData.comand2Id else null,
+                awayTeam = betData.away,
+                startOdds = betData.startKf,
+                currentOdds = betData.lastKf,
+                homeScore = betData.sh,
+                awayScore = betData.sa,
+                betType = betData.type,
+                status = if (betData.sh > 0 || betData.sa > 0) {
+                    checkMatchStatus(betData.type, betData.sh, betData.sa)
+                } else 0,
+                matchUrl = betData.url,
+                uzh = if (betData.uzh > 0) betData.uzh.toString() else "0.0",
+                totalType = if (betData.tbType > 0) betData.tbType else null
+            )
+        }
+        
+        val expressRowId = dbHelper.saveExpressWithMatches(
+            expId = expId,
+            kfall = totalKef,
+            sumbet = betAmount,
+            potentialWin = potentialWin,
+            balance = balance,
+            strategy = strategyStr,
+            eventsCount = betDataList.size,
+            matches = matchesData
         )
         
-        val existingMatchIds = mutableListOf<Int>()
-        while (eventsCursor.moveToNext()) {
-            existingMatchIds.add(eventsCursor.getInt(0))
-        }
-        eventsCursor.close()
-        
-        Log.d(TAG, "🔍 Экспресс #$idExp: existingMatchIds=$existingMatchIds")
-        
-        if (existingMatchIds.sorted() == matchIds.sorted()) {
-            Log.d(TAG, "🔍 НАЙДЕН ДУБЛИКАТ: экспресс #$idExp")
+        if (expressRowId > 0) {
+            dbHelper.addLog(userId, "express_created", 
+                "Экспресс #$expId: ${betDataList.size} матчей, кэф ${"%.2f".format(totalKef)}, ставка ${betAmount.toInt()} ₽, стратегия: $strategyStr")
             return true
         }
-    }
-    
-    Log.d(TAG, "🔍 Дубликатов не найдено")
-    return false
-}
-    
-private fun saveExpressToDb(
-    userId: Long,  // Оставляем параметр для логов
-    expId: Int,
-    betDataList: List<ApiClient.BetData>
-): Long {
-    val db = dbHelper.writableDatabase
-    val currentTimeUtc = System.currentTimeMillis() / 1000
-    val betAmount = prefs.getString("bet_amount", "30")?.toDoubleOrNull() ?: 30.0
-    
-    var totalKef = 1.0
-    betDataList.forEach { betData ->
-        totalKef *= betData.startKf
-    }
-    
-    val potentialWin = betAmount * totalKef
-    
-    // Формируем строку стратегии
-    val strategyStr = betDataList.joinToString("+") { betData ->
-        when (betData.type) {
-            924 -> "1x"
-            927 -> "f1(+1.5)"
-            928 -> "f2(+1.5)"
-            else -> "type${betData.type}"
-        }
-    }
-    
-    Log.d(TAG, "💾 saveExpressToDb #$expId:")
-    Log.d(TAG, "  Матчей: ${betDataList.size}")
-    Log.d(TAG, "  Общий кэф: ${"%.2f".format(totalKef)}")
-    Log.d(TAG, "  Ставка: ${betAmount.toInt()} ₽")
-    Log.d(TAG, "  Выигрыш: ${"%.2f".format(potentialWin)} ₽")
-    Log.d(TAG, "  Стратегия: $strategyStr")
-    Log.d(TAG, "  Баланс: $balance")
-    Log.d(TAG, "  Время создания: $currentTimeUtc")
-    
-    val expressValues = ContentValues().apply {
-        // user_id больше не сохраняем!
-        put("id_exp", expId)
-        put("kfall", totalKef)
-        put("profloss", 0.0)
-        put("balans", balance)
-        put("sumbet", betAmount)
-        put("sts_all", 0)  // 0 = активен
-        put("is_bet_placed", 0)
-        put("ct", currentTimeUtc)
-        put("strategy", strategyStr)
-        put("id_exp_replace", 0)
-        put("events_count", betDataList.size)
-        put("total_odds", totalKef)
-        put("bet_amount", betAmount)
-        put("potential_win", potentialWin)
-        put("balance", balance)
-        put("profit_loss", 0.0)
-        put("created_time", currentTimeUtc)
-        put("created_at", currentTimeUtc)
-        put("updated_at", currentTimeUtc)
-    }
-    
-    val expressId = db.insert("express_bets", null, expressValues)
-    
-    if (expressId == -1L) {
-        Log.e(TAG, "❌ Ошибка вставки в express_bets!")
-        return -1
-    }
-    
-    Log.d(TAG, "✅ Экспресс #$expId сохранен: expressId=$expressId")
-    
-    // Сохраняем матчи
-    var eventsSavedCount = 0
-    betDataList.forEach { betData ->
-        val initialStatus = if (betData.sh > 0 || betData.sa > 0) {
-            checkMatchStatus(betData.type, betData.sh, betData.sa)
-        } else {
-            0
-        }
         
-        val eventValues = ContentValues().apply {
-            put("express_id", expressId)
-            put("id_exp", expId)
-            // user_id больше не сохраняем!
-            put("m_id", betData.mId)
-            put("start_odds", betData.startKf)
-            put("current_odds", betData.lastKf)
-            put("bet_type", betData.type)
-            put("status", initialStatus)
-            put("home_score", betData.sh)
-            put("away_score", betData.sa)
-            put("match_time", 0)
-            put("created_at", currentTimeUtc)
-            put("updated_at", currentTimeUtc)
-            put("is_finalized", 0)
-            
-            if (betData.idLiga > 0) put("id_liga", betData.idLiga.toLong())
-            if (betData.ligaName.isNotEmpty()) put("league_name", betData.ligaName)
-            if (betData.home.isNotEmpty()) put("home_team", betData.home)
-            if (betData.away.isNotEmpty()) put("away_team", betData.away)
-            if (betData.comand1Id > 0) put("id_home", betData.comand1Id.toLong())
-            if (betData.comand2Id > 0) put("id_away", betData.comand2Id.toLong())
-            if (betData.url.isNotEmpty()) put("match_url", betData.url)
-            if (betData.uzh > 0) put("uzh", betData.uzh.toString())
-            if (betData.tbType > 0) put("total_type", betData.tbType.toLong())
-        }
-        
-        val eventInsertId = db.insert("express_events", null, eventValues)
-        if (eventInsertId == -1L) {
-            Log.e(TAG, "❌ Ошибка вставки матча #${betData.mId} в express_events!")
-        } else {
-            eventsSavedCount++
-            Log.d(TAG, "  ✅ Матч #${betData.mId} сохранен (event_id=$eventInsertId, status=$initialStatus)")
-        }
+        return false
     }
-    
-    Log.d(TAG, "📊 Сохранено матчей: $eventsSavedCount из ${betDataList.size}")
-    
-    // Проверяем сохранение
-    val checkCursor = db.query("express_events", arrayOf("COUNT(*)"), 
-        "express_id = ?", arrayOf(expressId.toString()), null, null, null)
-    var savedEventsCount = 0
-    if (checkCursor.moveToFirst()) {
-        savedEventsCount = checkCursor.getInt(0)
-    }
-    checkCursor.close()
-    
-    Log.d(TAG, "📊 Проверка БД: сохранено $savedEventsCount из ${betDataList.size} матчей")
-    
-    dbHelper.addLog(userId, "express_created", 
-        "Экспресс #$expId: ${betDataList.size} матчей, кэф ${"%.2f".format(totalKef)}, ставка ${betAmount.toInt()} ₽, стратегия: $strategyStr")
-    
-    return expressId
-}
-    
-    // ==================== ЕДИНСТВЕННЫЙ МЕТОД placeBet ====================
     
     private fun placeBet(
-        expressDbId: Long,
         expId: Int,
         userId: Long,
         betDataList: List<ApiClient.BetData>
     ): Boolean {
         try {
-            val db = dbHelper.writableDatabase
+            val betAmount = prefs.getString("bet_amount", "30")?.toDoubleOrNull()?.toInt() ?: 30
             
-            val cursor = db.query(
-                "express_bets",
-                arrayOf("sumbet", "kfall", "potential_win"),
-                "id = ?",
-                arrayOf(expressDbId.toString()),
-                null, null, null
-            )
-            
-            if (!cursor.moveToFirst()) {
-                Log.e(TAG, "❌ placeBet: Экспресс #$expId (dbId=$expressDbId) не найден в БД!")
-                return false
-            }
-            
-            val betAmount = cursor.getDouble(0).toInt()
-            val totalKef = cursor.getDouble(1)
-            val potentialWin = cursor.getDouble(2)
-            cursor.close()
+            var totalKef = 1.0
+            betDataList.forEach { totalKef *= it.startKf }
+            val potentialWin = betAmount * totalKef
             
             val matchesInfo = betDataList.joinToString(" + ") { betData ->
                 "${betData.home.take(15)} vs ${betData.away.take(15)} (${typeName(betData.type)})"
             }
             
             Log.d(TAG, "🎲 РАЗМЕЩЕНИЕ СТАВКИ #$expId:")
-            Log.d(TAG, "  expressDbId: $expressDbId")
             Log.d(TAG, "  Матчи: $matchesInfo")
             Log.d(TAG, "  Сумма: $betAmount ₽")
             Log.d(TAG, "  Кэф: ${"%.2f".format(totalKef)}")
             Log.d(TAG, "  Выигрыш: ${"%.2f".format(potentialWin)} ₽")
             
-            // Проверяем режим
             val testMode = prefs.getBoolean("test_mode", true)
             
             if (testMode) {
-                // ==================== ТЕСТОВЫЙ РЕЖИМ ====================
                 Log.d(TAG, "🧪 ТЕСТОВЫЙ РЕЖИМ: Ставка симулируется")
                 
-                // Симулируем успешную ставку
                 handleSuccessfulBet(
-                    expressDbId = expressDbId,
                     expId = expId,
                     userId = userId,
                     betAmount = betAmount,
                     totalKef = totalKef,
                     potentialWin = potentialWin,
                     matchesInfo = matchesInfo,
-                    newBalance = null  // В тестовом режиме баланс не меняется
+                    newBalance = null
                 )
                 return true
                 
             } else {
-                // ==================== РЕАЛЬНЫЙ РЕЖИМ ====================
                 Log.d(TAG, "💰 РЕАЛЬНЫЙ РЕЖИМ: Размещаем ставку на сервере")
                 
                 val cookieManager = CookieManager.getInstance()
@@ -687,7 +557,6 @@ private fun saveExpressToDb(
                             val newBalance = couponResult?.optDouble("clientSaldo")
                             
                             handleSuccessfulBet(
-                                expressDbId = expressDbId,
                                 expId = expId,
                                 userId = userId,
                                 betAmount = betAmount,
@@ -711,7 +580,6 @@ private fun saveExpressToDb(
                     }
                 )
                 
-                // Возвращаем true т.к. запрос отправлен (результат придёт асинхронно)
                 return true
             }
             
@@ -721,9 +589,7 @@ private fun saveExpressToDb(
         }
     }
     
-    // Вспомогательный метод для обработки успешной ставки
     private fun handleSuccessfulBet(
-        expressDbId: Long,
         expId: Int,
         userId: Long,
         betAmount: Int,
@@ -732,13 +598,8 @@ private fun saveExpressToDb(
         matchesInfo: String,
         newBalance: Double?
     ) {
-        val db = dbHelper.writableDatabase
-        
-        val values = ContentValues().apply {
-            put("is_bet_placed", 1)
-            put("updated_at", System.currentTimeMillis() / 1000)
-        }
-        db.update("express_bets", values, "id = ?", arrayOf(expressDbId.toString()))
+        // Обновляем флаг размещения
+        dbHelper.updateBetPlaced(expId, true)
         
         val testMode = prefs.getBoolean("test_mode", true)
         val modeLabel = if (testMode) "[ТЕСТ]" else ""
@@ -768,391 +629,368 @@ private fun saveExpressToDb(
         }
     }
     
-// ==================== МЕТОДЫ ОБНОВЛЕНИЯ СЧЕТА ====================
-
-private fun updateActiveMatchesScores() {
-    try {
-        val db = dbHelper.readableDatabase
-        val cursor = db.query("express_bets", arrayOf("id", "id_exp"),
-            "sts_all IN (0, 1, 2)", null, null, null, null)
-        
-        val activeExpresses = mutableListOf<Pair<Long, Int>>()
-        while (cursor.moveToNext()) {
-            activeExpresses.add(Pair(cursor.getLong(0), cursor.getInt(1)))
-        }
-        cursor.close()
-        
-        Log.d(TAG, "📊 updateActiveMatchesScores: активных экспрессов: ${activeExpresses.size}")
-        
-        if (activeExpresses.isEmpty()) {
-            Log.d(TAG, "📊 Нет активных экспрессов для обновления")
-            return
-        }
-        
-        activeExpresses.forEach { (expressDbId, expId) ->
-            val eventsCursor = db.query("express_events",
-                arrayOf("id", "m_id", "bet_type", "status", "home_score", "away_score", "match_time"),
-                "express_id = ? AND is_finalized = 0", 
-                arrayOf(expressDbId.toString()), null, null, null)
+    // ==================== МЕТОДЫ ОБНОВЛЕНИЯ СЧЕТА ====================
+    
+    private fun updateActiveMatchesScores() {
+        try {
+            val db = dbHelper.readableDatabase
+            
+            // Получаем все активные экспрессы
+            val cursor = db.query("express_bets", arrayOf("id", "id_exp"),
+                "sts_all IN (0, 1, 2)", null, null, null, null)
+            
+            val activeExpresses = mutableListOf<Pair<Long, Int>>()
+            while (cursor.moveToNext()) {
+                activeExpresses.add(Pair(cursor.getLong(0), cursor.getInt(1)))
+            }
+            cursor.close()
+            
+            Log.d(TAG, "📊 updateActiveMatchesScores: активных экспрессов: ${activeExpresses.size}")
+            
+            if (activeExpresses.isEmpty()) {
+                Log.d(TAG, "📊 Нет активных экспрессов для обновления")
+                return
+            }
+            
+            // Собираем все m_id из активных экспрессов
+            val allExpIds = activeExpresses.map { it.second }
+            val placeholders = allExpIds.joinToString(",") { "?" }
+            
+            val eventsCursor = db.rawQuery(
+                "SELECT id, id_exp, m_id, bet_type, status, home_score, away_score, match_time " +
+                "FROM express_events WHERE is_finalized = 0 AND id_exp IN ($placeholders)",
+                allExpIds.map { it.toString() }.toTypedArray()
+            )
             
             val events = mutableListOf<EventInfo>()
             while (eventsCursor.moveToNext()) {
                 events.add(EventInfo(
                     id = eventsCursor.getLong(0),
-                    mId = eventsCursor.getInt(1),
-                    betType = eventsCursor.getInt(2),
-                    status = eventsCursor.getInt(3),
-                    homeScore = eventsCursor.getInt(4),
-                    awayScore = eventsCursor.getInt(5),
-                    matchTime = eventsCursor.getInt(6)
+                    idExp = eventsCursor.getInt(1),
+                    mId = eventsCursor.getInt(2),
+                    betType = eventsCursor.getInt(3),
+                    status = eventsCursor.getInt(4),
+                    homeScore = eventsCursor.getInt(5),
+                    awayScore = eventsCursor.getInt(6),
+                    matchTime = eventsCursor.getInt(7)
                 ))
             }
             eventsCursor.close()
             
-            Log.d(TAG, "📊 Экспресс #$expId: ${events.size} незавершенных матчей")
+            Log.d(TAG, "📊 Всего незавершенных матчей: ${events.size}")
             
-            if (events.isEmpty()) {
-                // Все матчи завершены, проверяем статус экспресса
-                Log.d(TAG, "📊 Все матчи экспресса #$expId завершены, проверяем статус")
-                checkExpressStatus(expressDbId, expId)
-            } else {
-                events.forEach { event ->
-                    Log.d(TAG, "🔄 Обновляем счет матча #${event.mId} (тип=${event.betType})")
-                    updateMatchScore(event, expressDbId, expId)
-                }
+            // Обновляем каждый матч
+            events.forEach { event ->
+                Log.d(TAG, "🔄 Обновляем счет матча #${event.mId} (тип=${event.betType})")
+                updateMatchScore(event)
             }
+            
+            // Проверяем статусы экспрессов
+            activeExpresses.forEach { (_, idExp) ->
+                checkExpressStatus(idExp)
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка обновления счетов: ${e.message}", e)
         }
-    } catch (e: Exception) {
-        Log.e(TAG, "Ошибка обновления счетов: ${e.message}", e)
     }
-}
-
-private fun updateMatchScore(event: EventInfo, expressId: Long, expId: Int) {
-    Log.d(TAG, "🔍 Запрашиваем счет матча #${event.mId}...")
     
-    apiClient.getMatchScore(
-        matchId = event.mId,
-        onSuccess = { matchFactors: ApiClient.MatchFactors? ->
-            if (matchFactors != null) {
-                val sh = matchFactors.score1
-                val sa = matchFactors.score2
-                val matchTime = matchFactors.matchTime
-                
-                Log.d(TAG, "📊 Матч #${event.mId}: счет $sh:$sa, время ${matchTime}'")
-                
-                val db = dbHelper.writableDatabase
-                
-                // Обновляем счет и время
-                val updateValues = ContentValues().apply {
-                    put("home_score", sh)
-                    put("away_score", sa)
-                    put("match_time", matchTime)
-                    put("updated_at", System.currentTimeMillis() / 1000)
-                }
-                db.update("express_events", updateValues, "id = ?", arrayOf(event.id.toString()))
-                
-                // Обновляем локальные данные
-                event.homeScore = sh
-                event.awayScore = sa
-                event.matchTime = matchTime
-                
-                // Проверяем статус матча
-                val newStatus = checkMatchStatus(event.betType, sh, sa)
-                Log.d(TAG, "📊 Матч #${event.mId}: старый статус=${event.status}, новый статус=$newStatus")
-                
-                if (newStatus != event.status) {
-                    val statusValues = ContentValues().apply {
-                        put("status", newStatus)
-                        put("updated_at", System.currentTimeMillis() / 1000)
+    private fun updateMatchScore(event: EventInfo) {
+        Log.d(TAG, "🔍 Запрашиваем счет матча #${event.mId}...")
+        
+        apiClient.getMatchScore(
+            matchId = event.mId,
+            onSuccess = { matchFactors: ApiClient.MatchFactors? ->
+                if (matchFactors != null) {
+                    val sh = matchFactors.score1
+                    val sa = matchFactors.score2
+                    val matchTime = matchFactors.matchTime
+                    
+                    Log.d(TAG, "📊 Матч #${event.mId}: счет $sh:$sa, время ${matchTime}'")
+                    
+                    // Обновляем в БД по m_id
+                    val newStatus = checkMatchStatus(event.betType, sh, sa)
+                    
+                    dbHelper.updateMatchStatus(
+                        mId = event.mId,
+                        homeScore = sh,
+                        awayScore = sa,
+                        matchTime = matchTime,
+                        status = newStatus
+                    )
+                    
+                    // Обновляем локальные данные
+                    event.homeScore = sh
+                    event.awayScore = sa
+                    event.matchTime = matchTime
+                    
+                    if (newStatus != event.status) {
+                        event.status = newStatus
+                        
+                        val statusText = when (newStatus) {
+                            2 -> "ЗАШЁЛ ✅"
+                            1 -> "НЕ ЗАШЁЛ ❌"
+                            else -> "АКТИВЕН 🔄"
+                        }
+                        
+                        val message = "📊 Матч #${event.mId}: $sh-$sa (${matchTime}') | $statusText"
+                        onLogUpdate?.invoke("[${getCurrentTime()}] $message")
+                        onScoresUpdate?.invoke(message)
+                        
+                        Log.d(TAG, message)
                     }
-                    db.update("express_events", statusValues, "id = ?", arrayOf(event.id.toString()))
-                    
-                    event.status = newStatus
-                    
-                    val statusText = when (newStatus) {
-                        2 -> "ЗАШЁЛ ✅"
-                        1 -> "НЕ ЗАШЁЛ ❌"
-                        else -> "АКТИВЕН 🔄"
-                    }
-                    
-                    val message = "📊 Матч #${event.mId}: $sh-$sa (${matchTime}') | $statusText"
-                    onLogUpdate?.invoke("[${getCurrentTime()}] $message")
-                    onScoresUpdate?.invoke(message)
-                    
-                    Log.d(TAG, message)
-                    
-                    // Проверяем статус всего экспресса
-                    checkExpressStatus(expressId, expId)
+                } else {
+                    Log.d(TAG, "⚠️ Матч #${event.mId}: нет данных (matchFactors = null)")
+                    checkMatchTimeout(event)
                 }
-            } else {
-                Log.d(TAG, "⚠️ Матч #${event.mId}: нет данных (matchFactors = null)")
-                // Проверяем таймаут
-                checkMatchTimeout(event, expressId, expId)
+            },
+            onError = { error: String ->
+                Log.e(TAG, "❌ Ошибка получения счета матча #${event.mId}: $error")
+                checkMatchTimeout(event)
             }
-        },
-        onError = { error: String ->
-            Log.e(TAG, "❌ Ошибка получения счета матча #${event.mId}: $error")
-            // Проверяем таймаут при ошибке
-            checkMatchTimeout(event, expressId, expId)
-        }
-    )
-}
-
-private fun checkMatchTimeout(event: EventInfo, expressId: Long, expId: Int) {
-    val db = dbHelper.writableDatabase
-    val currentTime = System.currentTimeMillis() / 1000
-    
-    val cursor = db.query("express_events",
-        arrayOf("match_time", "created_at", "home_score", "away_score"),
-        "id = ?", arrayOf(event.id.toString()), null, null, null)
-    
-    var matchTime = event.matchTime
-    var createdAt = 0L
-    var homeScore = event.homeScore
-    var awayScore = event.awayScore
-    
-    if (cursor.moveToFirst()) {
-        matchTime = cursor.getInt(0)
-        createdAt = cursor.getLong(1)
-        homeScore = cursor.getInt(2)
-        awayScore = cursor.getInt(3)
+        )
     }
-    cursor.close()
     
-    val matchAge = currentTime - createdAt
-    Log.d(TAG, "⏰ Матч #${event.mId}: возраст=${matchAge}сек, время=${matchTime}', счет=$homeScore:$awayScore")
-    
-    // Если матчу больше 90 минут ИЛИ больше 2 часов
-    if ((matchAge > 5400 && matchTime >= 90) || matchAge > 7200) {
-        val status = checkMatchStatus(event.betType, homeScore, awayScore)
+    private fun checkMatchTimeout(event: EventInfo) {
+        val db = dbHelper.readableDatabase
+        val currentTime = System.currentTimeMillis() / 1000
         
-        val updateValues = ContentValues().apply {
-            put("status", status)
-            put("is_finalized", 1)
-            put("updated_at", currentTime)
-        }
-        db.update("express_events", updateValues, "id = ?", arrayOf(event.id.toString()))
+        // Получаем время создания матча
+        val cursor = db.query("express_events",
+            arrayOf("created_at"),
+            "m_id = ?", arrayOf(event.mId.toString()), null, null, null)
         
-        event.status = status
-        
-        val statusText = when (status) {
-            2 -> "ЗАШЁЛ ✅"
-            1 -> "НЕ ЗАШЁЛ ❌"
-            else -> "ЗАВЕРШЕН"
-        }
-        
-        val message = "⏰ Матч #${event.mId} завершен по таймауту (${matchTime}'): $homeScore-$awayScore | $statusText"
-        onLogUpdate?.invoke("[${getCurrentTime()}] $message")
-        onScoresUpdate?.invoke(message)
-        
-        Log.d(TAG, message)
-        
-        // Проверяем статус экспресса
-        checkExpressStatus(expressId, expId)
-    }
-}
-
-private fun checkMatchStatus(betType: Int, sh: Int, sa: Int): Int = when (betType) {
-    924 -> if (sh > sa) 2 else if (sh == sa) 2 else 1  // 1X: победа1 или ничья
-    927 -> if (sh + 1 >= sa) 2 else 1  // Ф1(+1.5): с учетом форы +1.5
-    928 -> if (sa + 1 >= sh) 2 else 1  // Ф2(+1.5): с учетом форы +1.5
-    else -> 1
-}
-
-private fun checkExpressStatus(expressId: Long, expId: Int) {
-    try {
-        val db = dbHelper.writableDatabase
-        
-        // Получаем все матчи экспресса
-        val cursor = db.query("express_events", 
-            arrayOf("status", "is_finalized", "home_score", "away_score", "m_id", "bet_type"),
-            "express_id = ?", arrayOf(expressId.toString()), null, null, null)
-        
-        var anyLost = false
-        var allWin = true
-        var hasUnfinished = false
-        var totalEvents = 0
-        val matchDetails = mutableListOf<String>()
-        
-        while (cursor.moveToNext()) {
-            totalEvents++
-            val isFinalized = cursor.getInt(1) == 1
-            val status = cursor.getInt(0)
-            val sh = cursor.getInt(2)
-            val sa = cursor.getInt(3)
-            val mId = cursor.getInt(4)
-            val betType = cursor.getInt(5)
-            
-            if (!isFinalized) {
-                hasUnfinished = true
-            }
-            
-            when (status) {
-                1 -> {
-                    anyLost = true
-                    allWin = false
-                    matchDetails.add("❌ #$mId: $sh-$sa (${typeName(betType)})")
-                }
-                2 -> {
-                    matchDetails.add("✅ #$mId: $sh-$sa (${typeName(betType)})")
-                }
-                else -> {
-                    allWin = false
-                    matchDetails.add("🔄 #$mId: $sh-$sa (${typeName(betType)})")
-                }
-            }
+        var createdAt = currentTime
+        if (cursor.moveToFirst()) {
+            createdAt = cursor.getLong(0)
         }
         cursor.close()
         
-        Log.d(TAG, "🎯 Экспресс #$expId: totalEvents=$totalEvents, hasUnfinished=$hasUnfinished, anyLost=$anyLost, allWin=$allWin")
-        matchDetails.forEach { Log.d(TAG, "  $it") }
+        val matchAge = currentTime - createdAt
+        Log.d(TAG, "⏰ Матч #${event.mId}: возраст=${matchAge}сек, время=${event.matchTime}', счет=${event.homeScore}:${event.awayScore}")
         
-        // Определяем статус
-        val expressStatus = when {
-            hasUnfinished -> 0  // Ещё активен
-            anyLost -> 1        // Проиграл
-            allWin -> 2         // Выиграл
-            else -> 0           // Активен
-        }
-        
-        // Получаем данные экспресса
-        val expressCursor = db.query("express_bets", 
-            arrayOf("sumbet", "kfall", "sts_all", "balans"),
-            "id = ?", arrayOf(expressId.toString()), null, null, null)
-        
-        var betAmount = 0.0
-        var totalKef = 0.0
-        var oldStatus = 0
-        var currentBalance = 0.0
-        
-        if (expressCursor.moveToFirst()) {
-            betAmount = expressCursor.getDouble(0)
-            totalKef = expressCursor.getDouble(1)
-            oldStatus = expressCursor.getInt(2)
-            currentBalance = expressCursor.getDouble(3)
-        }
-        expressCursor.close()
-        
-        val profitLoss = when (expressStatus) {
-            2 -> betAmount * totalKef - betAmount
-            1 -> -betAmount
-            else -> 0.0
-        }
-        
-        val newBalance = if (expressStatus != oldStatus && expressStatus != 0) {
-            currentBalance + profitLoss + betAmount  // Возвращаем ставку + профит
-        } else {
-            currentBalance
-        }
-        
-        Log.d(TAG, "🎯 Экспресс #$expId: oldStatus=$oldStatus, newStatus=$expressStatus, profit=$profitLoss, balance=$newBalance")
-        
-        if (expressStatus != oldStatus) {
-            val updateValues = ContentValues().apply {
-                put("sts_all", expressStatus)
-                put("profloss", profitLoss)
-                put("balans", newBalance)
-                put("updated_at", System.currentTimeMillis() / 1000)
-            }
-            db.update("express_bets", updateValues, "id = ?", arrayOf(expressId.toString()))
+        // Если матчу больше 90 минут ИЛИ больше 2 часов
+        if ((matchAge > 5400 && event.matchTime >= 90) || matchAge > 7200) {
+            val status = checkMatchStatus(event.betType, event.homeScore, event.awayScore)
             
-            val statusText = when (expressStatus) {
-                2 -> "ВЫИГРАЛ 🏆"
-                1 -> "ПРОИГРАЛ ❌"
-                else -> "АКТИВЕН 🔄"
+            dbHelper.updateMatchStatus(
+                mId = event.mId,
+                homeScore = event.homeScore,
+                awayScore = event.awayScore,
+                matchTime = event.matchTime,
+                status = status,
+                isFinalized = 1
+            )
+            
+            event.status = status
+            
+            val statusText = when (status) {
+                2 -> "ЗАШЁЛ ✅"
+                1 -> "НЕ ЗАШЁЛ ❌"
+                else -> "ЗАВЕРШЕН"
             }
             
-            val message = buildString {
-                append("🎯 Экспресс #$expId ")
-                append("($totalEvents матчей) ")
-                append("$statusText")
-                if (expressStatus != 0) {
-                    append(" | ${if (expressStatus == 2) "+" else ""}${"%.2f".format(profitLoss)} ₽")
-                    append(" | Баланс: ${"%.2f".format(newBalance)} ₽")
-                }
-                append("\n")
-                matchDetails.forEach { append("$it ") }
-            }
-            
+            val message = "⏰ Матч #${event.mId} завершен по таймауту (${event.matchTime}'): ${event.homeScore}-${event.awayScore} | $statusText"
             onLogUpdate?.invoke("[${getCurrentTime()}] $message")
             onScoresUpdate?.invoke(message)
             
             Log.d(TAG, message)
+        }
+    }
+    
+    private fun checkMatchStatus(betType: Int, sh: Int, sa: Int): Int = when (betType) {
+        924 -> if (sh > sa) 2 else if (sh == sa) 2 else 1  // 1X: победа1 или ничья
+        927 -> if (sh + 1 >= sa) 2 else 1  // Ф1(+1.5): с учетом форы +1.5
+        928 -> if (sa + 1 >= sh) 2 else 1  // Ф2(+1.5): с учетом форы +1.5
+        else -> 1
+    }
+    
+    private fun checkExpressStatus(idExp: Int) {
+        try {
+            val db = dbHelper.writableDatabase
             
-            // Обновляем баланс если изменился
-            if (expressStatus != 0) {
+            // Получаем все матчи экспресса по id_exp
+            val cursor = db.query("express_events", 
+                arrayOf("status", "is_finalized", "home_score", "away_score", "m_id", "bet_type"),
+                "id_exp = ?", arrayOf(idExp.toString()), null, null, null)
+            
+            var anyLost = false
+            var allWin = true
+            var hasUnfinished = false
+            var totalEvents = 0
+            val matchDetails = mutableListOf<String>()
+            
+            while (cursor.moveToNext()) {
+                totalEvents++
+                val isFinalized = cursor.getInt(1) == 1
+                val status = cursor.getInt(0)
+                val sh = cursor.getInt(2)
+                val sa = cursor.getInt(3)
+                val mId = cursor.getInt(4)
+                val betType = cursor.getInt(5)
+                
+                if (!isFinalized) {
+                    hasUnfinished = true
+                }
+                
+                when (status) {
+                    1 -> {
+                        anyLost = true
+                        allWin = false
+                        matchDetails.add("❌ #$mId: $sh-$sa (${typeName(betType)})")
+                    }
+                    2 -> {
+                        matchDetails.add("✅ #$mId: $sh-$sa (${typeName(betType)})")
+                    }
+                    else -> {
+                        allWin = false
+                        matchDetails.add("🔄 #$mId: $sh-$sa (${typeName(betType)})")
+                    }
+                }
+            }
+            cursor.close()
+            
+            Log.d(TAG, "🎯 Экспресс #$idExp: totalEvents=$totalEvents, hasUnfinished=$hasUnfinished, anyLost=$anyLost, allWin=$allWin")
+            
+            // Определяем статус
+            val expressStatus = when {
+                hasUnfinished -> return  // Ещё активен, не обновляем
+                anyLost -> 1             // Проиграл
+                allWin -> 2              // Выиграл
+                else -> return           // Активен
+            }
+            
+            // Получаем данные экспресса
+            val expressCursor = db.query("express_bets", 
+                arrayOf("sumbet", "kfall", "sts_all", "balans"),
+                "id_exp = ?", arrayOf(idExp.toString()), null, null, null)
+            
+            var betAmount = 0.0
+            var totalKef = 0.0
+            var oldStatus = 0
+            var currentBalance = 0.0
+            
+            if (expressCursor.moveToFirst()) {
+                betAmount = expressCursor.getDouble(0)
+                totalKef = expressCursor.getDouble(1)
+                oldStatus = expressCursor.getInt(2)
+                currentBalance = expressCursor.getDouble(3)
+            }
+            expressCursor.close()
+            
+            val profitLoss = when (expressStatus) {
+                2 -> betAmount * totalKef - betAmount
+                1 -> -betAmount
+                else -> 0.0
+            }
+            
+            val newBalance = currentBalance + profitLoss + betAmount
+            
+            Log.d(TAG, "🎯 Экспресс #$idExp: oldStatus=$oldStatus, newStatus=$expressStatus, profit=$profitLoss, balance=$newBalance")
+            
+            if (expressStatus != oldStatus) {
+                // Обновляем статус экспресса
+                dbHelper.updateExpressStatus(idExp, expressStatus, profitLoss, newBalance)
+                
+                val statusText = when (expressStatus) {
+                    2 -> "ВЫИГРАЛ 🏆"
+                    1 -> "ПРОИГРАЛ ❌"
+                    else -> "АКТИВЕН 🔄"
+                }
+                
+                val message = buildString {
+                    append("🎯 Экспресс #$idExp ")
+                    append("($totalEvents матчей) ")
+                    append("$statusText")
+                    if (expressStatus != 0) {
+                        append(" | ${if (expressStatus == 2) "+" else ""}${"%.2f".format(profitLoss)} ₽")
+                        append(" | Баланс: ${"%.2f".format(newBalance)} ₽")
+                    }
+                    append("\n")
+                    matchDetails.forEach { append("$it ") }
+                }
+                
+                onLogUpdate?.invoke("[${getCurrentTime()}] $message")
+                onScoresUpdate?.invoke(message)
+                
+                Log.d(TAG, message)
+                
+                // Обновляем баланс
                 balance = newBalance
                 lastBalance = newBalance
                 onBalanceUpdate?.invoke(newBalance)
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка проверки статуса экспресса #$idExp: ${e.message}", e)
         }
-    } catch (e: Exception) {
-        Log.e(TAG, "Ошибка проверки статуса экспресса #$expId: ${e.message}", e)
     }
-}
-
-private fun checkAndCreateReplacementExpress() {
-    val db = dbHelper.writableDatabase
-    val currentTime = System.currentTimeMillis() / 1000
-    val twelveHoursAgo = currentTime - (12 * 3600)
     
-    val cursor = db.rawQuery(
-        "SELECT id, id_exp, sumbet FROM express_bets WHERE sts_all = 1 AND ct < ? AND id_exp_replace = 0 ORDER BY ct ASC LIMIT 1",
-        arrayOf(twelveHoursAgo.toString())
-    )
+    // ==================== ЗАМЕНА ЭКСПРЕССОВ ====================
     
-    if (cursor.moveToFirst()) {
-        val oldExpressId = cursor.getLong(0)
-        val oldExpId = cursor.getInt(1)
-        val currentBetAmount = cursor.getDouble(2)
-        cursor.close()
+    private fun checkAndCreateReplacementExpress() {
+        val db = dbHelper.writableDatabase
+        val currentTime = System.currentTimeMillis() / 1000
+        val twelveHoursAgo = currentTime - (12 * 3600)
         
-        val multiply = prefs.getInt("multiply", 2)
-        val initialBet = prefs.getString("bet_amount", "30")?.toDoubleOrNull() ?: 30.0
-        val maxBetMultiplier = prefs.getInt("max_bet_multiplier", 3)
-        val maxAllowedBet = initialBet * maxBetMultiplier
-        var newBetAmount = currentBetAmount * multiply
+        val cursor = db.rawQuery(
+            "SELECT id, id_exp, sumbet FROM express_bets WHERE sts_all = 1 AND ct < ? AND id_exp_replace = 0 ORDER BY ct ASC LIMIT 1",
+            arrayOf(twelveHoursAgo.toString())
+        )
         
-        if (newBetAmount > maxAllowedBet) {
-            newBetAmount = initialBet + 1.0
-            onLogUpdate?.invoke("[${getCurrentTime()}] ⚠️ Ставка превысила лимит (${maxAllowedBet.toInt()} ₽), сброс до начальной + 1: ${newBetAmount.toInt()} ₽")
+        if (cursor.moveToFirst()) {
+            val oldExpressId = cursor.getLong(0)
+            val oldExpId = cursor.getInt(1)
+            val currentBetAmount = cursor.getDouble(2)
+            cursor.close()
             
-            authData?.let { data ->
-                val user = dbHelper.getUser(data.fsid, data.deviceId)
-                user?.let { dbHelper.addLog(it.id, "bet_reset", "Ставка сброшена до ${newBetAmount.toInt()} ₽") }
-            }
-        }
-        
-        val eventsCursor = db.query("express_events", arrayOf("m_id", "bet_type"),
-            "express_id = ?", arrayOf(oldExpressId.toString()), null, null, null)
-        val bets = mutableListOf<Pair<Int, Int>>()
-        while (eventsCursor.moveToNext()) bets.add(Pair(eventsCursor.getInt(0), eventsCursor.getInt(1)))
-        eventsCursor.close()
-        
-        if (bets.isNotEmpty()) {
-            val newExpId = (System.currentTimeMillis() / 1000).toInt()
-            onLogUpdate?.invoke("[${getCurrentTime()}] 🔄 Замена экспресса #$oldExpId → #$newExpId (ставка: ${currentBetAmount.toInt()} → ${newBetAmount.toInt()} ₽)")
+            val multiply = prefs.getInt("multiply", 2)
+            val initialBet = prefs.getString("bet_amount", "30")?.toDoubleOrNull() ?: 30.0
+            val maxBetMultiplier = prefs.getInt("max_bet_multiplier", 3)
+            val maxAllowedBet = initialBet * maxBetMultiplier
+            var newBetAmount = currentBetAmount * multiply
             
-            prefs.edit().putString("bet_amount", newBetAmount.toInt().toString()).apply()
-            
-            db.update("express_bets", ContentValues().apply {
-                put("sts_all", -1)
-                put("id_exp_replace", newExpId)
-                put("updated_at", currentTime)
-            }, "id = ?", arrayOf(oldExpressId.toString()))
-            
-            authData?.let { data ->
-                val user = dbHelper.getUser(data.fsid, data.deviceId)
-                user?.let { 
-                    dbHelper.addLog(it.id, "express_replaced", 
-                        "Экспресс #$oldExpId заменен на #$newExpId, ставка: ${newBetAmount.toInt()} ₽") 
+            if (newBetAmount > maxAllowedBet) {
+                newBetAmount = initialBet + 1.0
+                onLogUpdate?.invoke("[${getCurrentTime()}] ⚠️ Ставка превысила лимит (${maxAllowedBet.toInt()} ₽), сброс до начальной + 1: ${newBetAmount.toInt()} ₽")
+                
+                authData?.let { data ->
+                    val user = dbHelper.getUser(data.fsid, data.deviceId)
+                    user?.let { dbHelper.addLog(it.id, "bet_reset", "Ставка сброшена до ${newBetAmount.toInt()} ₽") }
                 }
             }
+            
+            val eventsCursor = db.query("express_events", arrayOf("m_id", "bet_type"),
+                "id_exp = ?", arrayOf(oldExpId.toString()), null, null, null)
+            val bets = mutableListOf<Pair<Int, Int>>()
+            while (eventsCursor.moveToNext()) bets.add(Pair(eventsCursor.getInt(0), eventsCursor.getInt(1)))
+            eventsCursor.close()
+            
+            if (bets.isNotEmpty()) {
+                val newExpId = (System.currentTimeMillis() / 1000).toInt()
+                onLogUpdate?.invoke("[${getCurrentTime()}] 🔄 Замена экспресса #$oldExpId → #$newExpId (ставка: ${currentBetAmount.toInt()} → ${newBetAmount.toInt()} ₽)")
+                
+                prefs.edit().putString("bet_amount", newBetAmount.toInt().toString()).apply()
+                
+                // Помечаем старый как замененный
+                val updateValues = ContentValues().apply {
+                    put("sts_all", -1)
+                    put("id_exp_replace", newExpId)
+                    put("updated_at", currentTime)
+                }
+                db.update("express_bets", updateValues, "id = ?", arrayOf(oldExpressId.toString()))
+                
+                authData?.let { data ->
+                    val user = dbHelper.getUser(data.fsid, data.deviceId)
+                    user?.let { 
+                        dbHelper.addLog(it.id, "express_replaced", 
+                            "Экспресс #$oldExpId заменен на #$newExpId, ставка: ${newBetAmount.toInt()} ₽") 
+                    }
+                }
+            }
+        } else {
+            cursor.close()
         }
-    } else {
-        cursor.close()
     }
-}
     
     // ==================== СЛУЖЕБНЫЕ МЕТОДЫ ====================
     
@@ -1237,15 +1075,22 @@ private fun checkAndCreateReplacementExpress() {
     override fun onBind(intent: Intent?): IBinder? = null
     
     // Data classes
-    data class EventInfo(val id: Long, val mId: Int, val betType: Int, var status: Int,
-                         var homeScore: Int, var awayScore: Int, var matchTime: Int = 0)
+    data class EventInfo(
+        val id: Long, 
+        val idExp: Int,
+        val mId: Int, 
+        val betType: Int, 
+        var status: Int,
+        var homeScore: Int, 
+        var awayScore: Int, 
+        var matchTime: Int = 0
+    )
     
-    data class MatchFactorsData(val mId: Int, val type: Int, val kef: Double, val handicap: Double,
-                                 val sh: Int, val sa: Int, val matchTime: Int = 0,
-                                 val leagueName: String = "", val homeTeam: String = "", val awayTeam: String = "",
-                                 val idLiga: Int = 0, val idHome: Int = 0, val idAway: Int = 0,
-                                 val url: String = "", val uzh: String = "0.0", val tbType: Int = 0)
-    
-    data class ActiveMatch(val id: Long, val expressId: Long, val mId: Int, val createdAt: Long,
-                           val homeScore: Int, val awayScore: Int, val betType: Int, val status: Int, val matchTime: Int)
+    data class MatchFactorsData(
+        val mId: Int, val type: Int, val kef: Double, val handicap: Double,
+        val sh: Int, val sa: Int, val matchTime: Int = 0,
+        val leagueName: String = "", val homeTeam: String = "", val awayTeam: String = "",
+        val idLiga: Int = 0, val idHome: Int = 0, val idAway: Int = 0,
+        val url: String = "", val uzh: String = "0.0", val tbType: Int = 0
+    )
 }
