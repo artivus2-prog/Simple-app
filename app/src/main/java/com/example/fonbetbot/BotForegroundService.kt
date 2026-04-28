@@ -17,7 +17,7 @@ import android.util.Log
 import android.webkit.CookieManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
-import com.example.fonbetbot.DatabaseHelper.ExpressEventData
+//import com.example.fonbetbot.DatabaseHelper.ExpressEventData
 import kotlinx.coroutines.*
 
 class BotForegroundService : Service() {
@@ -430,12 +430,30 @@ class BotForegroundService : Service() {
         Log.d(TAG, "  Выигрыш: ${"%.2f".format(potentialWin)} ₽")
         Log.d(TAG, "  Стратегия: $strategyStr")
         Log.d(TAG, "  Баланс: $balance")
-        
-        // Подготавливаем данные матчей
-     val matchesData: List<ExpressEventData> = betDataList.map { betData ->
-    ExpressEventData(...)
+  
+// Подготавливаем данные матчей
+val matchesData: List<DatabaseHelper.ExpressEventData> = betDataList.map { betData ->
+    DatabaseHelper.ExpressEventData(
+        mId = betData.mId,
+        idLiga = if (betData.idLiga > 0) betData.idLiga else null,
+        leagueName = betData.ligaName,
+        idHome = if (betData.comand1Id > 0) betData.comand1Id else null,
+        homeTeam = betData.home,
+        idAway = if (betData.comand2Id > 0) betData.comand2Id else null,
+        awayTeam = betData.away,
+        startOdds = betData.startKf,
+        currentOdds = betData.lastKf,
+        homeScore = betData.sh,
+        awayScore = betData.sa,
+        betType = betData.type,
+        status = if (betData.sh > 0 || betData.sa > 0) {
+            checkMatchStatus(betData.type, betData.sh, betData.sa)
+        } else 0,
+        matchUrl = betData.url,
+        uzh = if (betData.uzh > 0) betData.uzh.toString() else "0.0",
+        totalType = if (betData.tbType > 0) betData.tbType else null
+    )
 }
-        
         val expressRowId = dbHelper.saveExpressWithMatches(
             expId = expId,
             kfall = totalKef,
