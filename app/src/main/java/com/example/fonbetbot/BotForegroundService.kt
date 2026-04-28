@@ -17,7 +17,7 @@ import android.util.Log
 import android.webkit.CookieManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
-//import com.example.fonbetbot.DatabaseHelper.ExpressEventData
+import com.example.fonbetbot.DatabaseHelper.ExpressEventData
 import kotlinx.coroutines.*
 
 class BotForegroundService : Service() {
@@ -432,8 +432,9 @@ class BotForegroundService : Service() {
         Log.d(TAG, "  Баланс: $balance")
   
 // Подготавливаем данные матчей
-val matchesData: List<DatabaseHelper.ExpressEventData> = betDataList.map { betData ->
-    DatabaseHelper.ExpressEventData(
+// Подготавливаем данные матчей
+val matchesData: List<ExpressEventData> = betDataList.map { betData ->
+    ExpressEventData(
         mId = betData.mId,
         idLiga = if (betData.idLiga > 0) betData.idLiga else null,
         leagueName = betData.ligaName,
@@ -454,6 +455,7 @@ val matchesData: List<DatabaseHelper.ExpressEventData> = betDataList.map { betDa
         totalType = if (betData.tbType > 0) betData.tbType else null
     )
 }
+
         val expressRowId = dbHelper.saveExpressWithMatches(
             expId = expId,
             kfall = totalKef,
