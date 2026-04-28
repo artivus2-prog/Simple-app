@@ -334,41 +334,40 @@ fun MainBotScreen(
     }
     
     DisposableEffect(Unit) {
-        val scope = rememberCoroutineScope()
-        
-        BotForegroundService.onBalanceUpdate = { newBalance ->
-            scope.launch(Dispatchers.Main) {
-                balance = newBalance
-            }
-        }
-        BotForegroundService.onLogUpdate = { log ->
-            scope.launch(Dispatchers.Main) {
-                logs.add(0, log)
-                if (logs.size > 200) {
-                    repeat(logs.size - 200) { logs.removeLast() }
-                }
-            }
-        }
-        BotForegroundService.onBetsUpdate = { bets ->
-            scope.launch(Dispatchers.Main) {
-                loadActiveExpresses()
-            }
-        }
-        BotForegroundService.onScoresUpdate = { message ->
-            scope.launch(Dispatchers.Main) {
-                logs.add(0, message)
-                loadActiveExpresses()
-            }
-        }
-        BotForegroundService.authData = authData
-        
-        onDispose {
-            BotForegroundService.onBalanceUpdate = null
-            BotForegroundService.onLogUpdate = null
-            BotForegroundService.onBetsUpdate = null
-            BotForegroundService.onScoresUpdate = null
+    BotForegroundService.onBalanceUpdate = { newBalance ->
+        // Используем MainScope() напрямую
+        kotlinx.coroutines.MainScope().launch {
+            balance = newBalance
         }
     }
+    BotForegroundService.onLogUpdate = { log ->
+        kotlinx.coroutines.MainScope().launch {
+            logs.add(0, log)
+            if (logs.size > 200) {
+                repeat(logs.size - 200) { logs.removeLast() }
+            }
+        }
+    }
+    BotForegroundService.onBetsUpdate = { bets ->
+        kotlinx.coroutines.MainScope().launch {
+            loadActiveExpresses()
+        }
+    }
+    BotForegroundService.onScoresUpdate = { message ->
+        kotlinx.coroutines.MainScope().launch {
+            logs.add(0, message)
+            loadActiveExpresses()
+        }
+    }
+    BotForegroundService.authData = authData
+    
+    onDispose {
+        BotForegroundService.onBalanceUpdate = null
+        BotForegroundService.onLogUpdate = null
+        BotForegroundService.onBetsUpdate = null
+        BotForegroundService.onScoresUpdate = null
+    }
+}
     
     fun startBot() {
         if (authData == null) {
@@ -1068,7 +1067,7 @@ fun MatchInExpressRow(match: MatchInfo) {
         colors = CardDefaults.cardColors(
             containerColor = when {
                 match.isFinalized == 1 -> MaterialTheme.colorScheme.surfaceVariant
-                timeRemaining <= 300 && !match.isFinalized -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+                timeRemaining <= 300 && match.isFinalized == 0 -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
                 else -> MaterialTheme.colorScheme.surfaceVariant
             }
         )
@@ -1114,7 +1113,7 @@ fun MatchInExpressRow(match: MatchInfo) {
                                     else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     
-                    if (!match.isFinalized && timeRemaining > 0) {
+                    if (match.isFinalized == 0 && timeRemaining > 0) {
                         Text(
                             "⏰ ${timeRemaining / 60}мин",
                             fontSize = 11.sp,
@@ -1152,7 +1151,7 @@ fun MatchInExpressRow(match: MatchInfo) {
                          color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 
-                if (match.expectedEndTime > 0 && !match.isFinalized) {
+                if (match.expectedEndTime > 0 && match.isFinalized == 0) {
                     val endTime = SimpleDateFormat("HH:mm", Locale.getDefault())
                         .format(Date(match.expectedEndTime * 1000))
                     Text("До $endTime", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)

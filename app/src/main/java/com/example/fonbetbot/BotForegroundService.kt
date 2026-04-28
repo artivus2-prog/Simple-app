@@ -828,7 +828,7 @@ class BotForegroundService : Service() {
         
         Log.d(TAG, "⏰ Расчет времени: начало=${matchStartMinute}', текущее=${currentMatchTime}', эффективное=${effectiveMinute}', осталось=${remainingMinutes}мин, секунд=$seconds")
         
-        return maxOf(seconds, 300)
+        return maxOf(seconds, 300.00)
     }
     
     private fun determineSportType(betData: ApiClient.BetData): String {
