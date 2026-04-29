@@ -141,16 +141,6 @@ class ApiClient {
         Log.d(TAG, "📥 ===== END RESPONSE =====")
     }
     
-    // ИСПРАВЛЕНО: Добавлен метод для логирования критических ошибок
-    private fun logCriticalError(tag: String, message: String, throwable: Throwable? = null) {
-        Log.e(TAG, "❌❌❌ ===== КРИТИЧЕСКАЯ ОШИБКА =====")
-        Log.e(TAG, "❌❌❌ $tag: $message")
-        if (throwable != null) {
-            Log.e(TAG, "❌❌❌ StackTrace: ${throwable.stackTraceToString()}")
-        }
-        Log.e(TAG, "❌❌❌ ===== КОНЕЦ ОШИБКИ =====")
-    }
-    
     private fun buildCookieHeader(cookies: Map<String, String>, fsid: String): String {
         val allCookies = mutableMapOf<String, String>()
         allCookies.putAll(cookies)
@@ -624,6 +614,42 @@ class ApiClient {
             
             override fun onResponse(call: Call, response: Response) {
                 val bodyString = response.body?.string() ?: ""
+                
+                // ДЕТАЛЬНОЕ ЛОГИРОВАНИЕ ОТВЕТА betRequestId
+                Log.d(TAG, "📥 ===== betRequestId RESPONSE =====")
+                Log.d(TAG, "📥 HTTP Status: ${response.code} ${response.message}")
+                Log.d(TAG, "📥 Response Body (RAW):")
+                Log.d(TAG, bodyString)
+                
+                try {
+                    val json = JSONObject(bodyString)
+                    Log.d(TAG, "📥 Response Body (FORMATTED):")
+                    Log.d(TAG, json.toString(2))
+                    
+                    // Логируем все ключи ответа
+                    val keys = json.keys()
+                    val keysList = mutableListOf<String>()
+                    while (keys.hasNext()) {
+                        keysList.add(keys.next())
+                    }
+                    Log.d(TAG, "📥 Ключи ответа: $keysList")
+                    
+                    // Логируем значение requestId
+                    if (json.has("requestId")) {
+                        val requestIdRaw = json.get("requestId")
+                        Log.d(TAG, "📥 requestId значение: $requestIdRaw")
+                        Log.d(TAG, "📥 requestId тип: ${requestIdRaw::class.java.simpleName}")
+                    } else {
+                        Log.e(TAG, "❌ requestId отсутствует в ответе!")
+                    }
+                    
+                    Log.d(TAG, "📥 ===== END betRequestId RESPONSE =====")
+                    
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ Ошибка парсинга JSON ответа betRequestId: ${e.message}")
+                    Log.e(TAG, "❌ RAW body: $bodyString")
+                }
+                
                 logResponseDetails(response, bodyString)
                 
                 if (!response.isSuccessful) {
@@ -634,11 +660,34 @@ class ApiClient {
                 
                 try {
                     val json = JSONObject(bodyString)
-                    // ИСПРАВЛЕНО: Получаем requestId как Long и преобразуем в String
-                    val requestIdLong = json.getLong("requestId")
-                    val requestId = requestIdLong.toString()
-                    Log.d(TAG, "✅ requestId получен: $requestId (Long: $requestIdLong)")
+                    
+                    // Получаем requestId (может быть строкой или числом)
+                    val requestId = when {
+                        json.has("requestId") && !json.isNull("requestId") -> {
+                            val value = json.get("requestId")
+                            val result = when (value) {
+                                is String -> value
+                                is Long -> value.toString()
+                                is Int -> value.toString()
+                                is Double -> {
+                                    val longVal = value.toLong()
+                                    longVal.toString()
+                                }
+                                else -> value.toString()
+                            }
+                            Log.d(TAG, "✅ requestId преобразован: '$result' (исходный тип: ${value::class.java.simpleName})")
+                            result
+                        }
+                        else -> {
+                            Log.e(TAG, "❌ requestId не найден в ответе")
+                            onError("requestId not found")
+                            return
+                        }
+                    }
+                    
+                    Log.d(TAG, "✅ requestId получен: $requestId")
                     onSuccess(requestId)
+                    
                 } catch (e: Exception) {
                     Log.e(TAG, "❌ ШАГ 2/4: requestId не найден в ответе")
                     Log.e(TAG, "❌ Полный ответ: $bodyString")
@@ -650,7 +699,7 @@ class ApiClient {
 
     // Шаг 3: Разместить ставку
     fun placeBet(
-        requestId: Long, 
+        requestId: String,
         betSlipInfo: JSONObject,
         amount: Int,
         cookies: Map<String, String>,
@@ -663,16 +712,6 @@ class ApiClient {
         Log.d(TAG, "========================================")
         Log.d(TAG, "📤 ШАГ 3/4: ЗАПРОС placeBet")
         Log.d(TAG, "========================================")
-        
-        // ИСПРАВЛЕНО: Конвертируем requestId обратно в Long для отправки
-        val requestIdLong = requestId.toLongOrNull()
-        if (requestIdLong == null) {
-            logCriticalError("placeBet", "Невозможно преобразовать requestId '$requestId' в Long")
-            onError("Неверный формат requestId: $requestId")
-            return
-        }
-        
-        Log.d(TAG, "🔢 requestId: String=$requestId, Long=$requestIdLong")
         
         val betsArray = JSONArray()
         val betsFromSlip = betSlipInfo.getJSONArray("bets")
@@ -707,8 +746,15 @@ class ApiClient {
             put("bets", betsArray)
         }
         
+        // Конвертируем requestId из String в Long для JSON
+        val requestIdLong = requestId.toDoubleOrNull()?.toLong() 
+            ?: requestId.toLongOrNull() 
+            ?: 0L
+        
+        Log.d(TAG, "📤 requestId (оригинал): '$requestId'")
+        Log.d(TAG, "📤 requestId (конвертирован в Long): $requestIdLong")
+        
         val jsonBody = JSONObject().apply {
-            // ИСПРАВЛЕНО: Отправляем requestId как Long (Number), а не String
             put("requestId", requestIdLong)
             put("lang", "ru")
             put("clientId", clientId)
@@ -750,6 +796,57 @@ class ApiClient {
             
             override fun onResponse(call: Call, response: Response) {
                 val bodyString = response.body?.string() ?: ""
+                
+                // ДЕТАЛЬНОЕ ЛОГИРОВАНИЕ ОТВЕТА placeBet
+                Log.d(TAG, "📥 ===== placeBet RESPONSE =====")
+                Log.d(TAG, "📥 HTTP Status: ${response.code} ${response.message}")
+                Log.d(TAG, "📥 Response Body (RAW):")
+                Log.d(TAG, bodyString)
+                
+                try {
+                    val json = JSONObject(bodyString)
+                    Log.d(TAG, "📥 Response Body (FORMATTED):")
+                    Log.d(TAG, json.toString(2))
+                    
+                    // Логируем все ключи ответа
+                    val keys = json.keys()
+                    val keysList = mutableListOf<String>()
+                    while (keys.hasNext()) {
+                        keysList.add(keys.next())
+                    }
+                    Log.d(TAG, "📥 Ключи ответа: $keysList")
+                    
+                    // Логируем значения
+                    if (json.has("result")) {
+                        Log.d(TAG, "📥 result: ${json.optString("result")}")
+                    }
+                    if (json.has("resultCode")) {
+                        Log.d(TAG, "📥 resultCode (корень): ${json.optInt("resultCode")}")
+                    }
+                    if (json.has("errorCode")) {
+                        Log.d(TAG, "📥 errorCode: ${json.optInt("errorCode")}")
+                    }
+                    if (json.has("errorMessage")) {
+                        Log.d(TAG, "📥 errorMessage: ${json.optString("errorMessage")}")
+                    }
+                    if (json.has("errorValue")) {
+                        Log.d(TAG, "📥 errorValue: ${json.optString("errorValue")}")
+                    }
+                    if (json.has("coupon")) {
+                        val coupon = json.getJSONObject("coupon")
+                        Log.d(TAG, "📥 coupon присутствует")
+                        Log.d(TAG, "📥 coupon.resultCode: ${coupon.optInt("resultCode", -999)}")
+                    } else {
+                        Log.e(TAG, "❌ coupon отсутствует в ответе!")
+                    }
+                    
+                    Log.d(TAG, "📥 ===== END placeBet RESPONSE =====")
+                    
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ Ошибка парсинга JSON ответа placeBet: ${e.message}")
+                    Log.e(TAG, "❌ RAW body: $bodyString")
+                }
+                
                 logResponseDetails(response, bodyString)
                 
                 if (!response.isSuccessful) {
@@ -781,8 +878,6 @@ class ApiClient {
                                 Log.e(TAG, "  4. Неверный eventId или factorId")
                                 Log.e(TAG, "  5. Событие заблокировано для ставок")
                                 Log.e(TAG, "  6. Несовпадение score с реальным счетом")
-                                Log.e(TAG, "  7. flexBet должен быть 'any' (строчными)")
-                                Log.e(TAG, "  8. flexParam должен быть true (булево)")
                                 if (couponResult.has("error")) {
                                     Log.e(TAG, "  API error: ${couponResult.optString("error")}")
                                 }
@@ -799,6 +894,17 @@ class ApiClient {
                         }
                     } else {
                         Log.e(TAG, "❌ coupon объект отсутствует в ответе!")
+                        
+                        // Проверяем, есть ли ошибка в корне ответа
+                        if (json.has("errorCode")) {
+                            Log.e(TAG, "❌ errorCode: ${json.optInt("errorCode")}")
+                        }
+                        if (json.has("errorMessage")) {
+                            Log.e(TAG, "❌ errorMessage: ${json.optString("errorMessage")}")
+                        }
+                        if (json.has("errorValue")) {
+                            Log.e(TAG, "❌ errorValue: ${json.optString("errorValue")}")
+                        }
                     }
                     
                     onSuccess(json)
@@ -825,9 +931,14 @@ class ApiClient {
         Log.d(TAG, "📤 ШАГ 4/4: ЗАПРОС betResult (задержка ${delayMs}мс)")
         Log.d(TAG, "========================================")
         
+        // Конвертируем requestId из String в Long для JSON
+        val requestIdLong = requestId.toDoubleOrNull()?.toLong() 
+            ?: requestId.toLongOrNull() 
+            ?: 0L
+        
         val jsonBody = JSONObject().apply {
+            put("requestId", requestIdLong)
             put("lang", "ru")
-            put("requestId", requestId)
             put("fsid", fsid)
             put("sysId", 21)
             put("clientId", clientId)
@@ -859,49 +970,66 @@ class ApiClient {
         
         logRequestDetails(request, bodyString)
         
-        // ИСПРАВЛЕНО: Заменяем Thread.sleep на асинхронную задержку через Handler
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            client.newCall(request).enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) {
-                    Log.e(TAG, "❌ ШАГ 4/4: ОШИБКА СЕТИ")
-                    Log.e(TAG, "❌ ${e.message}", e)
-                    onError(e.message ?: "Network error")
+        Thread.sleep(delayMs)
+        
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.e(TAG, "❌ ШАГ 4/4: ОШИБКА СЕТИ")
+                Log.e(TAG, "❌ ${e.message}", e)
+                onError(e.message ?: "Network error")
+            }
+            
+            override fun onResponse(call: Call, response: Response) {
+                val bodyString = response.body?.string() ?: ""
+                
+                // ДЕТАЛЬНОЕ ЛОГИРОВАНИЕ ОТВЕТА betResult
+                Log.d(TAG, "📥 ===== betResult RESPONSE =====")
+                Log.d(TAG, "📥 HTTP Status: ${response.code} ${response.message}")
+                Log.d(TAG, "📥 Response Body (RAW):")
+                Log.d(TAG, bodyString)
+                
+                try {
+                    val json = JSONObject(bodyString)
+                    Log.d(TAG, "📥 Response Body (FORMATTED):")
+                    Log.d(TAG, json.toString(2))
+                    
+                    Log.d(TAG, "📊 АНАЛИЗ betResult:")
+                    if (json.has("result")) {
+                        Log.d(TAG, "  result: ${json.optString("result")}")
+                    }
+                    if (json.has("coupon")) {
+                        val coupon = json.getJSONObject("coupon")
+                        Log.d(TAG, "  coupon.regId: ${coupon.optString("regId", "N/A")}")
+                        Log.d(TAG, "  coupon.resultCode: ${coupon.optInt("resultCode", -999)}")
+                        Log.d(TAG, "  coupon.clientSaldo: ${coupon.optDouble("clientSaldo", -1.0)}")
+                        Log.d(TAG, "  coupon.amount: ${coupon.optDouble("amount", -1.0)}")
+                        Log.d(TAG, "  coupon.originalK: ${coupon.optDouble("originalK", -1.0)}")
+                    }
+                    
+                    Log.d(TAG, "📥 ===== END betResult RESPONSE =====")
+                    
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ Ошибка парсинга JSON ответа betResult: ${e.message}")
+                    Log.e(TAG, "❌ RAW body: $bodyString")
                 }
                 
-                override fun onResponse(call: Call, response: Response) {
-                    val bodyString = response.body?.string() ?: ""
-                    logResponseDetails(response, bodyString)
-                    
-                    if (!response.isSuccessful) {
-                        Log.e(TAG, "❌ ШАГ 4/4: HTTP ${response.code}")
-                        onError("HTTP ${response.code}")
-                        return
-                    }
-                    
-                    try {
-                        val json = JSONObject(bodyString)
-                        
-                        Log.d(TAG, "📊 АНАЛИЗ betResult:")
-                        if (json.has("result")) {
-                            Log.d(TAG, "  result: ${json.getString("result")}")
-                        }
-                        if (json.has("coupon")) {
-                            val coupon = json.getJSONObject("coupon")
-                            Log.d(TAG, "  coupon.regId: ${coupon.optString("regId", "N/A")}")
-                            Log.d(TAG, "  coupon.resultCode: ${coupon.optInt("resultCode", -999)}")
-                            Log.d(TAG, "  coupon.clientSaldo: ${coupon.optDouble("clientSaldo", -1.0)}")
-                            Log.d(TAG, "  coupon.amount: ${coupon.optDouble("amount", -1.0)}")
-                            Log.d(TAG, "  coupon.originalK: ${coupon.optDouble("originalK", -1.0)}")
-                        }
-                        
-                        onSuccess(json)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "❌ ШАГ 4/4: Ошибка парсинга JSON: ${e.message}")
-                        onError("Parse error: ${e.message}")
-                    }
+                logResponseDetails(response, bodyString)
+                
+                if (!response.isSuccessful) {
+                    Log.e(TAG, "❌ ШАГ 4/4: HTTP ${response.code}")
+                    onError("HTTP ${response.code}")
+                    return
                 }
-            })
-        }, delayMs)
+                
+                try {
+                    val json = JSONObject(bodyString)
+                    onSuccess(json)
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ ШАГ 4/4: Ошибка парсинга JSON: ${e.message}")
+                    onError("Parse error: ${e.message}")
+                }
+            }
+        })
     }
 
     // Главный метод размещения ставки
