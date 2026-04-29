@@ -1683,7 +1683,8 @@ fun ProfileContent(
     }
 }
 
-// ==================== ЭКРАН НАСТРОЕК ====================
+// 
+// ==================== ЭКРАН НАСТРОЕК (ПОЛНЫЙ) ====================
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1696,26 +1697,34 @@ fun BybitSettingsScreen(
     val scope = rememberCoroutineScope()
     val prefs = remember { context.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE) }
     
+    // Основные настройки
     var maxMatchesPerExpress by remember { mutableStateOf(prefs.getInt("max_matches_per_express", 2).toString()) }
     var multiply by remember { mutableStateOf(prefs.getInt("multiply", 2).toString()) }
     var allMinKef by remember { mutableStateOf(prefs.getFloat("all_min_kef", 1.67f).toDouble().toString()) }
     var maxActiveExpresses by remember { mutableStateOf(prefs.getInt("max_active_expresses", 5).toString()) }
     
+    // Тип 924
     var type924Min by remember { mutableStateOf(prefs.getFloat("type_924_min", 1.15f).toString()) }
     var type924Max by remember { mutableStateOf(prefs.getFloat("type_924_max", 1.35f).toString()) }
     var type924Start by remember { mutableStateOf(prefs.getInt("type_924_start", 80).toString()) }
     var type924End by remember { mutableStateOf(prefs.getInt("type_924_end", 100).toString()) }
+    var expandedType924 by remember { mutableStateOf(false) }
     
+    // Тип 927
     var type927Min by remember { mutableStateOf(prefs.getFloat("type_927_min", 1.15f).toString()) }
     var type927Max by remember { mutableStateOf(prefs.getFloat("type_927_max", 1.35f).toString()) }
     var type927Start by remember { mutableStateOf(prefs.getInt("type_927_start", 1).toString()) }
     var type927End by remember { mutableStateOf(prefs.getInt("type_927_end", 45).toString()) }
+    var expandedType927 by remember { mutableStateOf(false) }
     
+    // Тип 928
     var type928Min by remember { mutableStateOf(prefs.getFloat("type_928_min", 1.15f).toString()) }
     var type928Max by remember { mutableStateOf(prefs.getFloat("type_928_max", 1.35f).toString()) }
     var type928Start by remember { mutableStateOf(prefs.getInt("type_928_start", 1).toString()) }
     var type928End by remember { mutableStateOf(prefs.getInt("type_928_end", 45).toString()) }
+    var expandedType928 by remember { mutableStateOf(false) }
     
+    // Общие настройки
     var checkInterval by remember { mutableStateOf(prefs.getString("check_interval", "60") ?: "60") }
     var betAmount by remember { mutableStateOf(prefs.getString("bet_amount", "30") ?: "30") }
     var testMode by remember { mutableStateOf(prefs.getBoolean("test_mode", true)) }
@@ -1733,9 +1742,7 @@ fun BybitSettingsScreen(
                         Icon(Icons.Default.ArrowBack, "Назад", tint = BybitColors.TextPrimary)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = BybitColors.Surface
-                )
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = BybitColors.Surface)
             )
         }
     ) { paddingValues ->
@@ -1746,7 +1753,7 @@ fun BybitSettingsScreen(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Основные настройки
+            // ==================== ОСНОВНЫЕ НАСТРОЙКИ ====================
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -1772,19 +1779,39 @@ fun BybitSettingsScreen(
                         OutlinedTextField(
                             value = maxActiveExpresses,
                             onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) maxActiveExpresses = it },
-                            label = { Text("Макс. экспрессов") },
+                            label = { Text("Макс. одновременных экспрессов") },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             colors = bybitTextFieldColors()
                         )
                         
+                        // Быстрый выбор лимита
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf(3, 5, 7, 10).forEach { value ->
+                                FilterChip(
+                                    selected = maxActiveExpresses == value.toString(),
+                                    onClick = { maxActiveExpresses = value.toString() },
+                                    label = { Text(value.toString(), fontSize = 12.sp) },
+                                    modifier = Modifier.weight(1f),
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = BybitColors.Yellow.copy(alpha = 0.2f),
+                                        selectedLabelColor = BybitColors.Yellow
+                                    )
+                                )
+                            }
+                        }
+                        
                         Spacer(modifier = Modifier.height(8.dp))
                         
                         OutlinedTextField(
                             value = allMinKef,
                             onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) allMinKef = it },
-                            label = { Text("Мин. коэффициент") },
+                            label = { Text("Мин. коэффициент (ALL_MIN_KEF)") },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -1796,7 +1823,7 @@ fun BybitSettingsScreen(
                         OutlinedTextField(
                             value = multiply,
                             onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) multiply = it },
-                            label = { Text("Множитель") },
+                            label = { Text("Множитель ставки (MULTIPLY)") },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -1806,7 +1833,358 @@ fun BybitSettingsScreen(
                 }
             }
             
-            // Общие настройки
+            // ==================== ТИП 924 ====================
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = BybitColors.Surface
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { expandedType924 = !expandedType924 },
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    "924: 1х/футбол/хоккей",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = BybitColors.TextPrimary
+                                )
+                                if (!expandedType924) {
+                                    Text(
+                                        "Кэф: $type924Min - $type924Max | ${type924Start}' - ${type924End}'",
+                                        fontSize = 11.sp,
+                                        color = BybitColors.TextTertiary
+                                    )
+                                }
+                            }
+                            Icon(
+                                if (expandedType924) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                null,
+                                tint = BybitColors.TextSecondary
+                            )
+                        }
+                        
+                        if (expandedType924) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = type924Min,
+                                    onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type924Min = it },
+                                    label = { Text("Мин. кэф", fontSize = 11.sp) },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    colors = bybitTextFieldColors()
+                                )
+                                
+                                OutlinedTextField(
+                                    value = type924Max,
+                                    onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type924Max = it },
+                                    label = { Text("Макс. кэф", fontSize = 11.sp) },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    colors = bybitTextFieldColors()
+                                )
+                            }
+                            
+                            Spacer(modifier = Modifier.height(8.dp))
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = type924Start,
+                                    onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type924Start = it },
+                                    label = { Text("Мониторинг с (мин)", fontSize = 11.sp) },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    colors = bybitTextFieldColors()
+                                )
+                                
+                                OutlinedTextField(
+                                    value = type924End,
+                                    onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type924End = it },
+                                    label = { Text("Мониторинг до (мин)", fontSize = 11.sp) },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    colors = bybitTextFieldColors()
+                                )
+                            }
+                            
+                            // Визуализация диапазона
+                            Spacer(modifier = Modifier.height(8.dp))
+                            val start = type924Start.toIntOrNull() ?: 80
+                            val end = type924End.toIntOrNull() ?: 100
+                            val progress = (start.toFloat() / 130f).coerceIn(0f, 1f)
+                            val progressEnd = (end.toFloat() / 130f).coerceIn(0f, 1f)
+                            
+                            Column {
+                                Text(
+                                    "Диапазон: ${start}' - ${end}' (матч 130')",
+                                    fontSize = 11.sp,
+                                    color = BybitColors.TextTertiary
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(6.dp)
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .background(BybitColors.SurfaceLight)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxHeight()
+                                            .fillMaxWidth(fraction = progressEnd)
+                                            .clip(RoundedCornerShape(3.dp))
+                                            .background(BybitColors.Yellow.copy(alpha = 0.3f))
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxHeight()
+                                            .fillMaxWidth(fraction = progress)
+                                            .clip(RoundedCornerShape(3.dp))
+                                            .background(BybitColors.Yellow)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("0'", fontSize = 9.sp, color = BybitColors.TextTertiary)
+                                    Text("65'", fontSize = 9.sp, color = BybitColors.TextTertiary)
+                                    Text("130'", fontSize = 9.sp, color = BybitColors.TextTertiary)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // ==================== ТИП 927 ====================
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = BybitColors.Surface)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { expandedType927 = !expandedType927 },
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    "927: ф1(+1.5)/футбол/хоккей",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = BybitColors.TextPrimary
+                                )
+                                if (!expandedType927) {
+                                    Text(
+                                        "Кэф: $type927Min - $type927Max | ${type927Start}' - ${type927End}'",
+                                        fontSize = 11.sp,
+                                        color = BybitColors.TextTertiary
+                                    )
+                                }
+                            }
+                            Icon(
+                                if (expandedType927) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                null,
+                                tint = BybitColors.TextSecondary
+                            )
+                        }
+                        
+                        if (expandedType927) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = type927Min,
+                                    onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type927Min = it },
+                                    label = { Text("Мин. кэф", fontSize = 11.sp) },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    colors = bybitTextFieldColors()
+                                )
+                                
+                                OutlinedTextField(
+                                    value = type927Max,
+                                    onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type927Max = it },
+                                    label = { Text("Макс. кэф", fontSize = 11.sp) },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    colors = bybitTextFieldColors()
+                                )
+                            }
+                            
+                            Spacer(modifier = Modifier.height(8.dp))
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = type927Start,
+                                    onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type927Start = it },
+                                    label = { Text("Мониторинг с (мин)", fontSize = 11.sp) },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    colors = bybitTextFieldColors()
+                                )
+                                
+                                OutlinedTextField(
+                                    value = type927End,
+                                    onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type927End = it },
+                                    label = { Text("Мониторинг до (мин)", fontSize = 11.sp) },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    colors = bybitTextFieldColors()
+                                )
+                            }
+                            
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                "🎯 Фора 1 (+1.5): команда 1 не проиграет с разницей более 1 мяча",
+                                fontSize = 11.sp,
+                                color = BybitColors.TextTertiary
+                            )
+                        }
+                    }
+                }
+            }
+            
+            // ==================== ТИП 928 ====================
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = BybitColors.Surface)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { expandedType928 = !expandedType928 },
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    "928: ф2(+1.5)/футбол/хоккей",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = BybitColors.TextPrimary
+                                )
+                                if (!expandedType928) {
+                                    Text(
+                                        "Кэф: $type928Min - $type928Max | ${type928Start}' - ${type928End}'",
+                                        fontSize = 11.sp,
+                                        color = BybitColors.TextTertiary
+                                    )
+                                }
+                            }
+                            Icon(
+                                if (expandedType928) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                null,
+                                tint = BybitColors.TextSecondary
+                            )
+                        }
+                        
+                        if (expandedType928) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = type928Min,
+                                    onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type928Min = it },
+                                    label = { Text("Мин. кэф", fontSize = 11.sp) },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    colors = bybitTextFieldColors()
+                                )
+                                
+                                OutlinedTextField(
+                                    value = type928Max,
+                                    onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type928Max = it },
+                                    label = { Text("Макс. кэф", fontSize = 11.sp) },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    colors = bybitTextFieldColors()
+                                )
+                            }
+                            
+                            Spacer(modifier = Modifier.height(8.dp))
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = type928Start,
+                                    onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type928Start = it },
+                                    label = { Text("Мониторинг с (мин)", fontSize = 11.sp) },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    colors = bybitTextFieldColors()
+                                )
+                                
+                                OutlinedTextField(
+                                    value = type928End,
+                                    onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type928End = it },
+                                    label = { Text("Мониторинг до (мин)", fontSize = 11.sp) },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    colors = bybitTextFieldColors()
+                                )
+                            }
+                            
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                "🎯 Фора 2 (+1.5): команда 2 не проиграет с разницей более 1 мяча",
+                                fontSize = 11.sp,
+                                color = BybitColors.TextTertiary
+                            )
+                        }
+                    }
+                }
+            }
+            
+            // ==================== ОБЩИЕ НАСТРОЙКИ ====================
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -1821,6 +2199,7 @@ fun BybitSettingsScreen(
                             value = betAmount,
                             onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) betAmount = it },
                             label = { Text("Сумма ставки (₽)") },
+                            leadingIcon = { Icon(Icons.Default.AttachMoney, null, tint = BybitColors.Yellow) },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -1833,6 +2212,7 @@ fun BybitSettingsScreen(
                             value = checkInterval,
                             onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) checkInterval = it },
                             label = { Text("Интервал проверки (сек)") },
+                            leadingIcon = { Icon(Icons.Default.Timer, null, tint = BybitColors.TextSecondary) },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -1842,7 +2222,7 @@ fun BybitSettingsScreen(
                 }
             }
             
-            // Тестовый режим
+            // ==================== ТЕСТОВЫЙ РЕЖИМ ====================
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -1857,11 +2237,26 @@ fun BybitSettingsScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("🧪 Тестовый режим", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = BybitColors.TextPrimary)
+                            Column {
+                                Text(
+                                    "🧪 Тестовый режим",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = BybitColors.TextPrimary
+                                )
+                                Text(
+                                    if (testMode) "Ставки виртуальные" else "⚠️ Реальные ставки!",
+                                    fontSize = 11.sp,
+                                    color = if (testMode) BybitColors.Green else BybitColors.Red
+                                )
+                            }
                             Switch(
                                 checked = testMode,
                                 onCheckedChange = { testMode = it },
-                                colors = SwitchDefaults.colors(checkedThumbColor = BybitColors.Yellow)
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = BybitColors.Yellow,
+                                    checkedTrackColor = BybitColors.Yellow.copy(alpha = 0.3f)
+                                )
                             )
                         }
                         
@@ -1871,6 +2266,7 @@ fun BybitSettingsScreen(
                                 value = testBalance,
                                 onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) testBalance = it },
                                 label = { Text("Виртуальный баланс (₽)") },
+                                leadingIcon = { Icon(Icons.Default.AccountBalanceWallet, null, tint = BybitColors.Yellow) },
                                 modifier = Modifier.fillMaxWidth(),
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -1881,7 +2277,7 @@ fun BybitSettingsScreen(
                 }
             }
             
-            // Кнопки
+            // ==================== КНОПКИ СОХРАНЕНИЯ ====================
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1890,7 +2286,8 @@ fun BybitSettingsScreen(
                     OutlinedButton(
                         onClick = onBack,
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = BybitColors.TextSecondary)
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = BybitColors.TextSecondary),
+                        shape = RoundedCornerShape(12.dp)
                     ) {
                         Text("Отмена")
                     }
@@ -1902,49 +2299,61 @@ fun BybitSettingsScreen(
                                 .putInt("multiply", multiply.toIntOrNull() ?: 2)
                                 .putFloat("all_min_kef", allMinKef.toFloatOrNull() ?: 1.67f)
                                 .putInt("max_active_expresses", maxActiveExpresses.toIntOrNull() ?: 5)
+                                // Тип 924
                                 .putFloat("type_924_min", type924Min.toFloatOrNull() ?: 1.15f)
                                 .putFloat("type_924_max", type924Max.toFloatOrNull() ?: 1.35f)
                                 .putInt("type_924_start", type924Start.toIntOrNull() ?: 80)
                                 .putInt("type_924_end", type924End.toIntOrNull() ?: 100)
+                                // Тип 927
                                 .putFloat("type_927_min", type927Min.toFloatOrNull() ?: 1.15f)
                                 .putFloat("type_927_max", type927Max.toFloatOrNull() ?: 1.35f)
                                 .putInt("type_927_start", type927Start.toIntOrNull() ?: 1)
                                 .putInt("type_927_end", type927End.toIntOrNull() ?: 45)
+                                // Тип 928
                                 .putFloat("type_928_min", type928Min.toFloatOrNull() ?: 1.15f)
                                 .putFloat("type_928_max", type928Max.toFloatOrNull() ?: 1.35f)
                                 .putInt("type_928_start", type928Start.toIntOrNull() ?: 1)
                                 .putInt("type_928_end", type928End.toIntOrNull() ?: 45)
+                                // Общие
                                 .putString("check_interval", checkInterval)
                                 .putString("bet_amount", betAmount)
                                 .putBoolean("test_mode", testMode)
                                 .putString("test_balance", testBalance)
                                 .apply()
                             
-                            Toast.makeText(context, "Настройки сохранены", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "✅ Настройки сохранены", Toast.LENGTH_SHORT).show()
                             onSave()
                         },
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(containerColor = BybitColors.Yellow),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text("Сохранить", color = Color.Black)
+                        Text("💾 Сохранить", color = Color.Black, fontWeight = FontWeight.Bold)
                     }
                 }
             }
             
-            // Очистка данных
+            // ==================== ОЧИСТКА ДАННЫХ ====================
             item {
                 Button(
                     onClick = { showClearDialog = true },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = BybitColors.Red),
+                    colors = ButtonDefaults.buttonColors(containerColor = BybitColors.Red.copy(alpha = 0.8f)),
                     shape = RoundedCornerShape(12.dp)
                 ) {
+                    Icon(Icons.Default.DeleteForever, null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text("🗑 Очистить все данные")
                 }
             }
+            
+            // Отступ снизу
+            item {
+                Spacer(modifier = Modifier.height(32.dp))
+            }
         }
         
+        // Диалог очистки
         if (showClearDialog) {
             AlertDialog(
                 onDismissRequest = { showClearDialog = false },
@@ -1952,26 +2361,48 @@ fun BybitSettingsScreen(
                 titleContentColor = BybitColors.TextPrimary,
                 textContentColor = BybitColors.TextSecondary,
                 title = { Text("⚠️ Очистка данных") },
-                text = { Text("Удалить ВСЕ данные?\n\nЭто действие нельзя отменить!") },
+                text = { 
+                    Text("Удалить ВСЕ данные?\n\nБудут удалены:\n• Данные авторизации\n• История баланса\n• Логи\n• Экспрессы\n\nЭто действие нельзя отменить!")
+                },
                 confirmButton = {
                     Button(
                         onClick = {
                             showClearDialog = false
                             isClearing = true
                             scope.launch {
-                                dbHelper.clearAllData(context)
+                                val success = dbHelper.clearAllData(context)
                                 isClearing = false
-                                Toast.makeText(context, "Данные удалены", Toast.LENGTH_SHORT).show()
-                                onBack()
+                                
+                                if (success) {
+                                    context.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
+                                        .edit().clear().apply()
+                                    context.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE)
+                                        .edit().clear().apply()
+                                    Toast.makeText(context, "Данные удалены", Toast.LENGTH_SHORT).show()
+                                    onBack()
+                                } else {
+                                    Toast.makeText(context, "Ошибка", Toast.LENGTH_SHORT).show()
+                                }
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = BybitColors.Red)
                     ) {
-                        Text("Удалить")
+                        if (isClearing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = Color.White
+                            )
+                        } else {
+                            Text("Удалить всё")
+                        }
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showClearDialog = false }) {
+                    TextButton(
+                        onClick = { showClearDialog = false },
+                        enabled = !isClearing
+                    ) {
                         Text("Отмена", color = BybitColors.TextSecondary)
                     }
                 }
@@ -1990,6 +2421,8 @@ fun bybitTextFieldColors() = OutlinedTextFieldDefaults.colors(
     focusedTextColor = BybitColors.TextPrimary,
     unfocusedTextColor = BybitColors.TextPrimary
 )
+            
+         
 
 // ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 
