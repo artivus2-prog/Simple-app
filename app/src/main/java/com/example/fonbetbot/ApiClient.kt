@@ -1,4 +1,4 @@
-// ApiClient.kt - ПОЛНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ
+﻿// ApiClient.kt - ПОЛНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ С ДЕТАЛЬНЫМ ЛОГИРОВАНИЕМ
 package com.example.fonbetbot
 
 import android.util.Log
@@ -96,173 +96,165 @@ class ApiClient {
         val monitorStart: Int,
         val monitorEnd: Int
     )
-// ApiClient.kt - ИСПРАВЛЕННЫЙ МЕТОД getSaldo
 
-fun getSaldo(
-    cookies: Map<String, String>,
-    fsid: String,
-    deviceId: String,
-    clientId: Long = 18845703,
-    sysId: Int = 21,
-    onSuccess: (SessionInfo?) -> Unit,
-    onError: (String) -> Unit
-) {
-    val jsonBody = JSONObject().apply {
-        put("clientId", clientId)
-        put("fsid", fsid)
-        put("sysId", sysId)
-        put("deviceId", deviceId)
-    }
+    // ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ЛОГИРОВАНИЯ ====================
     
-    val mediaType = "application/json; charset=utf-8".toMediaType()
-    val body = jsonBody.toString().toRequestBody(mediaType)
-    
-    val requestBuilder = Request.Builder()
-        .url("https://clientsapi-lb51-w.bk6bba-resources.com/session/info")
-        .post(body)
-        .addHeader("Content-Type", "application/json")
-        .addHeader("Accept", "application/json")
-    
-    val cookieHeader = cookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
-    if (cookieHeader.isNotEmpty()) {
-        requestBuilder.addHeader("Cookie", cookieHeader)
-    }
-    
-    val request = requestBuilder.build()
-    
-    client.newCall(request).enqueue(object : Callback {
-        override fun onFailure(call: Call, e: IOException) {
-            onError("Ошибка сети: ${e.message}")
-        }
-        
-        override fun onResponse(call: Call, response: Response) {
-            response.use {
-                val bodyString = response.body?.string() ?: ""
-                
-                Log.d(TAG, "=== session/info FULL RESPONSE ===")
-                Log.d(TAG, bodyString)
-                Log.d(TAG, "=== END session/info ===")
-                
-                if (!response.isSuccessful) {
-                    onError("Ошибка ${response.code}")
-                    return
-                }
-                
-                try {
-                    val json = JSONObject(bodyString)
-                    
-                    // 1. ИЗВЛЕКАЕМ clientId
-                    val extractedClientId: Long? = when {
-                        json.has("clientId") && !json.isNull("clientId") -> {
-                            val cid = json.getLong("clientId")
-                            Log.d(TAG, "✅ clientId из корня: $cid")
-                            cid
-                        }
-                        else -> {
-                            Log.w(TAG, "⚠️ clientId не найден в ответе")
-                            null
-                        }
-                    }
-                    
-                    // 2. ИЗВЛЕКАЕМ saldo
-                    val saldo: Double? = when {
-                        json.has("saldo") && !json.isNull("saldo") -> {
-                            val s = json.getDouble("saldo")
-                            Log.d(TAG, "✅ saldo: $s")
-                            s
-                        }
-                        else -> {
-                            Log.w(TAG, "⚠️ saldo не найден в ответе")
-                            null
-                        }
-                    }
-                    
-                    // 3. ИЗВЛЕКАЕМ ИМЯ ПОЛЬЗОВАТЕЛЯ
-                    // Приоритет: registration.name > registration.fullName > registration.firstName+lastName
-                    val userName: String? = try {
-                        when {
-                            // Проверяем registration объект
-                            json.has("registration") && !json.isNull("registration") -> {
-                                val registration = json.getJSONObject("registration")
-                                Log.d(TAG, "📋 registration объект найден")
-                                
-                                when {
-                                    // registration.name (полное имя: "Артамонов Илья Витальевич")
-                                    registration.has("name") && !registration.isNull("name") -> {
-                                        val name = registration.getString("name")
-                                        Log.d(TAG, "✅ Имя из registration.name: $name")
-                                        name
-                                    }
-                                    // registration.fullName
-                                    registration.has("fullName") && !registration.isNull("fullName") -> {
-                                        val fullName = registration.getString("fullName")
-                                        Log.d(TAG, "✅ Имя из registration.fullName: $fullName")
-                                        fullName
-                                    }
-                                    // registration.firstName + registration.lastName
-                                    registration.has("firstName") && registration.has("lastName") -> {
-                                        val firstName = registration.optString("firstName", "")
-                                        val lastName = registration.optString("lastName", "")
-                                        val combined = "$lastName $firstName".trim()
-                                        Log.d(TAG, "✅ Имя из registration.firstName+lastName: $combined")
-                                        combined
-                                    }
-                                    else -> {
-                                        Log.w(TAG, "⚠️ registration найден, но нет поля с именем")
-                                        Log.d(TAG, "registration keys: ${registration.keys().asSequence().toList()}")
-                                        null
-                                    }
-                                }
-                            }
-                            // Запасные варианты в корне JSON
-                            json.has("userName") && !json.isNull("userName") -> {
-                                val name = json.getString("userName")
-                                Log.d(TAG, "✅ Имя из корневого userName: $name")
-                                name
-                            }
-                            json.has("fullName") && !json.isNull("fullName") -> {
-                                val name = json.getString("fullName")
-                                Log.d(TAG, "✅ Имя из корневого fullName: $name")
-                                name
-                            }
-                            json.has("name") && !json.isNull("name") -> {
-                                val name = json.getString("name")
-                                Log.d(TAG, "✅ Имя из корневого name: $name")
-                                name
-                            }
-                            else -> {
-                                Log.w(TAG, "⚠️ Имя пользователя не найдено ни в одном поле")
-                                null
-                            }
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "❌ Ошибка извлечения имени: ${e.message}", e)
-                        null
-                    }
-                    
-                    val sessionInfo = SessionInfo(
-                        saldo = saldo,
-                        clientId = extractedClientId,
-                        userName = userName
-                    )
-                    
-                    Log.d(TAG, "📊 ИТОГО SessionInfo:")
-                    Log.d(TAG, "  clientId: $extractedClientId")
-                    Log.d(TAG, "  saldo: $saldo")
-                    Log.d(TAG, "  userName: $userName")
-                    
-                    onSuccess(sessionInfo)
-                    
-                } catch (e: Exception) {
-                    Log.e(TAG, "❌ Ошибка парсинга: ${e.message}", e)
-                    onError("Ошибка парсинга: ${e.message}")
-                }
+    private fun logRequestDetails(request: Request, bodyString: String? = null) {
+        Log.d(TAG, "🌐 ===== REQUEST DETAILS =====")
+        Log.d(TAG, "🌐 URL: ${request.url}")
+        Log.d(TAG, "🌐 Method: ${request.method}")
+        Log.d(TAG, "🌐 Headers:")
+        request.headers.forEach { (name, value) ->
+            if (name.equals("Cookie", ignoreCase = true)) {
+                Log.d(TAG, "  $name: ${value.take(100)}... (${value.length} chars)")
+            } else {
+                Log.d(TAG, "  $name: $value")
             }
         }
-    })
-}
+        if (bodyString != null) {
+            Log.d(TAG, "🌐 Body:")
+            try {
+                val json = JSONObject(bodyString)
+                Log.d(TAG, json.toString(2))
+            } catch (e: Exception) {
+                Log.d(TAG, bodyString)
+            }
+        }
+        Log.d(TAG, "🌐 ===== END REQUEST =====")
+    }
     
-    // Метод получения ставок
+    private fun logResponseDetails(response: Response, bodyString: String) {
+        Log.d(TAG, "📥 ===== RESPONSE DETAILS =====")
+        Log.d(TAG, "📥 URL: ${response.request.url}")
+        Log.d(TAG, "📥 Status: ${response.code} ${response.message}")
+        Log.d(TAG, "📥 Headers:")
+        response.headers.forEach { (name, value) ->
+            Log.d(TAG, "  $name: $value")
+        }
+        Log.d(TAG, "📥 Body (${bodyString.length} chars):")
+        try {
+            val json = JSONObject(bodyString)
+            Log.d(TAG, json.toString(2))
+        } catch (e: Exception) {
+            Log.d(TAG, bodyString.take(3000))
+        }
+        Log.d(TAG, "📥 ===== END RESPONSE =====")
+    }
+    
+    private fun buildCookieHeader(cookies: Map<String, String>, fsid: String): String {
+        val allCookies = mutableMapOf<String, String>()
+        allCookies.putAll(cookies)
+        if (!allCookies.containsKey("fsid") && fsid.isNotEmpty()) {
+            allCookies["fsid"] = fsid
+            Log.w(TAG, "⚠️ fsid не было в cookies, добавлен из параметров")
+        }
+        val cookieHeader = allCookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
+        Log.d(TAG, "🍪 Cookie header (${allCookies.size} cookies): ${cookieHeader.take(150)}...")
+        return cookieHeader
+    }
+    
+    // ==================== МЕТОД ПОЛУЧЕНИЯ БАЛАНСА ====================
+    
+    fun getSaldo(
+        cookies: Map<String, String>,
+        fsid: String,
+        deviceId: String,
+        clientId: Long = 18845703,
+        sysId: Int = 21,
+        onSuccess: (SessionInfo?) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        val jsonBody = JSONObject().apply {
+            put("clientId", clientId)
+            put("fsid", fsid)
+            put("sysId", sysId)
+            put("deviceId", deviceId)
+        }
+        
+        val bodyString = jsonBody.toString()
+        val mediaType = "application/json; charset=utf-8".toMediaType()
+        val body = bodyString.toRequestBody(mediaType)
+        
+        val cookieHeader = buildCookieHeader(cookies, fsid)
+        
+        val request = Request.Builder()
+            .url("https://clientsapi-lb51-w.bk6bba-resources.com/session/info")
+            .post(body)
+            .addHeader("Content-Type", "application/json")
+            .addHeader("Accept", "application/json, text/plain, */*")
+            .addHeader("Accept-Language", "ru-RU,ru;q=0.9")
+            .addHeader("Origin", "https://www.fon.bet")
+            .addHeader("Referer", "https://www.fon.bet/")
+            .addHeader("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
+            .addHeader("Cookie", cookieHeader)
+            .build()
+        
+        logRequestDetails(request, bodyString)
+        
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.e(TAG, "❌ session/info NETWORK ERROR: ${e.message}", e)
+                onError("Ошибка сети: ${e.message}")
+            }
+            
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    val bodyString = response.body?.string() ?: ""
+                    logResponseDetails(response, bodyString)
+                    
+                    if (!response.isSuccessful) {
+                        onError("Ошибка ${response.code}")
+                        return
+                    }
+                    
+                    try {
+                        val json = JSONObject(bodyString)
+                        
+                        val extractedClientId: Long? = when {
+                            json.has("clientId") && !json.isNull("clientId") -> json.getLong("clientId")
+                            else -> null
+                        }
+                        
+                        val saldo: Double? = when {
+                            json.has("saldo") && !json.isNull("saldo") -> json.getDouble("saldo")
+                            else -> null
+                        }
+                        
+                        val userName: String? = try {
+                            when {
+                                json.has("registration") && !json.isNull("registration") -> {
+                                    val registration = json.getJSONObject("registration")
+                                    when {
+                                        registration.has("name") && !registration.isNull("name") -> registration.getString("name")
+                                        registration.has("fullName") && !registration.isNull("fullName") -> registration.getString("fullName")
+                                        registration.has("firstName") && registration.has("lastName") -> {
+                                            "${registration.optString("lastName", "")} ${registration.optString("firstName", "")}".trim()
+                                        }
+                                        else -> null
+                                    }
+                                }
+                                json.has("userName") && !json.isNull("userName") -> json.getString("userName")
+                                json.has("fullName") && !json.isNull("fullName") -> json.getString("fullName")
+                                json.has("name") && !json.isNull("name") -> json.getString("name")
+                                else -> null
+                            }
+                        } catch (e: Exception) { null }
+                        
+                        val sessionInfo = SessionInfo(saldo = saldo, clientId = extractedClientId, userName = userName)
+                        Log.d(TAG, "📊 SessionInfo: clientId=$extractedClientId, saldo=$saldo, userName=$userName")
+                        onSuccess(sessionInfo)
+                        
+                    } catch (e: Exception) {
+                        Log.e(TAG, "❌ Ошибка парсинга: ${e.message}", e)
+                        onError("Ошибка парсинга: ${e.message}")
+                    }
+                }
+            }
+        })
+    }
+    
+    // ==================== МЕТОД ПОЛУЧЕНИЯ СТАВОК ====================
+    
     fun getBets(
         userId: Long,
         settings: BetSettings,
@@ -274,8 +266,9 @@ fun getSaldo(
             put("settings", settings.toJson())
         }
         
+        val bodyString = jsonBody.toString()
         val mediaType = "application/json; charset=utf-8".toMediaType()
-        val body = jsonBody.toString().toRequestBody(mediaType)
+        val body = bodyString.toRequestBody(mediaType)
         
         val request = Request.Builder()
             .url("http://95.183.11.203:5000/api/getBets")
@@ -293,11 +286,9 @@ fun getSaldo(
             override fun onResponse(call: Call, response: Response) {
                 response.use {
                     val bodyString = response.body?.string() ?: ""
-                    
                     Log.d(TAG, "getBets response: $bodyString")
                     
                     if (!response.isSuccessful) {
-                        Log.e(TAG, "Ошибка getBets ${response.code}: $bodyString")
                         onError("Ошибка ${response.code}")
                         return
                     }
@@ -308,11 +299,9 @@ fun getSaldo(
                         
                         if (json.has("data")) {
                             val dataArray = json.getJSONArray("data")
-                            
                             for (i in 0 until dataArray.length()) {
                                 val betJson = dataArray.getJSONObject(i)
-                                
-                                val betData = BetData(
+                                betsList.add(BetData(
                                     mId = betJson.optInt("m_id", 0),
                                     type = betJson.optInt("type", 0),
                                     sport = betJson.optString("sport", ""),
@@ -333,9 +322,7 @@ fun getSaldo(
                                     uzh = betJson.optDouble("uzh", 0.0),
                                     tbType = betJson.optInt("tbtype", 0),
                                     matchTime = betJson.optInt("match_time", 0)
-                                )
-                                
-                                betsList.add(betData)
+                                ))
                             }
                         }
                         
@@ -351,7 +338,8 @@ fun getSaldo(
         })
     }
     
-    // Метод получения счета, времени и коэффициентов матча
+    // ==================== МЕТОД ПОЛУЧЕНИЯ СЧЕТА МАТЧА ====================
+    
     fun getMatchScore(
         matchId: Int,
         onSuccess: (MatchFactors?) -> Unit,
@@ -389,15 +377,8 @@ fun getSaldo(
                             val liveEventInfos = json.getJSONArray("liveEventInfos")
                             if (liveEventInfos.length() > 0) {
                                 val liveEventInfo = liveEventInfos.getJSONObject(0)
-                                
                                 val timerSeconds = liveEventInfo.optInt("timerSeconds", 0)
-                                matchTime = if (timerSeconds > 0) {
-                                    Math.round(timerSeconds / 60.0).toInt()
-                                } else {
-                                    0
-                                }
-                                
-                                Log.d(TAG, "Матч #$matchId: timerSeconds=$timerSeconds, matchTime=$matchTime мин")
+                                matchTime = if (timerSeconds > 0) timerSeconds / 60 else 0
                                 
                                 if (liveEventInfo.has("scores")) {
                                     val scores = liveEventInfo.getJSONArray("scores")
@@ -420,7 +401,6 @@ fun getSaldo(
                             val customFactors = json.getJSONArray("customFactors")
                             for (i in 0 until customFactors.length()) {
                                 val factorGroup = customFactors.getJSONObject(i)
-                                
                                 if (factorGroup.has("e") && factorGroup.getInt("e") == matchId) {
                                     if (factorGroup.has("factors")) {
                                         val factorsArray = factorGroup.getJSONArray("factors")
@@ -428,13 +408,10 @@ fun getSaldo(
                                             val factor = factorsArray.getJSONObject(j)
                                             val f = factor.optInt("f", 0)
                                             val v = factor.optDouble("v", 0.0)
-                                            
                                             if (f in listOf(924, 927, 928) && v > 0) {
                                                 factors[f] = v
                                                 val p = factor.optInt("p", 0)
-                                                if (p > 0) {
-                                                    handicaps[f] = p / 100.0
-                                                }
+                                                if (p > 0) handicaps[f] = p / 100.0
                                             }
                                         }
                                     }
@@ -461,45 +438,14 @@ fun getSaldo(
         onSuccess: (Int?) -> Unit,
         onError: (String) -> Unit
     ) {
-        getMatchScore(matchId, 
+        getMatchScore(matchId,
             onSuccess = { factors -> onSuccess(factors?.matchTime) },
             onError = onError
         )
     }
 
     // ==================== МЕТОДЫ ДЛЯ РАЗМЕЩЕНИЯ СТАВОК ====================
-
-    data class BetSlipInfo(
-        val k: Double,
-        val bets: List<BetSlipItem>,
-        val sums: Sums?
-    ) {
-        data class BetSlipItem(
-            val event: EventInfo,
-            val factor: FactorInfo
-        )
-        
-        data class EventInfo(
-            val id: Int,
-            val team1: String,
-            val team2: String,
-            val competitionName: String,
-            val score: String
-        )
-        
-        data class FactorInfo(
-            val id: Int,
-            val v: Double,
-            val couponChoiceCaption: String,
-            val param: Int?
-        )
-        
-        data class Sums(
-            val min: Double,
-            val max: Double
-        )
-    }
-
+    
     // Шаг 1: Получить информацию о ставках
     fun getBetSlipInfo(
         bets: List<BetData>,
@@ -509,12 +455,19 @@ fun getSaldo(
         onSuccess: (JSONObject) -> Unit,
         onError: (String) -> Unit
     ) {
+        Log.d(TAG, "========================================")
+        Log.d(TAG, "📤 ШАГ 1/4: ЗАПРОС betSlipInfo")
+        Log.d(TAG, "========================================")
+        
         val betsArray = JSONArray()
         bets.forEach { bet ->
             betsArray.put(JSONObject().apply {
                 put("eventId", bet.mId)
                 put("factorId", bet.type)
                 put("old", true)
+                if (bet.tbType > 0) {
+                    put("param", bet.tbType)
+                }
             })
         }
         
@@ -527,42 +480,80 @@ fun getSaldo(
             put("bets", betsArray)
         }
         
+        val bodyString = jsonBody.toString()
         val mediaType = "application/json; charset=utf-8".toMediaType()
-        val body = jsonBody.toString().toRequestBody(mediaType)
+        val body = bodyString.toRequestBody(mediaType)
         
-        val requestBuilder = Request.Builder()
+        val cookieHeader = buildCookieHeader(cookies, fsid)
+        
+        val request = Request.Builder()
             .url("https://clientsapi-lb51-w.bk6bba-resources.com/coupon/betSlipInfo")
             .post(body)
             .addHeader("Content-Type", "application/json")
-            .addHeader("Accept", "application/json")
+            .addHeader("Accept", "application/json, text/plain, */*")
+            .addHeader("Accept-Language", "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7")
+            .addHeader("Origin", "https://www.fon.bet")
+            .addHeader("Referer", "https://www.fon.bet/")
+            .addHeader("Sec-Fetch-Dest", "empty")
+            .addHeader("Sec-Fetch-Mode", "cors")
+            .addHeader("Sec-Fetch-Site", "same-site")
+            .addHeader("User-Agent", "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
+            .addHeader("X-Requested-With", "XMLHttpRequest")
+            .addHeader("Cookie", cookieHeader)
+            .build()
         
-        val cookieHeader = cookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
-        if (cookieHeader.isNotEmpty()) {
-            requestBuilder.addHeader("Cookie", cookieHeader)
-        }
+        logRequestDetails(request, bodyString)
         
-        client.newCall(requestBuilder.build()).enqueue(object : Callback {
+        client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                Log.e(TAG, "Ошибка getBetSlipInfo: ${e.message}")
+                Log.e(TAG, "❌ ШАГ 1/4: ОШИБКА СЕТИ")
+                Log.e(TAG, "❌ ${e.message}", e)
                 onError(e.message ?: "Network error")
             }
             
             override fun onResponse(call: Call, response: Response) {
-                response.use {
-                    val bodyString = response.body?.string() ?: ""
-                    Log.d(TAG, "getBetSlipInfo response: $bodyString")
+                val bodyString = response.body?.string() ?: ""
+                logResponseDetails(response, bodyString)
+                
+                if (!response.isSuccessful) {
+                    Log.e(TAG, "❌ ШАГ 1/4: HTTP ${response.code}")
+                    onError("HTTP ${response.code}: ${bodyString.take(500)}")
+                    return
+                }
+                
+                try {
+                    val json = JSONObject(bodyString)
                     
-                    if (!response.isSuccessful) {
-                        onError("HTTP ${response.code}: $bodyString")
-                        return
+                    // Детальный разбор ответа
+                    Log.d(TAG, "📊 АНАЛИЗ betSlipInfo:")
+                    if (json.has("K")) {
+                        Log.d(TAG, "  ✅ K (коэффициент): ${json.getDouble("K")}")
+                    } else {
+                        Log.e(TAG, "  ❌ K не найден!")
                     }
                     
-                    try {
-                        val json = JSONObject(bodyString)
-                        onSuccess(json)
-                    } catch (e: Exception) {
-                        onError("Parse error: ${e.message}")
+                    if (json.has("bets")) {
+                        val betsArray = json.getJSONArray("bets")
+                        Log.d(TAG, "  ✅ bets: ${betsArray.length()} элементов")
+                        for (i in 0 until betsArray.length()) {
+                            val bet = betsArray.getJSONObject(i)
+                            Log.d(TAG, "  bet[$i]: event=${bet.optJSONObject("event")?.optInt("id")}, factor=${bet.optJSONObject("factor")?.optInt("id")}, v=${bet.optJSONObject("factor")?.optDouble("v")}")
+                        }
                     }
+                    
+                    if (json.has("sums")) {
+                        val sums = json.getJSONObject("sums")
+                        Log.d(TAG, "  ✅ sums: min=${sums.optDouble("min")}, max=${sums.optDouble("max")}")
+                    }
+                    
+                    if (json.has("error")) {
+                        Log.e(TAG, "  ❌ API Error: ${json.optString("error")}")
+                    }
+                    
+                    onSuccess(json)
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ ШАГ 1/4: Ошибка парсинга JSON: ${e.message}")
+                    onError("Parse error: ${e.message}")
                 }
             }
         })
@@ -577,6 +568,10 @@ fun getSaldo(
         onSuccess: (String) -> Unit,
         onError: (String) -> Unit
     ) {
+        Log.d(TAG, "========================================")
+        Log.d(TAG, "📤 ШАГ 2/4: ЗАПРОС betRequestId")
+        Log.d(TAG, "========================================")
+        
         val jsonBody = JSONObject().apply {
             put("lang", "ru")
             put("clientId", clientId)
@@ -586,266 +581,211 @@ fun getSaldo(
             put("deviceId", deviceId)
         }
         
+        val bodyString = jsonBody.toString()
         val mediaType = "application/json; charset=utf-8".toMediaType()
-        val body = jsonBody.toString().toRequestBody(mediaType)
+        val body = bodyString.toRequestBody(mediaType)
         
-        val requestBuilder = Request.Builder()
+        val cookieHeader = buildCookieHeader(cookies, fsid)
+        
+        val request = Request.Builder()
             .url("https://clientsapi-lb51-w.bk6bba-resources.com/coupon/betRequestId")
             .post(body)
             .addHeader("Content-Type", "application/json")
-            .addHeader("Accept", "application/json")
+            .addHeader("Accept", "application/json, text/plain, */*")
+            .addHeader("Accept-Language", "ru-RU,ru;q=0.9")
+            .addHeader("Origin", "https://www.fon.bet")
+            .addHeader("Referer", "https://www.fon.bet/")
+            .addHeader("Sec-Fetch-Dest", "empty")
+            .addHeader("Sec-Fetch-Mode", "cors")
+            .addHeader("Sec-Fetch-Site", "same-site")
+            .addHeader("User-Agent", "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36")
+            .addHeader("X-Requested-With", "XMLHttpRequest")
+            .addHeader("Cookie", cookieHeader)
+            .build()
         
-        val cookieHeader = cookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
-        if (cookieHeader.isNotEmpty()) {
-            requestBuilder.addHeader("Cookie", cookieHeader)
-        }
+        logRequestDetails(request, bodyString)
         
-        client.newCall(requestBuilder.build()).enqueue(object : Callback {
+        client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
+                Log.e(TAG, "❌ ШАГ 2/4: ОШИБКА СЕТИ")
+                Log.e(TAG, "❌ ${e.message}", e)
                 onError(e.message ?: "Network error")
             }
             
             override fun onResponse(call: Call, response: Response) {
-                response.use {
-                    val bodyString = response.body?.string() ?: ""
-                    
-                    if (!response.isSuccessful) {
-                        onError("HTTP ${response.code}")
-                        return
-                    }
-                    
-                    try {
-                        val json = JSONObject(bodyString)
-                        val requestId = json.getString("requestId")
-                        onSuccess(requestId)
-                    } catch (e: Exception) {
-                        onError("Parse error: ${e.message}")
-                    }
+                val bodyString = response.body?.string() ?: ""
+                logResponseDetails(response, bodyString)
+                
+                if (!response.isSuccessful) {
+                    Log.e(TAG, "❌ ШАГ 2/4: HTTP ${response.code}")
+                    onError("HTTP ${response.code}")
+                    return
+                }
+                
+                try {
+                    val json = JSONObject(bodyString)
+                    val requestId = json.getString("requestId")
+                    Log.d(TAG, "✅ requestId получен: $requestId")
+                    onSuccess(requestId)
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ ШАГ 2/4: requestId не найден в ответе")
+                    Log.e(TAG, "❌ Полный ответ: $bodyString")
+                    onError("Parse error: ${e.message}")
                 }
             }
         })
     }
 
     // Шаг 3: Разместить ставку
-    // Шаг 3: Разместить ставку (ИСПРАВЛЕННАЯ ВЕРСИЯ)
-fun placeBet(
-    requestId: String,
-    betSlipInfo: JSONObject,
-    amount: Int,
-    cookies: Map<String, String>,
-    fsid: String,
-    clientId: Long,
-    bets: List<BetData>,
-    onSuccess: (JSONObject) -> Unit,
-    onError: (String) -> Unit
-) {
-    // Детальное логирование входящих параметров
-    Log.d(TAG, "═══════════════════════════════════════")
-    Log.d(TAG, "🎰 placeBet: НАЧАЛО РАЗМЕЩЕНИЯ СТАВКИ")
-    Log.d(TAG, "═══════════════════════════════════════")
-    Log.d(TAG, "📋 requestId: $requestId")
-    Log.d(TAG, "💰 amount: $amount")
-    Log.d(TAG, "👤 clientId: $clientId")
-    Log.d(TAG, "🔑 fsid: ${fsid.take(20)}...")
-    Log.d(TAG, "📊 Количество ставок: ${bets.size}")
-    
-    // Логируем содержимое betSlipInfo
-    try {
-        Log.d(TAG, "📦 betSlipInfo K: ${betSlipInfo.optDouble("K", 0.0)}")
-        val betsArray = betSlipInfo.optJSONArray("bets")
-        if (betsArray != null) {
-            for (i in 0 until betsArray.length()) {
-                val bet = betsArray.getJSONObject(i)
-                val event = bet.getJSONObject("event")
-                val factor = bet.getJSONObject("factor")
-                Log.d(TAG, "  Ставка #${i+1}:")
-                Log.d(TAG, "    Событие: ${event.optString("team1", "?")} vs ${event.optString("team2", "?")}")
-                Log.d(TAG, "    Турнир: ${event.optString("competitionName", "?")}")
-                Log.d(TAG, "    Ставка: ${factor.optString("couponChoiceCaption", "?")}")
-                Log.d(TAG, "    Коэф: ${factor.optDouble("v", 0.0)}")
-                Log.d(TAG, "    eventId: ${event.optInt("id", 0)}")
-                Log.d(TAG, "    factorId: ${factor.optInt("id", 0)}")
-                if (factor.has("param")) {
-                    Log.d(TAG, "    param: ${factor.optInt("param", 0)}")
-                }
-            }
-        }
-    } catch (e: Exception) {
-        Log.e(TAG, "❌ Ошибка при логировании betSlipInfo: ${e.message}")
-    }
-    
-    // Формируем массив ставок для купона
-    val betsArray = JSONArray()
-    val betsFromSlip = betSlipInfo.getJSONArray("bets")
-    
-    // КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: создаем карту для быстрого поиска tbtype
-    val paramsMap = mutableMapOf<String, Int>()
-    bets.forEach { betData ->
-        val key = "${betData.mId}_${betData.type}"
-        if (betData.tbType > 0) {
-            paramsMap[key] = betData.tbType
-        }
-    }
-    
-    for (i in 0 until betsFromSlip.length()) {
-        val bet = betsFromSlip.getJSONObject(i)
-        val eventId = bet.getJSONObject("event").getInt("id")
-        val factorId = bet.getJSONObject("factor").getInt("id")
-        val factorValue = bet.getJSONObject("factor").getDouble("v")
-        val score = bet.getJSONObject("event").optString("score", "0:0")
+    fun placeBet(
+        requestId: String,
+        betSlipInfo: JSONObject,
+        amount: Int,
+        cookies: Map<String, String>,
+        fsid: String,
+        clientId: Long,
+        bets: List<BetData>,
+        onSuccess: (JSONObject) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        Log.d(TAG, "========================================")
+        Log.d(TAG, "📤 ШАГ 3/4: ЗАПРОС placeBet")
+        Log.d(TAG, "========================================")
         
-        val betItem = JSONObject().apply {
-            put("event", eventId)
-            put("factor", factorId)
-            put("value", factorValue)
-            put("score", score)
+        val betsArray = JSONArray()
+        val betsFromSlip = betSlipInfo.getJSONArray("bets")
+        
+        for (i in 0 until betsFromSlip.length()) {
+            val bet = betsFromSlip.getJSONObject(i)
+            val betData = bets[i]
             
-            // ИСПРАВЛЕНИЕ: добавляем param для тоталов
-            // Список типов тоталов (как в Python)
-            val totalTypes = listOf(1696, 1793, 1796, 1799, 930)
-            if (factorId in totalTypes) {
-                // Ищем параметр в карте или в betSlipInfo
-                val key = "${eventId}_${factorId}"
-                when {
-                    paramsMap.containsKey(key) && paramsMap[key]!! > 0 -> {
-                        put("param", paramsMap[key]!!)
-                        Log.d(TAG, "  ✅ Добавлен param=${paramsMap[key]} для тотала $factorId (из BetData)")
-                    }
-                    bet.getJSONObject("factor").has("param") -> {
-                        val param = bet.getJSONObject("factor").getInt("param")
-                        if (param > 0) {
-                            put("param", param)
-                            Log.d(TAG, "  ✅ Добавлен param=$param для тотала $factorId (из betSlipInfo)")
-                        }
-                    }
-                    else -> {
-                        Log.d(TAG, "  ⚠️ Тотал $factorId без param")
-                    }
+            betsArray.put(JSONObject().apply {
+                put("event", bet.getJSONObject("event").getInt("id"))
+                put("factor", bet.getJSONObject("factor").getInt("id"))
+                put("value", bet.getJSONObject("factor").getDouble("v"))
+                put("score", bet.getJSONObject("event").optString("score", "0:0"))
+                
+                if (betData.tbType > 0) {
+                    put("param", betData.tbType)
+                } else if (bet.getJSONObject("factor").has("param")) {
+                    put("param", bet.getJSONObject("factor").getInt("param"))
                 }
-            }
-        }
-        betsArray.put(betItem)
-    }
-    
-    // Формируем купон
-    val coupon = JSONObject().apply {
-        put("amount", amount)
-        put("flexBet", "any")
-        put("flexParam", true)
-        put("mirror", "https://fon.bet")
-        put("type", "express")
-        put("expressBonus", 0)
-        put("betType", "express")
-        put("part", 1)
-        put("bets", betsArray)
-    }
-    
-    // ИСПРАВЛЕНИЕ: добавляем CDI
-    val jsonBody = JSONObject().apply {
-        put("requestId", requestId)
-        put("lang", "ru")
-        put("clientId", clientId)
-        put("fsid", fsid)
-        put("sysId", 21)
-        put("CDI", 877)  // ← ДОБАВЛЕН CDI
-        put("deviceId", "9B883CE30780121A11348AF8C3542A89") // ← ДОБАВЛЕН deviceId
-        put("coupon", coupon)
-    }
-    
-    // Логируем полный payload
-    Log.d(TAG, "📤 placeBet PAYLOAD:")
-    try {
-        Log.d(TAG, jsonBody.toString(2))
-    } catch (e: Exception) {
-        Log.d(TAG, jsonBody.toString())
-    }
-    
-    val mediaType = "application/json; charset=utf-8".toMediaType()
-    val body = jsonBody.toString().toRequestBody(mediaType)
-    
-    // ИСПРАВЛЕНИЕ: правильный URL (.com вместо .ru)
-    val url = "https://clientsapi-lb52-w.bk6bba-resources.com/coupon/bet"
-    Log.d(TAG, "🌐 URL: $url")
-    
-    val requestBuilder = Request.Builder()
-        .url(url)
-        .post(body)
-        .addHeader("Content-Type", "application/json")
-        .addHeader("Accept", "application/json")
-    
-    val cookieHeader = cookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
-    if (cookieHeader.isNotEmpty()) {
-        requestBuilder.addHeader("Cookie", cookieHeader)
-        Log.d(TAG, "🍪 Cookie header: ${cookieHeader.take(100)}...")
-    } else {
-        Log.w(TAG, "⚠️ Cookie header ПУСТОЙ!")
-    }
-    
-    client.newCall(requestBuilder.build()).enqueue(object : Callback {
-        override fun onFailure(call: Call, e: IOException) {
-            Log.e(TAG, "═══════════════════════════════════════")
-            Log.e(TAG, "❌ placeBet NETWORK ERROR: ${e.message}")
-            Log.e(TAG, "═══════════════════════════════════════")
-            onError("Network error: ${e.message}")
+            })
         }
         
-        override fun onResponse(call: Call, response: Response) {
-            response.use {
+        val coupon = JSONObject().apply {
+            put("amount", amount)
+            put("flexBet", "any")
+            put("flexParam", true)
+            put("mirror", "https://fon.bet")
+            put("type", "express")
+            put("expressBonus", 0)
+            put("betType", "express")
+            put("part", 1)
+            put("bets", betsArray)
+        }
+        
+        val jsonBody = JSONObject().apply {
+            put("requestId", requestId)
+            put("lang", "ru")
+            put("clientId", clientId)
+            put("fsid", fsid)
+            put("sysId", 21)
+            put("coupon", coupon)
+        }
+        
+        val bodyString = jsonBody.toString()
+        val mediaType = "application/json; charset=utf-8".toMediaType()
+        val body = bodyString.toRequestBody(mediaType)
+        
+        val cookieHeader = buildCookieHeader(cookies, fsid)
+        
+        val request = Request.Builder()
+            .url("https://clientsapi-lb52-w.bk6bba-resources.com/coupon/bet")
+            .post(body)
+            .addHeader("Content-Type", "application/json")
+            .addHeader("Accept", "application/json, text/plain, */*")
+            .addHeader("Accept-Language", "ru-RU,ru;q=0.9")
+            .addHeader("Origin", "https://www.fon.bet")
+            .addHeader("Referer", "https://www.fon.bet/")
+            .addHeader("Sec-Fetch-Dest", "empty")
+            .addHeader("Sec-Fetch-Mode", "cors")
+            .addHeader("Sec-Fetch-Site", "same-site")
+            .addHeader("User-Agent", "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36")
+            .addHeader("X-Requested-With", "XMLHttpRequest")
+            .addHeader("Cookie", cookieHeader)
+            .build()
+        
+        logRequestDetails(request, bodyString)
+        
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.e(TAG, "❌ ШАГ 3/4: ОШИБКА СЕТИ")
+                Log.e(TAG, "❌ ${e.message}", e)
+                onError(e.message ?: "Network error")
+            }
+            
+            override fun onResponse(call: Call, response: Response) {
                 val bodyString = response.body?.string() ?: ""
-                val code = response.code
-                val isSuccess = response.isSuccessful
+                logResponseDetails(response, bodyString)
                 
-                Log.d(TAG, "═══════════════════════════════════════")
-                Log.d(TAG, "📥 placeBet RESPONSE")
-                Log.d(TAG, "═══════════════════════════════════════")
-                Log.d(TAG, "  HTTP Status: $code")
-                Log.d(TAG, "  Successful: $isSuccess")
-                Log.d(TAG, "  Headers: ${response.headers}")
-                Log.d(TAG, "  Body: ${bodyString.take(2000)}") // Ограничиваем длину
-                Log.d(TAG, "═══════════════════════════════════════")
-                
-                if (!isSuccess) {
-                    val errorMsg = "HTTP $code: ${bodyString.take(500)}"
-                    Log.e(TAG, "❌ $errorMsg")
-                    onError(errorMsg)
+                if (!response.isSuccessful) {
+                    Log.e(TAG, "❌ ШАГ 3/4: HTTP ${response.code}")
+                    Log.e(TAG, "❌ Response: ${bodyString.take(1000)}")
+                    onError("HTTP ${response.code}: ${bodyString.take(500)}")
                     return
                 }
                 
                 try {
                     val json = JSONObject(bodyString)
                     
-                    // Логируем результат
-                    val result = json.optString("result", "unknown")
-                    Log.d(TAG, "  result: $result")
+                    // ДЕТАЛЬНЫЙ АНАЛИЗ ОТВЕТА
+                    Log.d(TAG, "📊 АНАЛИЗ placeBet ОТВЕТА:")
+                    Log.d(TAG, "  resultCode (корень): ${json.optInt("resultCode", -999)}")
                     
-                    if (result == "betDelay") {
-                        val delay = json.optLong("betDelay", 0)
-                        Log.d(TAG, "  ⏳ betDelay: $delay мс")
-                    }
-                    
-                    if (result == "couponResult") {
-                        val coupon = json.optJSONObject("coupon")
-                        if (coupon != null) {
-                            Log.d(TAG, "  📋 regId: ${coupon.optString("regId", "?")}")
-                            Log.d(TAG, "  🔢 checkCode: ${coupon.optString("checkCode", "?")}")
-                            Log.d(TAG, "  💰 amount: ${coupon.optDouble("amount", 0.0)}")
-                            Log.d(TAG, "  📈 originalK: ${coupon.optDouble("originalK", 0.0)}")
-                            Log.d(TAG, "  💳 clientSaldo: ${coupon.optDouble("clientSaldo", 0.0)}")
-                            Log.d(TAG, "  🎁 bonusSaldo: ${coupon.optDouble("bonusAccountClientSaldo", 0.0)}")
-                            Log.d(TAG, "  ✅ resultCode: ${coupon.optInt("resultCode", -999)}")
+                    val couponResult = json.optJSONObject("coupon")
+                    if (couponResult != null) {
+                        val couponCode = couponResult.optInt("resultCode", -999)
+                        Log.d(TAG, "  coupon.resultCode: $couponCode")
+                        
+                        when (couponCode) {
+                            -1 -> {
+                                Log.e(TAG, "❌❌❌ КОД -1: СТАВКА НЕ ПРИНЯТА ❌❌❌")
+                                Log.e(TAG, "Возможные причины:")
+                                Log.e(TAG, "  1. Невалидная сессия (куки/fsid устарели)")
+                                Log.e(TAG, "  2. Изменился коэффициент")
+                                Log.e(TAG, "  3. Недостаточно средств")
+                                Log.e(TAG, "  4. Неверный eventId или factorId")
+                                Log.e(TAG, "  5. Событие заблокировано для ставок")
+                                Log.e(TAG, "  6. Несовпадение score с реальным счетом")
+                                Log.e(TAG, "  7. flexBet должен быть 'any' (строчными)")
+                                Log.e(TAG, "  8. flexParam должен быть true (булево)")
+                                if (couponResult.has("error")) {
+                                    Log.e(TAG, "  API error: ${couponResult.optString("error")}")
+                                }
+                                if (couponResult.has("errorMessage")) {
+                                    Log.e(TAG, "  API errorMessage: ${couponResult.optString("errorMessage")}")
+                                }
+                            }
+                            0 -> Log.d(TAG, "✅ КОД 0: СТАВКА ПРИНЯТА УСПЕШНО")
+                            1 -> Log.e(TAG, "❌ КОД 1: Ошибка авторизации")
+                            2 -> Log.e(TAG, "❌ КОД 2: Недостаточно средств")
+                            3 -> Log.w(TAG, "⚠️ КОД 3: Изменился коэффициент")
+                            4 -> Log.w(TAG, "⚠️ КОД 4: Событие недоступно")
+                            else -> Log.w(TAG, "⚠️ Неизвестный код: $couponCode")
                         }
+                    } else {
+                        Log.e(TAG, "❌ coupon объект отсутствует в ответе!")
                     }
                     
                     onSuccess(json)
                 } catch (e: Exception) {
-                    Log.e(TAG, "❌ Parse error: ${e.message}")
-                    Log.e(TAG, "Raw body: ${bodyString.take(1000)}")
+                    Log.e(TAG, "❌ ШАГ 3/4: Ошибка парсинга JSON: ${e.message}")
                     onError("Parse error: ${e.message}")
                 }
             }
-        }
-    })
-}
+        })
+    }
 
     // Шаг 4: Получить результат ставки
     fun getBetResult(
@@ -858,6 +798,10 @@ fun placeBet(
         onSuccess: (JSONObject) -> Unit,
         onError: (String) -> Unit
     ) {
+        Log.d(TAG, "========================================")
+        Log.d(TAG, "📤 ШАГ 4/4: ЗАПРОС betResult (задержка ${delayMs}мс)")
+        Log.d(TAG, "========================================")
+        
         val jsonBody = JSONObject().apply {
             put("lang", "ru")
             put("requestId", requestId)
@@ -868,43 +812,69 @@ fun placeBet(
             put("deviceId", deviceId)
         }
         
+        val bodyString = jsonBody.toString()
         val mediaType = "application/json; charset=utf-8".toMediaType()
-        val body = jsonBody.toString().toRequestBody(mediaType)
+        val body = bodyString.toRequestBody(mediaType)
         
-        val requestBuilder = Request.Builder()
+        val cookieHeader = buildCookieHeader(cookies, fsid)
+        
+        val request = Request.Builder()
             .url("https://clientsapi-lb51-w.bk6bba-resources.com/coupon/betResult")
             .post(body)
             .addHeader("Content-Type", "application/json")
-            .addHeader("Accept", "application/json")
+            .addHeader("Accept", "application/json, text/plain, */*")
+            .addHeader("Accept-Language", "ru-RU,ru;q=0.9")
+            .addHeader("Origin", "https://www.fon.bet")
+            .addHeader("Referer", "https://www.fon.bet/")
+            .addHeader("Sec-Fetch-Dest", "empty")
+            .addHeader("Sec-Fetch-Mode", "cors")
+            .addHeader("Sec-Fetch-Site", "same-site")
+            .addHeader("User-Agent", "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36")
+            .addHeader("X-Requested-With", "XMLHttpRequest")
+            .addHeader("Cookie", cookieHeader)
+            .build()
         
-        val cookieHeader = cookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
-        if (cookieHeader.isNotEmpty()) {
-            requestBuilder.addHeader("Cookie", cookieHeader)
-        }
+        logRequestDetails(request, bodyString)
         
         Thread.sleep(delayMs)
         
-        client.newCall(requestBuilder.build()).enqueue(object : Callback {
+        client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
+                Log.e(TAG, "❌ ШАГ 4/4: ОШИБКА СЕТИ")
+                Log.e(TAG, "❌ ${e.message}", e)
                 onError(e.message ?: "Network error")
             }
             
             override fun onResponse(call: Call, response: Response) {
-                response.use {
-                    val bodyString = response.body?.string() ?: ""
-                    Log.d(TAG, "getBetResult response: $bodyString")
+                val bodyString = response.body?.string() ?: ""
+                logResponseDetails(response, bodyString)
+                
+                if (!response.isSuccessful) {
+                    Log.e(TAG, "❌ ШАГ 4/4: HTTP ${response.code}")
+                    onError("HTTP ${response.code}")
+                    return
+                }
+                
+                try {
+                    val json = JSONObject(bodyString)
                     
-                    if (!response.isSuccessful) {
-                        onError("HTTP ${response.code}")
-                        return
+                    Log.d(TAG, "📊 АНАЛИЗ betResult:")
+                    if (json.has("result")) {
+                        Log.d(TAG, "  result: ${json.getString("result")}")
+                    }
+                    if (json.has("coupon")) {
+                        val coupon = json.getJSONObject("coupon")
+                        Log.d(TAG, "  coupon.regId: ${coupon.optString("regId", "N/A")}")
+                        Log.d(TAG, "  coupon.resultCode: ${coupon.optInt("resultCode", -999)}")
+                        Log.d(TAG, "  coupon.clientSaldo: ${coupon.optDouble("clientSaldo", -1.0)}")
+                        Log.d(TAG, "  coupon.amount: ${coupon.optDouble("amount", -1.0)}")
+                        Log.d(TAG, "  coupon.originalK: ${coupon.optDouble("originalK", -1.0)}")
                     }
                     
-                    try {
-                        val json = JSONObject(bodyString)
-                        onSuccess(json)
-                    } catch (e: Exception) {
-                        onError("Parse error: ${e.message}")
-                    }
+                    onSuccess(json)
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ ШАГ 4/4: Ошибка парсинга JSON: ${e.message}")
+                    onError("Parse error: ${e.message}")
                 }
             }
         })
@@ -921,25 +891,31 @@ fun placeBet(
         onSuccess: (MakeBetResult) -> Unit,
         onError: (String) -> Unit
     ) {
-        Log.d(TAG, "🎰 makeBet: ${bets.size} матчей, сумма $amount ₽")
+        Log.d(TAG, "========================================")
+        Log.d(TAG, "🎰 НАЧАЛО ПОЛНОГО ЦИКЛА СТАВКИ")
+        Log.d(TAG, "========================================")
+        Log.d(TAG, "📊 Параметры: сумма=$amount ₽, clientId=$clientId")
+        Log.d(TAG, "📊 Матчей: ${bets.size}")
+        Log.d(TAG, "📊 FSID: ${fsid.take(10)}...")
+        Log.d(TAG, "📊 DeviceID: ${deviceId.take(10)}...")
+        Log.d(TAG, "📊 Cookies получено: ${cookies.size}")
+        
+        bets.forEachIndexed { index, bet ->
+            Log.d(TAG, "📊 Матч ${index+1}: mId=${bet.mId}, type=${bet.type}, home=${bet.home}, away=${bet.away}, kef=${bet.startKf}")
+        }
         
         getBetSlipInfo(bets, cookies, fsid, clientId,
             onSuccess = { betSlipInfo ->
-                Log.d(TAG, "✅ betSlipInfo получен, K=${betSlipInfo.optDouble("K")}")
-                
                 getBetRequestId(cookies, fsid, clientId, deviceId,
                     onSuccess = { requestId ->
-                        Log.d(TAG, "✅ requestId получен: $requestId")
-                        
                         placeBet(requestId, betSlipInfo, amount, cookies, fsid, clientId, bets,
                             onSuccess = { placeBetResponse ->
-                                Log.d(TAG, "✅ Ставка размещена, ответ: $placeBetResponse")
-                                
                                 val betDelay = placeBetResponse.optLong("betDelay", 0)
-                                
                                 getBetResult(requestId, betDelay, cookies, fsid, clientId, deviceId,
                                     onSuccess = { betResult ->
-                                        Log.d(TAG, "✅ Результат ставки: $betResult")
+                                        Log.d(TAG, "========================================")
+                                        Log.d(TAG, "🎉 ПОЛНЫЙ ЦИКЛ СТАВКИ ЗАВЕРШЕН")
+                                        Log.d(TAG, "========================================")
                                         
                                         val result = MakeBetResult(
                                             betSlipInfo = betSlipInfo,
@@ -951,25 +927,25 @@ fun placeBet(
                                         onSuccess(result)
                                     },
                                     onError = { error ->
-                                        Log.e(TAG, "❌ Ошибка getBetResult: $error")
+                                        Log.e(TAG, "❌ Ошибка на шаге 4/4: $error")
                                         onError("Ошибка получения результата: $error")
                                     }
                                 )
                             },
                             onError = { error ->
-                                Log.e(TAG, "❌ Ошибка placeBet: $error")
+                                Log.e(TAG, "❌ Ошибка на шаге 3/4: $error")
                                 onError("Ошибка размещения ставки: $error")
                             }
                         )
                     },
                     onError = { error ->
-                        Log.e(TAG, "❌ Ошибка getBetRequestId: $error")
+                        Log.e(TAG, "❌ Ошибка на шаге 2/4: $error")
                         onError("Ошибка получения requestId: $error")
                     }
                 )
             },
             onError = { error ->
-                Log.e(TAG, "❌ Ошибка getBetSlipInfo: $error")
+                Log.e(TAG, "❌ Ошибка на шаге 1/4: $error")
                 onError("Ошибка получения информации о ставках: $error")
             }
         )
