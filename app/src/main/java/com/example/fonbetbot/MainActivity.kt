@@ -44,6 +44,7 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import android.util.Log
 import android.webkit.CookieManager
+import android.content.ContentValues
 import java.util.*
 
 // ==================== ЦВЕТОВАЯ ПАЛИТРА BYBIT ====================
@@ -306,6 +307,7 @@ fun loadActiveExpresses() {
 }
     // Внутри BybitMainScreen, добавьте эту функцию:
 
+// Исправленная версия finalizeOldExpresses (без конфликта имён)
 fun finalizeOldExpresses() {
     scope.launch(Dispatchers.IO) {
         try {
@@ -327,15 +329,14 @@ fun finalizeOldExpresses() {
                 val idExp = cursor.getInt(1)
                 val ageSeconds = currentTime - cursor.getLong(3)
                 
-                // Помечаем как неактивный (статус -3 = "устарел")
-                val updateValues = ContentValues().apply {
+                // Используем полное имя класса для избежания конфликта
+                val updateValues = android.content.ContentValues().apply {
                     put("sts_all", -3)
                     put("updated_at", currentTime)
                 }
                 db.update("express_bets", updateValues, "id = ?", arrayOf(expressId.toString()))
                 
-                // Помечаем все матчи как finalized
-                val eventValues = ContentValues().apply {
+                val eventValues = android.content.ContentValues().apply {
                     put("is_finalized", 1)
                     put("status", 0)
                     put("updated_at", currentTime)
@@ -352,7 +353,7 @@ fun finalizeOldExpresses() {
             if (finalizedCount > 0) {
                 withContext(Dispatchers.Main) {
                     logs.add(0, "[${getCurrentTime()}] ⏰ Автоматически завершено $finalizedCount старых экспрессов")
-                    loadActiveExpresses() // Перезагружаем список
+                    loadActiveExpresses()
                 }
             }
         } catch (e: Exception) {
@@ -360,6 +361,7 @@ fun finalizeOldExpresses() {
         }
     }
 }
+
     fun fetchBalanceFromApi() {
         if (authData == null) {
             logs.add(0, "[${getCurrentTime()}] ❌ Нет данных авторизации")
