@@ -258,35 +258,108 @@ fun BybitMainScreen(
     
     val maxActiveExpresses = prefs.getInt("max_active_expresses", 5)
     
-    fun loadActiveExpresses() {
-        scope.launch(Dispatchers.IO) {
-            try {
-                val allExpresses = dbHelper.getAllExpresses()
-                val currentTime = System.currentTimeMillis() / 1000
-                val twoHoursInSeconds = 2 * 60 * 60
+    // Внутри BybitMainScreen, замените функцию loadActiveExpresses:
+
+fun loadActiveExpresses() {
+    scope.launch(Dispatchers.IO) {
+        try {
+            val allExpresses = dbHelper.getAllExpresses()
+            val currentTime = System.currentTimeMillis() / 1000
+            val maxAgeSeconds = 2 * 60 * 60 // 2 часа в секундах
+            
+            // Фильтруем: только активные (0,1,2) и не старше 2 часов
+            val filtered = allExpresses.filter { express ->
+                val ageSeconds = currentTime - express.createdAt
+                val isActive = express.stsAll in listOf(0, 1, 2)
+                val isRecent = ageSeconds <= maxAgeSeconds
                 
-                val filtered = allExpresses.filter { express ->
-                    express.stsAll in listOf(0, 1, 2) &&
-                    (currentTime - express.createdAt) <= twoHoursInSeconds
-                }.sortedByDescending { it.createdAt }
-                
-                val matchesMap = mutableMapOf<Long, List<MatchInfo>>()
-                filtered.forEach { express ->
-                    matchesMap[express.id] = dbHelper.getMatchesByExpressId(express.id)
+                if (isActive && !isRecent) {
+                    Log.d("BybitMainScreen", "⏰ Экспресс #${express.idExp} старше 2 часов (${ageSeconds/60}мин), скрыт из UI")
                 }
                 
-                withContext(Dispatchers.Main) {
-                    activeExpresses = filtered
-                    matchesByExpress = matchesMap
+                isActive && isRecent
+            }.sortedByDescending { it.createdAt }
+            
+            val matchesMap = mutableMapOf<Long, List<MatchInfo>>()
+            filtered.forEach { express ->
+                matchesMap[express.id] = dbHelper.getMatchesByExpressId(express.id)
+            }
+            
+            withContext(Dispatchers.Main) {
+                activeExpresses = filtered
+                matchesByExpress = matchesMap
+                
+                // Логируем статистику
+                val hiddenCount = allExpresses.count { 
+                    it.stsAll in listOf(0, 1, 2) && (currentTime - it.createdAt) > maxAgeSeconds 
                 }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    logs.add(0, "[${getCurrentTime()}] ❌ Ошибка загрузки: ${e.message}")
+                if (hiddenCount > 0) {
+                    logs.add(0, "[${getCurrentTime()}] ⏰ Скрыто $hiddenCount экспрессов старше 2ч")
                 }
+            }
+        } catch (e: Exception) {
+            withContext(Dispatchers.Main) {
+                logs.add(0, "[${getCurrentTime()}] ❌ Ошибка загрузки: ${e.message}")
             }
         }
     }
-    
+}
+    // Внутри BybitMainScreen, добавьте эту функцию:
+
+fun finalizeOldExpresses() {
+    scope.launch(Dispatchers.IO) {
+        try {
+            val db = dbHelper.writableDatabase
+            val currentTime = System.currentTimeMillis() / 1000
+            val maxAgeSeconds = 2 * 60 * 60
+            
+            // Находим экспрессы старше 2 часов со статусом 0 (активные)
+            val cursor = db.rawQuery("""
+                SELECT id, id_exp, sts_all, ct 
+                FROM express_bets 
+                WHERE sts_all IN (0, 1, 2) 
+                AND ct < ?
+            """, arrayOf((currentTime - maxAgeSeconds).toString()))
+            
+            var finalizedCount = 0
+            while (cursor.moveToNext()) {
+                val expressId = cursor.getLong(0)
+                val idExp = cursor.getInt(1)
+                val ageSeconds = currentTime - cursor.getLong(3)
+                
+                // Помечаем как неактивный (статус -3 = "устарел")
+                val updateValues = ContentValues().apply {
+                    put("sts_all", -3)
+                    put("updated_at", currentTime)
+                }
+                db.update("express_bets", updateValues, "id = ?", arrayOf(expressId.toString()))
+                
+                // Помечаем все матчи как finalized
+                val eventValues = ContentValues().apply {
+                    put("is_finalized", 1)
+                    put("status", 0)
+                    put("updated_at", currentTime)
+                }
+                db.update("express_events", eventValues, 
+                    "express_id = ? AND is_finalized = 0", 
+                    arrayOf(expressId.toString()))
+                
+                finalizedCount++
+                Log.d("BybitMainScreen", "⏰ Экспресс #$idExp финализирован (возраст: ${ageSeconds/3600}ч)")
+            }
+            cursor.close()
+            
+            if (finalizedCount > 0) {
+                withContext(Dispatchers.Main) {
+                    logs.add(0, "[${getCurrentTime()}] ⏰ Автоматически завершено $finalizedCount старых экспрессов")
+                    loadActiveExpresses() // Перезагружаем список
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("BybitMainScreen", "Ошибка финализации: ${e.message}")
+        }
+    }
+}
     fun fetchBalanceFromApi() {
         if (authData == null) {
             logs.add(0, "[${getCurrentTime()}] ❌ Нет данных авторизации")
@@ -343,30 +416,30 @@ fun BybitMainScreen(
         }
     }
     
-    LaunchedEffect(isBotRunning) {
-        loadActiveExpresses()
-    }
     
     // Периодическое обновление
-    LaunchedEffect(isBotRunning) {
-        if (isBotRunning) {
-            while (true) {
-                delay(5000)
-                loadActiveExpresses()
-            }
+    // В LaunchedEffect при старте:
+LaunchedEffect(Unit) {
+    isBotRunning = BotForegroundService.isRunning
+    if (isBotRunning) {
+        logs.add(0, "[${getCurrentTime()}] 🔄 Подключено к работающему боту")
+        if (BotForegroundService.lastBalance > 0) {
+            balance = BotForegroundService.lastBalance
         }
     }
-    
-    LaunchedEffect(Unit) {
-        isBotRunning = BotForegroundService.isRunning
-        if (isBotRunning) {
-            logs.add(0, "[${getCurrentTime()}] 🔄 Подключено к работающему боту")
-            if (BotForegroundService.lastBalance > 0) {
-                balance = BotForegroundService.lastBalance
-            }
+    loadActiveExpresses()
+    finalizeOldExpresses() // ← Финализируем старые при старте
+}
+
+// Добавьте отдельный цикл для периодической финализации:
+LaunchedEffect(isBotRunning) {
+    if (isBotRunning) {
+        while (true) {
+            delay(60000) // Каждую минуту
+            finalizeOldExpresses()
         }
-        loadActiveExpresses()
     }
+}
     
     // Обработка P&L
     LaunchedEffect(balance) {
@@ -451,16 +524,18 @@ fun BybitMainScreen(
     }
     
     Scaffold(
-        containerColor = BybitColors.Background,
-        bottomBar = {
-            BybitBottomNavigation(
-                selectedItem = selectedNavItem,
-                onItemSelected = onNavItemSelected,
-                isBotRunning = isBotRunning,
-                onStartStopBot = { if (isBotRunning) stopBot() else startBot() }
-            )
-        }
-    ) { paddingValues ->
+    containerColor = BybitColors.Background,
+    bottomBar = {
+        BybitBottomNavigation(
+            selectedItem = selectedNavItem,
+            onItemSelected = onNavItemSelected,
+            isBotRunning = isBotRunning,
+            onStartStopBot = { if (isBotRunning) stopBot() else startBot() },
+            activeExpressesCount = activeExpresses.size,  // ← Теперь только свежие
+            maxActiveExpresses = maxActiveExpresses
+        )
+    }
+) { paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -604,12 +679,15 @@ fun BybitMainScreen(
 
 // ==================== НИЖНЯЯ ПАНЕЛЬ НАВИГАЦИИ ====================
 
+// Версия ТОЛЬКО с бейджем на иконке (без текста рядом)
 @Composable
-fun BybitBottomNavigation(
+fun BybitBottomNavigationBadgeOnly(
     selectedItem: BottomNavItem,
     onItemSelected: (BottomNavItem) -> Unit,
     isBotRunning: Boolean,
-    onStartStopBot: () -> Unit
+    onStartStopBot: () -> Unit,
+    activeExpressesCount: Int = 0,
+    maxActiveExpresses: Int = 5
 ) {
     Surface(
         color = BybitColors.Surface,
@@ -623,59 +701,70 @@ fun BybitBottomNavigation(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            BottomNavItem.entries.take(4).forEach { item ->
-                val isSelected = selectedItem == item
-                
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { onItemSelected(item) }
-                        .padding(vertical = 4.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Box(
-                        modifier = Modifier.size(24.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        when (item) {
-                            BottomNavItem.HOME -> Icon(
-                                Icons.Default.Home,
-                                null,
-                                tint = if (isSelected) BybitColors.Yellow else BybitColors.TextTertiary,
-                                modifier = Modifier.size(22.dp)
-                            )
-                            BottomNavItem.BETS -> Icon(
-                                Icons.Default.ListAlt,
-                                null,
-                                tint = if (isSelected) BybitColors.Yellow else BybitColors.TextTertiary,
-                                modifier = Modifier.size(22.dp)
-                            )
-                            BottomNavItem.STATS -> Icon(
-                                Icons.Default.BarChart,
-                                null,
-                                tint = if (isSelected) BybitColors.Yellow else BybitColors.TextTertiary,
-                                modifier = Modifier.size(22.dp)
-                            )
-                            BottomNavItem.PROFILE -> Icon(
-                                Icons.Default.Person,
-                                null,
-                                tint = if (isSelected) BybitColors.Yellow else BybitColors.TextTertiary,
-                                modifier = Modifier.size(22.dp)
+            // Главная
+            BottomNavItemView(
+                item = BottomNavItem.HOME,
+                isSelected = selectedItem == BottomNavItem.HOME,
+                onClick = { onItemSelected(BottomNavItem.HOME) }
+            )
+            
+            // Экспрессы С БЕЙДЖЕМ
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { onItemSelected(BottomNavItem.BETS) }
+                    .padding(vertical = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Box(modifier = Modifier.size(28.dp)) {
+                    Icon(
+                        Icons.Default.ListAlt,
+                        null,
+                        tint = if (selectedItem == BottomNavItem.BETS) BybitColors.Yellow else BybitColors.TextTertiary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    
+                    // 🔴 Красный бейдж как в БК
+                    if (activeExpressesCount > 0) {
+                        Badge(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .offset(x = 4.dp, y = (-4).dp),
+                            containerColor = BybitColors.Red,
+                            contentColor = Color.White
+                        ) {
+                            Text(
+                                text = if (activeExpressesCount > 9) "9+" else activeExpressesCount.toString(),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     }
-                    
-                    Spacer(modifier = Modifier.height(2.dp))
-                    
-                    Text(
-                        text = item.label,
-                        fontSize = 11.sp,
-                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                        color = if (isSelected) BybitColors.Yellow else BybitColors.TextTertiary
-                    )
                 }
+                
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Экспрессы",
+                    fontSize = 11.sp,
+                    fontWeight = if (selectedItem == BottomNavItem.BETS) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (selectedItem == BottomNavItem.BETS) BybitColors.Yellow else BybitColors.TextTertiary
+                )
             }
+            
+            // Статистика
+            BottomNavItemView(
+                item = BottomNavItem.STATS,
+                isSelected = selectedItem == BottomNavItem.STATS,
+                onClick = { onItemSelected(BottomNavItem.STATS) }
+            )
+            
+            // Аккаунт
+            BottomNavItemView(
+                item = BottomNavItem.PROFILE,
+                isSelected = selectedItem == BottomNavItem.PROFILE,
+                onClick = { onItemSelected(BottomNavItem.PROFILE) }
+            )
             
             // Кнопка бота
             Column(
@@ -688,23 +777,20 @@ fun BybitBottomNavigation(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(40.dp)
                         .clip(CircleShape)
-                        .background(
-                            if (isBotRunning) BybitColors.Red else BybitColors.Green
-                        ),
+                        .background(if (isBotRunning) BybitColors.Red else BybitColors.Green),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         if (isBotRunning) Icons.Default.Stop else Icons.Default.PlayArrow,
                         null,
                         tint = Color.White,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(22.dp)
                     )
                 }
                 
                 Spacer(modifier = Modifier.height(2.dp))
-                
                 Text(
                     text = if (isBotRunning) "Стоп" else "Старт",
                     fontSize = 11.sp,
@@ -713,6 +799,55 @@ fun BybitBottomNavigation(
                 )
             }
         }
+    }
+}
+
+@Composable
+fun BottomNavItemView(
+    item: BottomNavItem,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .weight(1f)
+            .clickable { onClick() }
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Box(modifier = Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+            when (item) {
+                BottomNavItem.HOME -> Icon(
+                    Icons.Default.Home, null,
+                    tint = if (isSelected) BybitColors.Yellow else BybitColors.TextTertiary,
+                    modifier = Modifier.size(22.dp)
+                )
+                BottomNavItem.BETS -> Icon(
+                    Icons.Default.ListAlt, null,
+                    tint = if (isSelected) BybitColors.Yellow else BybitColors.TextTertiary,
+                    modifier = Modifier.size(22.dp)
+                )
+                BottomNavItem.STATS -> Icon(
+                    Icons.Default.BarChart, null,
+                    tint = if (isSelected) BybitColors.Yellow else BybitColors.TextTertiary,
+                    modifier = Modifier.size(22.dp)
+                )
+                BottomNavItem.PROFILE -> Icon(
+                    Icons.Default.Person, null,
+                    tint = if (isSelected) BybitColors.Yellow else BybitColors.TextTertiary,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = item.label,
+            fontSize = 11.sp,
+            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (isSelected) BybitColors.Yellow else BybitColors.TextTertiary
+        )
     }
 }
 
