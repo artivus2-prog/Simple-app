@@ -2891,7 +2891,130 @@ fun bybitTextFieldColors() = OutlinedTextFieldDefaults.colors(
     unfocusedTextColor = BybitColors.TextPrimary
 )
             
-         
+  // РАЗМЕСТИТЕ ЭТУ ФУНКЦИЮ ПОСЛЕ ВСЕХ @Composable ФУНКЦИЙ, НО ДО ВСПОМОГАТЕЛЬНЫХ
+
+@Composable
+fun BybitBottomNavigation(
+    selectedItem: BottomNavItem,
+    onItemSelected: (BottomNavItem) -> Unit,
+    isBotRunning: Boolean,
+    onStartStopBot: () -> Unit,
+    activeExpressesCount: Int = 0,
+    maxActiveExpresses: Int = 5
+) {
+    Surface(
+        color = BybitColors.Surface,
+        shadowElevation = 8.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(64.dp)
+                .padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            BottomNavItem.entries.forEach { item ->
+                val isSelected = selectedItem == item
+                
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onItemSelected(item) }
+                        .padding(vertical = 4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Box(modifier = Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                        when (item) {
+                            BottomNavItem.HOME -> Icon(
+                                Icons.Default.Home, null,
+                                tint = if (isSelected) BybitColors.Yellow else BybitColors.TextTertiary,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            BottomNavItem.BETS -> {
+                                Icon(
+                                    Icons.Default.ListAlt, null,
+                                    tint = if (isSelected) BybitColors.Yellow else BybitColors.TextTertiary,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                
+                                if (activeExpressesCount > 0) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .offset(x = 6.dp, y = (-4).dp)
+                                            .size(18.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                if (activeExpressesCount >= maxActiveExpresses) BybitColors.Red 
+                                                else BybitColors.Yellow
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = if (activeExpressesCount > 99) "99+" else "$activeExpressesCount",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (activeExpressesCount >= maxActiveExpresses) Color.White else Color.Black
+                                        )
+                                    }
+                                }
+                            }
+                            BottomNavItem.STATS -> Icon(
+                                Icons.Default.BarChart, null,
+                                tint = if (isSelected) BybitColors.Yellow else BybitColors.TextTertiary,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            BottomNavItem.PROFILE -> Icon(
+                                Icons.Default.Person, null,
+                                tint = if (isSelected) BybitColors.Yellow else BybitColors.TextTertiary,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = item.label,
+                        fontSize = 11.sp,
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (isSelected) BybitColors.Yellow else BybitColors.TextTertiary
+                    )
+                }
+            }
+            
+            // Кнопка Старт/Стоп
+            Column(
+                modifier = Modifier
+                    .weight(1.2f)
+                    .clickable { onStartStopBot() }
+                    .padding(vertical = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(if (isBotRunning) BybitColors.Red else BybitColors.Green),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        if (isBotRunning) Icons.Default.Stop else Icons.Default.PlayArrow, null,
+                        tint = Color.White, modifier = Modifier.size(22.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = if (isBotRunning) "Стоп" else "Старт",
+                    fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                    color = BybitColors.TextSecondary
+                )
+            }
+        }
+    }
+}       
 
 // ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 
