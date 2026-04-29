@@ -528,16 +528,16 @@ LaunchedEffect(isBotRunning) {
     Scaffold(
     containerColor = BybitColors.Background,
     bottomBar = {
-        BybitBottomNavigation(
+        BybitBottomNavigationBadgeOnly(
             selectedItem = selectedNavItem,
             onItemSelected = onNavItemSelected,
             isBotRunning = isBotRunning,
             onStartStopBot = { if (isBotRunning) stopBot() else startBot() },
-            activeExpressesCount = activeExpresses.size,  // ← Теперь только свежие
+            activeExpressesCount = activeExpresses.size,
             maxActiveExpresses = maxActiveExpresses
         )
     }
-) { paddingValues ->
+){ paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -680,8 +680,6 @@ LaunchedEffect(isBotRunning) {
 }
 
 // ==================== НИЖНЯЯ ПАНЕЛЬ НАВИГАЦИИ ====================
-
-// Версия ТОЛЬКО с бейджем на иконке (без текста рядом)
 @Composable
 fun BybitBottomNavigationBadgeOnly(
     selectedItem: BottomNavItem,
@@ -704,16 +702,32 @@ fun BybitBottomNavigationBadgeOnly(
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Главная
-            BottomNavItemView(
-                item = BottomNavItem.HOME,
-                isSelected = selectedItem == BottomNavItem.HOME,
-                onClick = { onItemSelected(BottomNavItem.HOME) }
-            )
+            Column(
+                modifier = Modifier
+                    .weight(1f, fill = true)
+                    .clickable { onItemSelected(BottomNavItem.HOME) }
+                    .padding(vertical = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    Icons.Default.Home, null,
+                    tint = if (selectedItem == BottomNavItem.HOME) BybitColors.Yellow else BybitColors.TextTertiary,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Главная",
+                    fontSize = 11.sp,
+                    fontWeight = if (selectedItem == BottomNavItem.HOME) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (selectedItem == BottomNavItem.HOME) BybitColors.Yellow else BybitColors.TextTertiary
+                )
+            }
             
             // Экспрессы С БЕЙДЖЕМ
             Column(
                 modifier = Modifier
-                    .weight(1f)
+                    .weight(1f, fill = true)
                     .clickable { onItemSelected(BottomNavItem.BETS) }
                     .padding(vertical = 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -721,23 +735,29 @@ fun BybitBottomNavigationBadgeOnly(
             ) {
                 Box(modifier = Modifier.size(28.dp)) {
                     Icon(
-                        Icons.Default.ListAlt,
-                        null,
+                        Icons.Default.ListAlt, null,
                         tint = if (selectedItem == BottomNavItem.BETS) BybitColors.Yellow else BybitColors.TextTertiary,
                         modifier = Modifier.size(24.dp)
                     )
                     
-                    // 🔴 Красный бейдж как в БК
+                    // 🔴 Красный бейдж с количеством активных экспрессов
                     if (activeExpressesCount > 0) {
                         Badge(
                             modifier = Modifier
                                 .align(Alignment.TopEnd)
                                 .offset(x = 4.dp, y = (-4).dp),
-                            containerColor = BybitColors.Red,
-                            contentColor = Color.White
+                            containerColor = if (activeExpressesCount >= maxActiveExpresses) 
+                                BybitColors.Red 
+                            else 
+                                BybitColors.Yellow,
+                            contentColor = if (activeExpressesCount >= maxActiveExpresses) 
+                                Color.White 
+                            else 
+                                Color.Black
                         ) {
                             Text(
-                                text = if (activeExpressesCount > 9) "9+" else activeExpressesCount.toString(),
+                                text = if (activeExpressesCount > 99) "99+" 
+                                       else activeExpressesCount.toString(),
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -755,23 +775,55 @@ fun BybitBottomNavigationBadgeOnly(
             }
             
             // Статистика
-            BottomNavItemView(
-                item = BottomNavItem.STATS,
-                isSelected = selectedItem == BottomNavItem.STATS,
-                onClick = { onItemSelected(BottomNavItem.STATS) }
-            )
-            
-            // Аккаунт
-            BottomNavItemView(
-                item = BottomNavItem.PROFILE,
-                isSelected = selectedItem == BottomNavItem.PROFILE,
-                onClick = { onItemSelected(BottomNavItem.PROFILE) }
-            )
-            
-            // Кнопка бота
             Column(
                 modifier = Modifier
-                    .weight(1.2f)
+                    .weight(1f, fill = true)
+                    .clickable { onItemSelected(BottomNavItem.STATS) }
+                    .padding(vertical = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    Icons.Default.BarChart, null,
+                    tint = if (selectedItem == BottomNavItem.STATS) BybitColors.Yellow else BybitColors.TextTertiary,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Статистика",
+                    fontSize = 11.sp,
+                    fontWeight = if (selectedItem == BottomNavItem.STATS) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (selectedItem == BottomNavItem.STATS) BybitColors.Yellow else BybitColors.TextTertiary
+                )
+            }
+            
+            // Аккаунт
+            Column(
+                modifier = Modifier
+                    .weight(1f, fill = true)
+                    .clickable { onItemSelected(BottomNavItem.PROFILE) }
+                    .padding(vertical = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    Icons.Default.Person, null,
+                    tint = if (selectedItem == BottomNavItem.PROFILE) BybitColors.Yellow else BybitColors.TextTertiary,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Аккаунт",
+                    fontSize = 11.sp,
+                    fontWeight = if (selectedItem == BottomNavItem.PROFILE) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (selectedItem == BottomNavItem.PROFILE) BybitColors.Yellow else BybitColors.TextTertiary
+                )
+            }
+            
+            // Кнопка Старт/Стоп
+            Column(
+                modifier = Modifier
+                    .weight(1.2f, fill = true)
                     .clickable { onStartStopBot() }
                     .padding(vertical = 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -785,74 +837,20 @@ fun BybitBottomNavigationBadgeOnly(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        if (isBotRunning) Icons.Default.Stop else Icons.Default.PlayArrow,
-                        null,
-                        tint = Color.White,
-                        modifier = Modifier.size(22.dp)
+                        if (isBotRunning) Icons.Default.Stop else Icons.Default.PlayArrow, null,
+                        tint = Color.White, modifier = Modifier.size(22.dp)
                     )
                 }
-                
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = if (isBotRunning) "Стоп" else "Старт",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
                     color = BybitColors.TextSecondary
                 )
             }
         }
     }
 }
-
-@Composable
-fun BottomNavItemView(
-    item: BottomNavItem,
-    isSelected: Boolean,
-    onClick: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .weight(1f, fill = true)
-            .clickable { onClick() }
-            .padding(vertical = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Box(modifier = Modifier.size(24.dp), contentAlignment = Alignment.Center) {
-            when (item) {
-                BottomNavItem.HOME -> Icon(
-                    Icons.Default.Home, null,
-                    tint = if (isSelected) BybitColors.Yellow else BybitColors.TextTertiary,
-                    modifier = Modifier.size(22.dp)
-                )
-                BottomNavItem.BETS -> Icon(
-                    Icons.Default.ListAlt, null,
-                    tint = if (isSelected) BybitColors.Yellow else BybitColors.TextTertiary,
-                    modifier = Modifier.size(22.dp)
-                )
-                BottomNavItem.STATS -> Icon(
-                    Icons.Default.BarChart, null,
-                    tint = if (isSelected) BybitColors.Yellow else BybitColors.TextTertiary,
-                    modifier = Modifier.size(22.dp)
-                )
-                BottomNavItem.PROFILE -> Icon(
-                    Icons.Default.Person, null,
-                    tint = if (isSelected) BybitColors.Yellow else BybitColors.TextTertiary,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-        }
-        
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(
-            text = item.label,
-            fontSize = 11.sp,
-            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-            color = if (isSelected) BybitColors.Yellow else BybitColors.TextTertiary
-        )
-    }
-}
-
 // ==================== КАРТОЧКА БАЛАНСА ====================
 
 @Composable
