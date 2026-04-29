@@ -1543,6 +1543,8 @@ fun StatRow(label: String, value: String, valueColor: Color = BybitColors.TextPr
 
 // ==================== ЭКРАН ПРОФИЛЯ ====================
 
+// ==================== ЭКРАН ПРОФИЛЯ (ОБНОВЛЁННЫЙ) ====================
+
 @Composable
 fun ProfileContent(
     authData: AuthData?,
@@ -1551,6 +1553,125 @@ fun ProfileContent(
     onNavigateToSettings: () -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    
+    // Состояния для данных профиля
+    var isLoadingProfile by remember { mutableStateOf(false) }
+    var profileClientId by remember { mutableStateOf<Long?>(null) }
+    var profileUserName by remember { mutableStateOf<String?>(null) }
+    var profileSaldo by remember { mutableStateOf<Double?>(null) }
+    var profileError by remember { mutableStateOf<String?>(null) }
+    var lastProfileUpdate by remember { mutableStateOf<Long>(0) }
+    
+    // Загружаем сохранённые данные из локальной БД при старте
+    LaunchedEffect(authData) {
+        authData?.let {
+            try {
+                val user = dbHelper.getUser(it.fsid, it.deviceId)
+                user?.let { userData ->
+                    profileClientId = userData.clientId
+                    profileUserName = userData.username
+                    
+                    val stats = dbHelper.getBalanceStats(userData.id)
+                    if (stats.currentBalance > 0) {
+                        profileSaldo = stats.currentBalance
+                    }
+                    
+                    Log.d("ProfileContent", "📊 Загружено из БД: clientId=$profileClientId, userName=$profileUserName, saldo=$profileSaldo")
+                }
+            } catch (e: Exception) {
+                Log.e("ProfileContent", "Ошибка загрузки из БД: ${e.message}")
+            }
+        }
+    }
+    
+    // Функция загрузки данных из API
+    fun fetchProfileFromApi() {
+        if (authData == null) {
+            profileError = "Нет данных авторизации"
+            return
+        }
+        
+        isLoadingProfile = true
+        profileError = null
+        
+        val apiClient = ApiClient()
+        
+        // Получаем куки из WebView если есть
+        val cookieManager = CookieManager.getInstance()
+        val cookieString = cookieManager.getCookie("https://www.fon.bet") ?: ""
+        
+        val cookies = if (cookieString.isNotEmpty()) {
+            cookieString.split("; ").associate { cookie ->
+                val parts = cookie.split("=", limit = 2)
+                parts[0] to (parts.getOrNull(1) ?: "")
+            }
+        } else {
+            emptyMap()
+        }
+        
+        Log.d("ProfileContent", "🔄 Запрос session/info...")
+        
+        apiClient.getSaldo(
+            cookies = cookies,
+            fsid = authData.fsid,
+            deviceId = authData.deviceId,
+            onSuccess = { sessionInfo: ApiClient.SessionInfo? ->
+                isLoadingProfile = false
+                lastProfileUpdate = System.currentTimeMillis()
+                
+                if (sessionInfo != null) {
+                    Log.d("ProfileContent", "✅ session/info успешно получен")
+                    Log.d("ProfileContent", "  clientId: ${sessionInfo.clientId}")
+                    Log.d("ProfileContent", "  saldo: ${sessionInfo.saldo}")
+                    Log.d("ProfileContent", "  userName: ${sessionInfo.userName}")
+                    
+                    // Обновляем UI
+                    sessionInfo.saldo?.let { profileSaldo = it }
+                    sessionInfo.clientId?.let { profileClientId = it }
+                    sessionInfo.userName?.let { profileUserName = it }
+                    
+                    // Сохраняем в локальную БД
+                    scope.launch {
+                        try {
+                            val user = dbHelper.getUser(authData.fsid, authData.deviceId)
+                            if (user != null) {
+                                dbHelper.updateUserInfo(
+                                    userId = user.id,
+                                    clientId = sessionInfo.clientId,
+                                    username = sessionInfo.userName
+                                )
+                                sessionInfo.saldo?.let {
+                                    dbHelper.saveBalance(user.id, it)
+                                }
+                                Log.d("ProfileContent", "💾 Данные сохранены в БД")
+                            } else {
+                                // Создаём пользователя если не существует
+                                val userId = dbHelper.saveUser(
+                                    fsid = authData.fsid,
+                                    deviceId = authData.deviceId,
+                                    username = sessionInfo.userName
+                                )
+                                sessionInfo.saldo?.let {
+                                    dbHelper.saveBalance(userId, it)
+                                }
+                                Log.d("ProfileContent", "💾 Создан новый пользователь id=$userId")
+                            }
+                        } catch (e: Exception) {
+                            Log.e("ProfileContent", "Ошибка сохранения в БД: ${e.message}")
+                        }
+                    }
+                } else {
+                    profileError = "Пустой ответ от API"
+                }
+            },
+            onError = { error: String ->
+                isLoadingProfile = false
+                profileError = error
+                Log.e("ProfileContent", "❌ Ошибка API: $error")
+            }
+        )
+    }
     
     LazyColumn(
         modifier = Modifier
@@ -1558,15 +1679,43 @@ fun ProfileContent(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // Заголовок с кнопкой обновления
         item {
-            Text(
-                text = "👤 Аккаунт",
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                color = BybitColors.TextPrimary
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "👤 Аккаунт",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = BybitColors.TextPrimary
+                )
+                
+                // Кнопка обновления из API
+                IconButton(
+                    onClick = { fetchProfileFromApi() },
+                    enabled = authData != null && !isLoadingProfile
+                ) {
+                    if (isLoadingProfile) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                            color = BybitColors.Yellow
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.Sync,
+                            "Обновить из API",
+                            tint = if (authData != null) BybitColors.Yellow else BybitColors.TextTertiary
+                        )
+                    }
+                }
+            }
         }
         
+        // Карточка профиля
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -1577,9 +1726,10 @@ fun ProfileContent(
                     modifier = Modifier.padding(20.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    // Аватар с первой буквой имени
                     Box(
                         modifier = Modifier
-                            .size(72.dp)
+                            .size(80.dp)
                             .clip(CircleShape)
                             .background(
                                 Brush.linearGradient(
@@ -1588,25 +1738,131 @@ fun ProfileContent(
                             ),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("👤", fontSize = 32.sp)
+                        Text(
+                            text = when {
+                                profileUserName != null && profileUserName!!.isNotEmpty() -> 
+                                    profileUserName!!.trim().split(" ").lastOrNull()?.take(1)?.uppercase() ?: "👤"
+                                else -> "👤"
+                            },
+                            fontSize = 36.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Black
+                        )
                     }
                     
                     Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "Пользователь",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = BybitColors.TextPrimary
-                    )
-                    Text(
-                        text = "Фонбет аккаунт",
-                        fontSize = 13.sp,
-                        color = BybitColors.TextSecondary
-                    )
+                    
+                    // Полное имя
+                    if (profileUserName != null && profileUserName!!.isNotEmpty()) {
+                        Text(
+                            text = profileUserName!!,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = BybitColors.TextPrimary,
+                            textAlign = TextAlign.Center
+                        )
+                    } else {
+                        Text(
+                            text = "Загрузка...",
+                            fontSize = 18.sp,
+                            color = BybitColors.TextTertiary
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.height(12.dp))
+                    
+                    // Client ID
+                    if (profileClientId != null) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = BybitColors.SurfaceLight
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.Tag,
+                                    null,
+                                    tint = BybitColors.Yellow,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = "Client ID",
+                                        fontSize = 10.sp,
+                                        color = BybitColors.TextTertiary
+                                    )
+                                    Text(
+                                        text = "$profileClientId",
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = BybitColors.TextPrimary,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Баланс
+                    if (profileSaldo != null) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = BybitColors.SurfaceLight
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "Общие активы",
+                                    fontSize = 12.sp,
+                                    color = BybitColors.TextTertiary
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = String.format("%.0f ₽", profileSaldo),
+                                    fontSize = 28.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = BybitColors.TextPrimary
+                                )
+                            }
+                        }
+                    }
+                    
+                    // Время обновления
+                    if (lastProfileUpdate > 0) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Обновлено: ${SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(lastProfileUpdate))}",
+                            fontSize = 10.sp,
+                            color = BybitColors.TextTertiary
+                        )
+                    }
+                    
+                    // Ошибка
+                    if (profileError != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = BybitColors.Red.copy(alpha = 0.1f)
+                        ) {
+                            Text(
+                                text = "❌ $profileError",
+                                fontSize = 12.sp,
+                                color = BybitColors.Red,
+                                modifier = Modifier.padding(12.dp)
+                            )
+                        }
+                    }
                 }
             }
         }
         
+        // Данные авторизации
         if (authData != null) {
             item {
                 Card(
@@ -1615,74 +1871,148 @@ fun ProfileContent(
                     colors = CardDefaults.cardColors(containerColor = BybitColors.Surface)
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Text(
-                            text = "Данные авторизации",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = BybitColors.TextPrimary,
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        )
-                        
-                        Text(
-                            text = "FSID: ${authData.fsid.take(20)}...",
-                            fontSize = 11.sp,
-                            color = BybitColors.TextSecondary,
-                            fontFamily = FontFamily.Monospace
-                        )
-                        
-                        Text(
-                            text = "DeviceID: ${authData.deviceId.take(20)}...",
-                            fontSize = 11.sp,
-                            color = BybitColors.TextSecondary,
-                            fontFamily = FontFamily.Monospace
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "🔐 Ключи авторизации",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = BybitColors.TextPrimary
+                            )
+                            
+                            // Кнопка копирования
+                            IconButton(
+                                onClick = {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    val data = buildString {
+                                        appendLine("FSID: ${authData.fsid}")
+                                        appendLine("DeviceID: ${authData.deviceId}")
+                                        profileClientId?.let { appendLine("ClientID: $it") }
+                                    }
+                                    val clip = ClipData.newPlainText("Auth Data", data)
+                                    clipboard.setPrimaryClip(clip)
+                                    Toast.makeText(context, "Скопировано ✅", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.ContentCopy,
+                                    "Копировать всё",
+                                    tint = BybitColors.Yellow,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
                         
                         Spacer(modifier = Modifier.height(12.dp))
                         
-                        OutlinedButton(
-                            onClick = {
-                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                val clip = ClipData.newPlainText("Auth", "FSID: ${authData.fsid}\nDeviceID: ${authData.deviceId}")
-                                clipboard.setPrimaryClip(clip)
-                                Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = BybitColors.Yellow)
-                        ) {
-                            Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Копировать")
-                        }
+                        // FSID
+                        ProfileInfoCard(
+                            label = "FSID",
+                            value = authData.fsid,
+                            isMonospace = true
+                        )
                         
                         Spacer(modifier = Modifier.height(8.dp))
                         
-                        OutlinedButton(
-                            onClick = onNavigateToSettings,
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = BybitColors.TextSecondary)
-                        ) {
-                            Icon(Icons.Default.Settings, null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Настройки")
-                        }
+                        // Device ID
+                        ProfileInfoCard(
+                            label = "Device ID",
+                            value = authData.deviceId,
+                            isMonospace = true
+                        )
                     }
                 }
             }
         }
         
+        // Кнопки действий
         item {
-            Button(
-                onClick = onLogout,
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = BybitColors.Red),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text("🚪 Выйти из аккаунта")
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { fetchProfileFromApi() },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = authData != null && !isLoadingProfile,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = BybitColors.Yellow)
+                ) {
+                    if (isLoadingProfile) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = Color.Black
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Загрузка...", color = Color.Black)
+                    } else {
+                        Icon(Icons.Default.Refresh, null, modifier = Modifier.size(18.dp), tint = Color.Black)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("🔄 Обновить данные", color = Color.Black, fontWeight = FontWeight.Bold)
+                    }
+                }
+                
+                OutlinedButton(
+                    onClick = onNavigateToSettings,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = BybitColors.TextSecondary)
+                ) {
+                    Icon(Icons.Default.Settings, null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("⚙️ Настройки")
+                }
+                
+                Button(
+                    onClick = onLogout,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = BybitColors.Red),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.Logout, null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("🚪 Выйти")
+                }
             }
+        }
+        
+        // Отступ снизу
+        item {
+            Spacer(modifier = Modifier.height(32.dp))
         }
     }
 }
 
+@Composable
+fun ProfileInfoCard(
+    label: String,
+    value: String,
+    isMonospace: Boolean = false
+) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = BybitColors.SurfaceLight
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(
+                text = label,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                color = BybitColors.TextTertiary
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = value,
+                fontSize = 12.sp,
+                color = BybitColors.TextSecondary,
+                fontFamily = if (isMonospace) FontFamily.Monospace else FontFamily.Default,
+                maxLines = 3
+            )
+        }
+    }
+}
 // 
 // ==================== ЭКРАН НАСТРОЕК (ПОЛНЫЙ) ====================
 

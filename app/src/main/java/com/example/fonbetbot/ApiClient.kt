@@ -96,130 +96,171 @@ class ApiClient {
         val monitorStart: Int,
         val monitorEnd: Int
     )
+// ApiClient.kt - ИСПРАВЛЕННЫЙ МЕТОД getSaldo
+
+fun getSaldo(
+    cookies: Map<String, String>,
+    fsid: String,
+    deviceId: String,
+    clientId: Long = 18845703,
+    sysId: Int = 21,
+    onSuccess: (SessionInfo?) -> Unit,
+    onError: (String) -> Unit
+) {
+    val jsonBody = JSONObject().apply {
+        put("clientId", clientId)
+        put("fsid", fsid)
+        put("sysId", sysId)
+        put("deviceId", deviceId)
+    }
     
-    // Метод получения баланса
-    fun getSaldo(
-        cookies: Map<String, String>,
-        fsid: String,
-        deviceId: String,
-        clientId: Long = 18845703,
-        sysId: Int = 21,
-        onSuccess: (SessionInfo?) -> Unit,
-        onError: (String) -> Unit
-    ) {
-        val jsonBody = JSONObject().apply {
-            put("clientId", clientId)
-            put("fsid", fsid)
-            put("sysId", sysId)
-            put("deviceId", deviceId)
+    val mediaType = "application/json; charset=utf-8".toMediaType()
+    val body = jsonBody.toString().toRequestBody(mediaType)
+    
+    val requestBuilder = Request.Builder()
+        .url("https://clientsapi-lb51-w.bk6bba-resources.com/session/info")
+        .post(body)
+        .addHeader("Content-Type", "application/json")
+        .addHeader("Accept", "application/json")
+    
+    val cookieHeader = cookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
+    if (cookieHeader.isNotEmpty()) {
+        requestBuilder.addHeader("Cookie", cookieHeader)
+    }
+    
+    val request = requestBuilder.build()
+    
+    client.newCall(request).enqueue(object : Callback {
+        override fun onFailure(call: Call, e: IOException) {
+            onError("Ошибка сети: ${e.message}")
         }
         
-        val mediaType = "application/json; charset=utf-8".toMediaType()
-        val body = jsonBody.toString().toRequestBody(mediaType)
-        
-        val requestBuilder = Request.Builder()
-            .url("https://clientsapi-lb51-w.bk6bba-resources.com/session/info")
-            .post(body)
-            .addHeader("Content-Type", "application/json")
-            .addHeader("Accept", "application/json")
-        
-        val cookieHeader = cookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
-        if (cookieHeader.isNotEmpty()) {
-            requestBuilder.addHeader("Cookie", cookieHeader)
-        }
-        
-        val request = requestBuilder.build()
-        
-        client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                onError("Ошибка сети: ${e.message}")
-            }
-            
-            override fun onResponse(call: Call, response: Response) {
-                response.use {
-                    val bodyString = response.body?.string() ?: ""
+        override fun onResponse(call: Call, response: Response) {
+            response.use {
+                val bodyString = response.body?.string() ?: ""
+                
+                Log.d(TAG, "=== session/info FULL RESPONSE ===")
+                Log.d(TAG, bodyString)
+                Log.d(TAG, "=== END session/info ===")
+                
+                if (!response.isSuccessful) {
+                    onError("Ошибка ${response.code}")
+                    return
+                }
+                
+                try {
+                    val json = JSONObject(bodyString)
                     
-                    Log.d(TAG, "=== session/info FULL RESPONSE ===")
-                    Log.d(TAG, bodyString)
-                    Log.d(TAG, "=== END session/info ===")
-                    
-                    if (!response.isSuccessful) {
-                        onError("Ошибка ${response.code}")
-                        return
+                    // 1. ИЗВЛЕКАЕМ clientId
+                    val extractedClientId: Long? = when {
+                        json.has("clientId") && !json.isNull("clientId") -> {
+                            val cid = json.getLong("clientId")
+                            Log.d(TAG, "✅ clientId из корня: $cid")
+                            cid
+                        }
+                        else -> {
+                            Log.w(TAG, "⚠️ clientId не найден в ответе")
+                            null
+                        }
                     }
                     
-                    try {
-                        val json = JSONObject(bodyString)
-                        
-                        val saldo: Double? = if (json.has("saldo") && !json.isNull("saldo")) {
-                            json.getDouble("saldo")
-                        } else {
+                    // 2. ИЗВЛЕКАЕМ saldo
+                    val saldo: Double? = when {
+                        json.has("saldo") && !json.isNull("saldo") -> {
+                            val s = json.getDouble("saldo")
+                            Log.d(TAG, "✅ saldo: $s")
+                            s
+                        }
+                        else -> {
+                            Log.w(TAG, "⚠️ saldo не найден в ответе")
                             null
                         }
-                        
-                        val extractedClientId: Long? = if (json.has("clientId") && !json.isNull("clientId")) {
-                            json.getLong("clientId")
-                        } else {
-                            null
-                        }
-                        
-                        val userName: String? = try {
-                            when {
-                                json.has("registration") && !json.isNull("registration") -> {
-                                    val registration = json.getJSONObject("registration")
-                                    when {
-                                        registration.has("name") && !registration.isNull("name") -> {
-                                            val name = registration.getString("name")
-                                            Log.d(TAG, "✅ Имя найдено в registration.name: $name")
-                                            name
-                                        }
-                                        registration.has("fullName") && !registration.isNull("fullName") -> {
-                                            registration.getString("fullName")
-                                        }
-                                        registration.has("firstName") && registration.has("lastName") -> {
-                                            val firstName = registration.optString("firstName", "")
-                                            val lastName = registration.optString("lastName", "")
-                                            "$lastName $firstName".trim()
-                                        }
-                                        else -> null
+                    }
+                    
+                    // 3. ИЗВЛЕКАЕМ ИМЯ ПОЛЬЗОВАТЕЛЯ
+                    // Приоритет: registration.name > registration.fullName > registration.firstName+lastName
+                    val userName: String? = try {
+                        when {
+                            // Проверяем registration объект
+                            json.has("registration") && !json.isNull("registration") -> {
+                                val registration = json.getJSONObject("registration")
+                                Log.d(TAG, "📋 registration объект найден")
+                                
+                                when {
+                                    // registration.name (полное имя: "Артамонов Илья Витальевич")
+                                    registration.has("name") && !registration.isNull("name") -> {
+                                        val name = registration.getString("name")
+                                        Log.d(TAG, "✅ Имя из registration.name: $name")
+                                        name
+                                    }
+                                    // registration.fullName
+                                    registration.has("fullName") && !registration.isNull("fullName") -> {
+                                        val fullName = registration.getString("fullName")
+                                        Log.d(TAG, "✅ Имя из registration.fullName: $fullName")
+                                        fullName
+                                    }
+                                    // registration.firstName + registration.lastName
+                                    registration.has("firstName") && registration.has("lastName") -> {
+                                        val firstName = registration.optString("firstName", "")
+                                        val lastName = registration.optString("lastName", "")
+                                        val combined = "$lastName $firstName".trim()
+                                        Log.d(TAG, "✅ Имя из registration.firstName+lastName: $combined")
+                                        combined
+                                    }
+                                    else -> {
+                                        Log.w(TAG, "⚠️ registration найден, но нет поля с именем")
+                                        Log.d(TAG, "registration keys: ${registration.keys().asSequence().toList()}")
+                                        null
                                     }
                                 }
-                                json.has("userName") && !json.isNull("userName") -> {
-                                    json.getString("userName")
-                                }
-                                json.has("fullName") && !json.isNull("fullName") -> {
-                                    json.getString("fullName")
-                                }
-                                json.has("name") && !json.isNull("name") -> {
-                                    json.getString("name")
-                                }
-                                else -> {
-                                    Log.d(TAG, "⚠️ Имя пользователя не найдено в ответе")
-                                    null
-                                }
                             }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Ошибка извлечения имени: ${e.message}")
-                            null
+                            // Запасные варианты в корне JSON
+                            json.has("userName") && !json.isNull("userName") -> {
+                                val name = json.getString("userName")
+                                Log.d(TAG, "✅ Имя из корневого userName: $name")
+                                name
+                            }
+                            json.has("fullName") && !json.isNull("fullName") -> {
+                                val name = json.getString("fullName")
+                                Log.d(TAG, "✅ Имя из корневого fullName: $name")
+                                name
+                            }
+                            json.has("name") && !json.isNull("name") -> {
+                                val name = json.getString("name")
+                                Log.d(TAG, "✅ Имя из корневого name: $name")
+                                name
+                            }
+                            else -> {
+                                Log.w(TAG, "⚠️ Имя пользователя не найдено ни в одном поле")
+                                null
+                            }
                         }
-                        
-                        val sessionInfo = SessionInfo(
-                            saldo = saldo,
-                            clientId = extractedClientId,
-                            userName = userName
-                        )
-                        
-                        Log.d(TAG, "SessionInfo: saldo=$saldo, clientId=$extractedClientId, userName=$userName")
-                        onSuccess(sessionInfo)
-                        
                     } catch (e: Exception) {
-                        Log.e(TAG, "Ошибка парсинга: ${e.message}")
-                        onError("Ошибка парсинга: ${e.message}")
+                        Log.e(TAG, "❌ Ошибка извлечения имени: ${e.message}", e)
+                        null
                     }
+                    
+                    val sessionInfo = SessionInfo(
+                        saldo = saldo,
+                        clientId = extractedClientId,
+                        userName = userName
+                    )
+                    
+                    Log.d(TAG, "📊 ИТОГО SessionInfo:")
+                    Log.d(TAG, "  clientId: $extractedClientId")
+                    Log.d(TAG, "  saldo: $saldo")
+                    Log.d(TAG, "  userName: $userName")
+                    
+                    onSuccess(sessionInfo)
+                    
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ Ошибка парсинга: ${e.message}", e)
+                    onError("Ошибка парсинга: ${e.message}")
                 }
             }
-        })
-    }
+        }
+    })
+}
     
     // Метод получения ставок
     fun getBets(
