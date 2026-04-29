@@ -812,7 +812,7 @@ fun BottomNavItemView(
 ) {
     Column(
         modifier = Modifier
-            .weight(1f)
+            .weight(1f, fill = true)
             .clickable { onClick() }
             .padding(vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
