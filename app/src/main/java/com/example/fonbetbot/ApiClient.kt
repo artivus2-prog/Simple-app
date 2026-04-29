@@ -650,7 +650,7 @@ class ApiClient {
 
     // Шаг 3: Разместить ставку
     fun placeBet(
-        requestId: String,
+        requestId: Long, 
         betSlipInfo: JSONObject,
         amount: Int,
         cookies: Map<String, String>,
