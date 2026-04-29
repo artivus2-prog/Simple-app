@@ -627,96 +627,225 @@ fun getSaldo(
     }
 
     // Шаг 3: Разместить ставку
-    fun placeBet(
-        requestId: String,
-        betSlipInfo: JSONObject,
-        amount: Int,
-        cookies: Map<String, String>,
-        fsid: String,
-        clientId: Long,
-        bets: List<BetData>,
-        onSuccess: (JSONObject) -> Unit,
-        onError: (String) -> Unit
-    ) {
-        val betsArray = JSONArray()
-        val betsFromSlip = betSlipInfo.getJSONArray("bets")
-        
-        for (i in 0 until betsFromSlip.length()) {
-            val bet = betsFromSlip.getJSONObject(i)
-            val betData = bets[i]
-            
-            betsArray.put(JSONObject().apply {
-                put("event", bet.getJSONObject("event").getInt("id"))
-                put("factor", bet.getJSONObject("factor").getInt("id"))
-                put("value", bet.getJSONObject("factor").getDouble("v"))
-                put("score", bet.getJSONObject("event").optString("score", "0:0"))
-                
-                if (betData.tbType > 0) {
-                    put("param", betData.tbType)
-                }
-            })
-        }
-        
-        val coupon = JSONObject().apply {
-            put("amount", amount)
-            put("flexBet", "any")
-            put("flexParam", true)
-            put("mirror", "https://fon.bet")
-            put("type", "express")
-            put("expressBonus", 0)
-            put("betType", "express")
-            put("part", 1)
-            put("bets", betsArray)
-        }
-        
-        val jsonBody = JSONObject().apply {
-            put("requestId", requestId)
-            put("lang", "ru")
-            put("clientId", clientId)
-            put("fsid", fsid)
-            put("sysId", 21)
-            put("coupon", coupon)
-        }
-        
-        val mediaType = "application/json; charset=utf-8".toMediaType()
-        val body = jsonBody.toString().toRequestBody(mediaType)
-        
-        val requestBuilder = Request.Builder()
-            .url("https://clientsapi-lb52-w.bk6bba-resources.ru/coupon/bet")
-            .post(body)
-            .addHeader("Content-Type", "application/json")
-            .addHeader("Accept", "application/json")
-        
-        val cookieHeader = cookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
-        if (cookieHeader.isNotEmpty()) {
-            requestBuilder.addHeader("Cookie", cookieHeader)
-        }
-        
-        client.newCall(requestBuilder.build()).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                onError(e.message ?: "Network error")
-            }
-            
-            override fun onResponse(call: Call, response: Response) {
-                response.use {
-                    val bodyString = response.body?.string() ?: ""
-                    Log.d(TAG, "placeBet response: $bodyString")
-                    
-                    if (!response.isSuccessful) {
-                        onError("HTTP ${response.code}: $bodyString")
-                        return
-                    }
-                    
-                    try {
-                        val json = JSONObject(bodyString)
-                        onSuccess(json)
-                    } catch (e: Exception) {
-                        onError("Parse error: ${e.message}")
-                    }
+    // Шаг 3: Разместить ставку (ИСПРАВЛЕННАЯ ВЕРСИЯ)
+fun placeBet(
+    requestId: String,
+    betSlipInfo: JSONObject,
+    amount: Int,
+    cookies: Map<String, String>,
+    fsid: String,
+    clientId: Long,
+    bets: List<BetData>,
+    onSuccess: (JSONObject) -> Unit,
+    onError: (String) -> Unit
+) {
+    // Детальное логирование входящих параметров
+    Log.d(TAG, "═══════════════════════════════════════")
+    Log.d(TAG, "🎰 placeBet: НАЧАЛО РАЗМЕЩЕНИЯ СТАВКИ")
+    Log.d(TAG, "═══════════════════════════════════════")
+    Log.d(TAG, "📋 requestId: $requestId")
+    Log.d(TAG, "💰 amount: $amount")
+    Log.d(TAG, "👤 clientId: $clientId")
+    Log.d(TAG, "🔑 fsid: ${fsid.take(20)}...")
+    Log.d(TAG, "📊 Количество ставок: ${bets.size}")
+    
+    // Логируем содержимое betSlipInfo
+    try {
+        Log.d(TAG, "📦 betSlipInfo K: ${betSlipInfo.optDouble("K", 0.0)}")
+        val betsArray = betSlipInfo.optJSONArray("bets")
+        if (betsArray != null) {
+            for (i in 0 until betsArray.length()) {
+                val bet = betsArray.getJSONObject(i)
+                val event = bet.getJSONObject("event")
+                val factor = bet.getJSONObject("factor")
+                Log.d(TAG, "  Ставка #${i+1}:")
+                Log.d(TAG, "    Событие: ${event.optString("team1", "?")} vs ${event.optString("team2", "?")}")
+                Log.d(TAG, "    Турнир: ${event.optString("competitionName", "?")}")
+                Log.d(TAG, "    Ставка: ${factor.optString("couponChoiceCaption", "?")}")
+                Log.d(TAG, "    Коэф: ${factor.optDouble("v", 0.0)}")
+                Log.d(TAG, "    eventId: ${event.optInt("id", 0)}")
+                Log.d(TAG, "    factorId: ${factor.optInt("id", 0)}")
+                if (factor.has("param")) {
+                    Log.d(TAG, "    param: ${factor.optInt("param", 0)}")
                 }
             }
-        })
+        }
+    } catch (e: Exception) {
+        Log.e(TAG, "❌ Ошибка при логировании betSlipInfo: ${e.message}")
     }
+    
+    // Формируем массив ставок для купона
+    val betsArray = JSONArray()
+    val betsFromSlip = betSlipInfo.getJSONArray("bets")
+    
+    // КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: создаем карту для быстрого поиска tbtype
+    val paramsMap = mutableMapOf<String, Int>()
+    bets.forEach { betData ->
+        val key = "${betData.mId}_${betData.type}"
+        if (betData.tbType > 0) {
+            paramsMap[key] = betData.tbType
+        }
+    }
+    
+    for (i in 0 until betsFromSlip.length()) {
+        val bet = betsFromSlip.getJSONObject(i)
+        val eventId = bet.getJSONObject("event").getInt("id")
+        val factorId = bet.getJSONObject("factor").getInt("id")
+        val factorValue = bet.getJSONObject("factor").getDouble("v")
+        val score = bet.getJSONObject("event").optString("score", "0:0")
+        
+        val betItem = JSONObject().apply {
+            put("event", eventId)
+            put("factor", factorId)
+            put("value", factorValue)
+            put("score", score)
+            
+            // ИСПРАВЛЕНИЕ: добавляем param для тоталов
+            // Список типов тоталов (как в Python)
+            val totalTypes = listOf(1696, 1793, 1796, 1799, 930)
+            if (factorId in totalTypes) {
+                // Ищем параметр в карте или в betSlipInfo
+                val key = "${eventId}_${factorId}"
+                when {
+                    paramsMap.containsKey(key) && paramsMap[key]!! > 0 -> {
+                        put("param", paramsMap[key]!!)
+                        Log.d(TAG, "  ✅ Добавлен param=${paramsMap[key]} для тотала $factorId (из BetData)")
+                    }
+                    bet.getJSONObject("factor").has("param") -> {
+                        val param = bet.getJSONObject("factor").getInt("param")
+                        if (param > 0) {
+                            put("param", param)
+                            Log.d(TAG, "  ✅ Добавлен param=$param для тотала $factorId (из betSlipInfo)")
+                        }
+                    }
+                    else -> {
+                        Log.d(TAG, "  ⚠️ Тотал $factorId без param")
+                    }
+                }
+            }
+        }
+        betsArray.put(betItem)
+    }
+    
+    // Формируем купон
+    val coupon = JSONObject().apply {
+        put("amount", amount)
+        put("flexBet", "any")
+        put("flexParam", true)
+        put("mirror", "https://fon.bet")
+        put("type", "express")
+        put("expressBonus", 0)
+        put("betType", "express")
+        put("part", 1)
+        put("bets", betsArray)
+    }
+    
+    // ИСПРАВЛЕНИЕ: добавляем CDI
+    val jsonBody = JSONObject().apply {
+        put("requestId", requestId)
+        put("lang", "ru")
+        put("clientId", clientId)
+        put("fsid", fsid)
+        put("sysId", 21)
+        put("CDI", 877)  // ← ДОБАВЛЕН CDI
+        put("deviceId", "9B883CE30780121A11348AF8C3542A89") // ← ДОБАВЛЕН deviceId
+        put("coupon", coupon)
+    }
+    
+    // Логируем полный payload
+    Log.d(TAG, "📤 placeBet PAYLOAD:")
+    try {
+        Log.d(TAG, jsonBody.toString(2))
+    } catch (e: Exception) {
+        Log.d(TAG, jsonBody.toString())
+    }
+    
+    val mediaType = "application/json; charset=utf-8".toMediaType()
+    val body = jsonBody.toString().toRequestBody(mediaType)
+    
+    // ИСПРАВЛЕНИЕ: правильный URL (.com вместо .ru)
+    val url = "https://clientsapi-lb52-w.bk6bba-resources.com/coupon/bet"
+    Log.d(TAG, "🌐 URL: $url")
+    
+    val requestBuilder = Request.Builder()
+        .url(url)
+        .post(body)
+        .addHeader("Content-Type", "application/json")
+        .addHeader("Accept", "application/json")
+    
+    val cookieHeader = cookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
+    if (cookieHeader.isNotEmpty()) {
+        requestBuilder.addHeader("Cookie", cookieHeader)
+        Log.d(TAG, "🍪 Cookie header: ${cookieHeader.take(100)}...")
+    } else {
+        Log.w(TAG, "⚠️ Cookie header ПУСТОЙ!")
+    }
+    
+    client.newCall(requestBuilder.build()).enqueue(object : Callback {
+        override fun onFailure(call: Call, e: IOException) {
+            Log.e(TAG, "═══════════════════════════════════════")
+            Log.e(TAG, "❌ placeBet NETWORK ERROR: ${e.message}")
+            Log.e(TAG, "═══════════════════════════════════════")
+            onError("Network error: ${e.message}")
+        }
+        
+        override fun onResponse(call: Call, response: Response) {
+            response.use {
+                val bodyString = response.body?.string() ?: ""
+                val code = response.code
+                val isSuccess = response.isSuccessful
+                
+                Log.d(TAG, "═══════════════════════════════════════")
+                Log.d(TAG, "📥 placeBet RESPONSE")
+                Log.d(TAG, "═══════════════════════════════════════")
+                Log.d(TAG, "  HTTP Status: $code")
+                Log.d(TAG, "  Successful: $isSuccess")
+                Log.d(TAG, "  Headers: ${response.headers}")
+                Log.d(TAG, "  Body: ${bodyString.take(2000)}") // Ограничиваем длину
+                Log.d(TAG, "═══════════════════════════════════════")
+                
+                if (!isSuccess) {
+                    val errorMsg = "HTTP $code: ${bodyString.take(500)}"
+                    Log.e(TAG, "❌ $errorMsg")
+                    onError(errorMsg)
+                    return
+                }
+                
+                try {
+                    val json = JSONObject(bodyString)
+                    
+                    // Логируем результат
+                    val result = json.optString("result", "unknown")
+                    Log.d(TAG, "  result: $result")
+                    
+                    if (result == "betDelay") {
+                        val delay = json.optLong("betDelay", 0)
+                        Log.d(TAG, "  ⏳ betDelay: $delay мс")
+                    }
+                    
+                    if (result == "couponResult") {
+                        val coupon = json.optJSONObject("coupon")
+                        if (coupon != null) {
+                            Log.d(TAG, "  📋 regId: ${coupon.optString("regId", "?")}")
+                            Log.d(TAG, "  🔢 checkCode: ${coupon.optString("checkCode", "?")}")
+                            Log.d(TAG, "  💰 amount: ${coupon.optDouble("amount", 0.0)}")
+                            Log.d(TAG, "  📈 originalK: ${coupon.optDouble("originalK", 0.0)}")
+                            Log.d(TAG, "  💳 clientSaldo: ${coupon.optDouble("clientSaldo", 0.0)}")
+                            Log.d(TAG, "  🎁 bonusSaldo: ${coupon.optDouble("bonusAccountClientSaldo", 0.0)}")
+                            Log.d(TAG, "  ✅ resultCode: ${coupon.optInt("resultCode", -999)}")
+                        }
+                    }
+                    
+                    onSuccess(json)
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ Parse error: ${e.message}")
+                    Log.e(TAG, "Raw body: ${bodyString.take(1000)}")
+                    onError("Parse error: ${e.message}")
+                }
+            }
+        }
+    })
+}
 
     // Шаг 4: Получить результат ставки
     fun getBetResult(
