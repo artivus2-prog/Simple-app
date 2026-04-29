@@ -141,6 +141,16 @@ class ApiClient {
         Log.d(TAG, "📥 ===== END RESPONSE =====")
     }
     
+    // ИСПРАВЛЕНО: Добавлен метод для логирования критических ошибок
+    private fun logCriticalError(tag: String, message: String, throwable: Throwable? = null) {
+        Log.e(TAG, "❌❌❌ ===== КРИТИЧЕСКАЯ ОШИБКА =====")
+        Log.e(TAG, "❌❌❌ $tag: $message")
+        if (throwable != null) {
+            Log.e(TAG, "❌❌❌ StackTrace: ${throwable.stackTraceToString()}")
+        }
+        Log.e(TAG, "❌❌❌ ===== КОНЕЦ ОШИБКИ =====")
+    }
+    
     private fun buildCookieHeader(cookies: Map<String, String>, fsid: String): String {
         val allCookies = mutableMapOf<String, String>()
         allCookies.putAll(cookies)
@@ -624,8 +634,10 @@ class ApiClient {
                 
                 try {
                     val json = JSONObject(bodyString)
-                    val requestId = json.getString("requestId")
-                    Log.d(TAG, "✅ requestId получен: $requestId")
+                    // ИСПРАВЛЕНО: Получаем requestId как Long и преобразуем в String
+                    val requestIdLong = json.getLong("requestId")
+                    val requestId = requestIdLong.toString()
+                    Log.d(TAG, "✅ requestId получен: $requestId (Long: $requestIdLong)")
                     onSuccess(requestId)
                 } catch (e: Exception) {
                     Log.e(TAG, "❌ ШАГ 2/4: requestId не найден в ответе")
@@ -651,6 +663,16 @@ class ApiClient {
         Log.d(TAG, "========================================")
         Log.d(TAG, "📤 ШАГ 3/4: ЗАПРОС placeBet")
         Log.d(TAG, "========================================")
+        
+        // ИСПРАВЛЕНО: Конвертируем requestId обратно в Long для отправки
+        val requestIdLong = requestId.toLongOrNull()
+        if (requestIdLong == null) {
+            logCriticalError("placeBet", "Невозможно преобразовать requestId '$requestId' в Long")
+            onError("Неверный формат requestId: $requestId")
+            return
+        }
+        
+        Log.d(TAG, "🔢 requestId: String=$requestId, Long=$requestIdLong")
         
         val betsArray = JSONArray()
         val betsFromSlip = betSlipInfo.getJSONArray("bets")
@@ -686,7 +708,8 @@ class ApiClient {
         }
         
         val jsonBody = JSONObject().apply {
-            put("requestId", requestId)
+            // ИСПРАВЛЕНО: Отправляем requestId как Long (Number), а не String
+            put("requestId", requestIdLong)
             put("lang", "ru")
             put("clientId", clientId)
             put("fsid", fsid)
@@ -836,48 +859,49 @@ class ApiClient {
         
         logRequestDetails(request, bodyString)
         
-        Thread.sleep(delayMs)
-        
-        client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                Log.e(TAG, "❌ ШАГ 4/4: ОШИБКА СЕТИ")
-                Log.e(TAG, "❌ ${e.message}", e)
-                onError(e.message ?: "Network error")
-            }
-            
-            override fun onResponse(call: Call, response: Response) {
-                val bodyString = response.body?.string() ?: ""
-                logResponseDetails(response, bodyString)
-                
-                if (!response.isSuccessful) {
-                    Log.e(TAG, "❌ ШАГ 4/4: HTTP ${response.code}")
-                    onError("HTTP ${response.code}")
-                    return
+        // ИСПРАВЛЕНО: Заменяем Thread.sleep на асинхронную задержку через Handler
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            client.newCall(request).enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    Log.e(TAG, "❌ ШАГ 4/4: ОШИБКА СЕТИ")
+                    Log.e(TAG, "❌ ${e.message}", e)
+                    onError(e.message ?: "Network error")
                 }
                 
-                try {
-                    val json = JSONObject(bodyString)
+                override fun onResponse(call: Call, response: Response) {
+                    val bodyString = response.body?.string() ?: ""
+                    logResponseDetails(response, bodyString)
                     
-                    Log.d(TAG, "📊 АНАЛИЗ betResult:")
-                    if (json.has("result")) {
-                        Log.d(TAG, "  result: ${json.getString("result")}")
-                    }
-                    if (json.has("coupon")) {
-                        val coupon = json.getJSONObject("coupon")
-                        Log.d(TAG, "  coupon.regId: ${coupon.optString("regId", "N/A")}")
-                        Log.d(TAG, "  coupon.resultCode: ${coupon.optInt("resultCode", -999)}")
-                        Log.d(TAG, "  coupon.clientSaldo: ${coupon.optDouble("clientSaldo", -1.0)}")
-                        Log.d(TAG, "  coupon.amount: ${coupon.optDouble("amount", -1.0)}")
-                        Log.d(TAG, "  coupon.originalK: ${coupon.optDouble("originalK", -1.0)}")
+                    if (!response.isSuccessful) {
+                        Log.e(TAG, "❌ ШАГ 4/4: HTTP ${response.code}")
+                        onError("HTTP ${response.code}")
+                        return
                     }
                     
-                    onSuccess(json)
-                } catch (e: Exception) {
-                    Log.e(TAG, "❌ ШАГ 4/4: Ошибка парсинга JSON: ${e.message}")
-                    onError("Parse error: ${e.message}")
+                    try {
+                        val json = JSONObject(bodyString)
+                        
+                        Log.d(TAG, "📊 АНАЛИЗ betResult:")
+                        if (json.has("result")) {
+                            Log.d(TAG, "  result: ${json.getString("result")}")
+                        }
+                        if (json.has("coupon")) {
+                            val coupon = json.getJSONObject("coupon")
+                            Log.d(TAG, "  coupon.regId: ${coupon.optString("regId", "N/A")}")
+                            Log.d(TAG, "  coupon.resultCode: ${coupon.optInt("resultCode", -999)}")
+                            Log.d(TAG, "  coupon.clientSaldo: ${coupon.optDouble("clientSaldo", -1.0)}")
+                            Log.d(TAG, "  coupon.amount: ${coupon.optDouble("amount", -1.0)}")
+                            Log.d(TAG, "  coupon.originalK: ${coupon.optDouble("originalK", -1.0)}")
+                        }
+                        
+                        onSuccess(json)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "❌ ШАГ 4/4: Ошибка парсинга JSON: ${e.message}")
+                        onError("Parse error: ${e.message}")
+                    }
                 }
-            }
-        })
+            })
+        }, delayMs)
     }
 
     // Главный метод размещения ставки
