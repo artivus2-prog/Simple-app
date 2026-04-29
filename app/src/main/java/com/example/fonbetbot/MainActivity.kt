@@ -2919,7 +2919,7 @@ fun BybitBottomNavigation(
                 
                 Column(
                     modifier = Modifier
-                        .weight(1f)
+                        .weight(1f, fill = true)
                         .clickable { onItemSelected(item) }
                         .padding(vertical = 4.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -2987,7 +2987,7 @@ fun BybitBottomNavigation(
             // Кнопка Старт/Стоп
             Column(
                 modifier = Modifier
-                    .weight(1.2f)
+                    .weight(1.2f, fill = true)
                     .clickable { onStartStopBot() }
                     .padding(vertical = 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -3014,8 +3014,7 @@ fun BybitBottomNavigation(
             }
         }
     }
-}       
-
+}
 // ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 
 private fun getCurrentTime(): String {
