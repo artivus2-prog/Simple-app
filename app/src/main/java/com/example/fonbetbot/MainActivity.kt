@@ -42,6 +42,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
+import android.util.Log
+import android.webkit.CookieManager
 import java.util.*
 
 // ==================== ЦВЕТОВАЯ ПАЛИТРА BYBIT ====================
