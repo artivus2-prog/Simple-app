@@ -1,4 +1,4 @@
-// MainActivity.kt - РЕДИЗАЙН В СТИЛЕ BYBIT
+// MainActivity.kt - ПОЛНАЯ ВЕРСИЯ С ИСПРАВЛЕНИЯМИ
 package com.example.fonbetbot
 
 import android.content.ClipData
@@ -16,7 +16,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -48,18 +47,30 @@ import java.util.*
 // ==================== ЦВЕТОВАЯ ПАЛИТРА BYBIT ====================
 
 object BybitColors {
-    val Background = Color(0xFF0B0E11)          // Основной фон
-    val Surface = Color(0xFF1E2329)             // Карточки
-    val SurfaceLight = Color(0xFF2B3139)        // Вторичные карточки
-    val Yellow = Color(0xFFF0B90B)              // Акцентный жёлтый (Bybit)
-    val YellowLight = Color(0xFFF8D33A)         // Светлый жёлтый
-    val Green = Color(0xFF0ECB81)               // Прибыль/успех
-    val Red = Color(0xFFF6465D)                 // Убыток/ошибка
-    val TextPrimary = Color(0xFFEAECEF)         // Основной текст
-    val TextSecondary = Color(0xFF848E9C)       // Вторичный текст
-    val TextTertiary = Color(0xFF5E6673)        // Третичный текст
-    val Divider = Color(0xFF2B3139)             // Разделители
-    val Blue = Color(0xFF3772FF)                // Для графиков/ссылок
+    val Background = Color(0xFF0B0E11)
+    val Surface = Color(0xFF1E2329)
+    val SurfaceLight = Color(0xFF2B3139)
+    val Yellow = Color(0xFFF0B90B)
+    val YellowLight = Color(0xFFF8D33A)
+    val Green = Color(0xFF0ECB81)
+    val Red = Color(0xFFF6465D)
+    val TextPrimary = Color(0xFFEAECEF)
+    val TextSecondary = Color(0xFF848E9C)
+    val TextTertiary = Color(0xFF5E6673)
+    val Divider = Color(0xFF2B3139)
+    val Blue = Color(0xFF3772FF)
+}
+
+// ==================== МОДЕЛЬ НАВИГАЦИИ ====================
+
+enum class BottomNavItem(
+    val label: String,
+    val icon: @Composable () -> Unit
+) {
+    HOME("Главная", { Icon(Icons.Default.Home, null, tint = BybitColors.TextPrimary) }),
+    BETS("Экспрессы", { Icon(Icons.Default.ListAlt, null, tint = BybitColors.TextPrimary) }),
+    STATS("Статистика", { Icon(Icons.Default.BarChart, null, tint = BybitColors.TextPrimary) }),
+    PROFILE("Аккаунт", { Icon(Icons.Default.Person, null, tint = BybitColors.TextPrimary) })
 }
 
 // ==================== ОСНОВНАЯ АКТИВНОСТЬ ====================
@@ -137,18 +148,6 @@ fun BybitTheme(content: @Composable () -> Unit) {
     )
 }
 
-// ==================== МОДЕЛЬ НАВИГАЦИИ ====================
-
-enum class BottomNavItem(
-    val label: String,
-    val icon: @Composable () -> Unit
-) {
-    HOME("Главная", { Icon(Icons.Default.Home, null, tint = BybitColors.TextPrimary) }),
-    BETS("Экспрессы", { Icon(Icons.Default.ListAlt, null, tint = BybitColors.TextPrimary) }),
-    STATS("Статистика", { Icon(Icons.Default.BarChart, null, tint = BybitColors.TextPrimary) }),
-    PROFILE("Аккаунт", { Icon(Icons.Default.Person, null, tint = BybitColors.TextPrimary) })
-}
-
 // ==================== ГЛАВНЫЙ КОМПОНЕНТ ====================
 
 data class AuthData(
@@ -218,20 +217,10 @@ fun FonbetBotApp(dbHelper: DatabaseHelper) {
             },
             onBack = { currentScreen = "main" }
         )
-        "settings" -> SettingsScreen(
+        "settings" -> BybitSettingsScreen(
             onBack = { currentScreen = "main" },
             onSave = { currentScreen = "main" },
             dbHelper = dbHelper
-        )
-        "stats" -> StatsScreen(
-            onBack = { currentScreen = "main" },
-            dbHelper = dbHelper,
-            authData = authData
-        )
-        "history" -> HistoryScreen(
-            onBack = { currentScreen = "main" },
-            dbHelper = dbHelper,
-            authData = authData
         )
     }
 }
@@ -563,7 +552,7 @@ fun BybitMainScreen(
                     StatsContent(
                         dbHelper = dbHelper,
                         authData = authData,
-                        onNavigateToHistory = { /* реализовать навигацию */ }
+                        onNavigateToHistory = {}
                     )
                 }
                 
@@ -574,7 +563,8 @@ fun BybitMainScreen(
                         onLogout = {
                             onLogout()
                             onNavItemSelected(BottomNavItem.HOME)
-                        }
+                        },
+                        onNavigateToSettings = onNavigateToSettings
                     )
                 }
             }
@@ -642,10 +632,8 @@ fun BybitBottomNavigation(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    // Иконка с цветовой индикацией
                     Box(
-                        modifier = Modifier
-                            .size(24.dp),
+                        modifier = Modifier.size(24.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         when (item) {
@@ -746,7 +734,6 @@ fun BalanceHeaderCard(
         Column(
             modifier = Modifier.padding(20.dp)
         ) {
-            // Статус бота и заголовок
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -770,7 +757,6 @@ fun BalanceHeaderCard(
                     )
                 }
                 
-                // Кнопка обновления
                 IconButton(
                     onClick = onRefresh,
                     modifier = Modifier.size(32.dp),
@@ -795,7 +781,6 @@ fun BalanceHeaderCard(
             
             Spacer(modifier = Modifier.height(16.dp))
             
-            // Название "актива"
             Text(
                 text = "Общие активы",
                 fontSize = 14.sp,
@@ -805,7 +790,6 @@ fun BalanceHeaderCard(
             
             Spacer(modifier = Modifier.height(4.dp))
             
-            // Баланс крупным шрифтом
             Text(
                 text = if (balance > 0) String.format("%.2f ₽", balance) else "0.00 ₽",
                 fontSize = 32.sp,
@@ -816,7 +800,6 @@ fun BalanceHeaderCard(
             
             Spacer(modifier = Modifier.height(4.dp))
             
-            // P&L
             if (profitLoss != 0.0) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -856,7 +839,7 @@ fun BalanceHeaderCard(
     }
 }
 
-// ==================== ПАНЕЛЬ ДЕЙСТВИЙ (как в Bybit) ====================
+// ==================== ПАНЕЛЬ ДЕЙСТВИЙ ====================
 
 @Composable
 fun ActionButtonsRow(
@@ -884,14 +867,14 @@ fun ActionButtonsRow(
             
             ActionButton(
                 icon = { Icon(Icons.Default.SwapHoriz, null, tint = BybitColors.TextSecondary, modifier = Modifier.size(28.dp)) },
-                label = "P2P",
-                onClick = { /* Заглушка */ }
+                label = "Авторизация",
+                onClick = onNavigateToAuth
             )
             
             ActionButton(
-                icon = { Icon(Icons.Default.SmartToy, null, tint = BybitColors.TextSecondary, modifier = Modifier.size(28.dp)) },
-                label = "Бот",
-                onClick = { /* Заглушка */ }
+                icon = { Icon(Icons.Default.Settings, null, tint = BybitColors.TextSecondary, modifier = Modifier.size(28.dp)) },
+                label = "Настройки",
+                onClick = onNavigateToSettings
             )
             
             ActionButton(
@@ -942,9 +925,7 @@ fun PromoCard() {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = BybitColors.Surface
-        )
+        colors = CardDefaults.cardColors(containerColor = BybitColors.Surface)
     ) {
         Row(
             modifier = Modifier
@@ -976,7 +957,6 @@ fun PromoCard() {
             )
         }
         
-        // Индикатор страниц (1/6)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1017,7 +997,6 @@ fun ActiveExpressesSection(
         colors = CardDefaults.cardColors(containerColor = BybitColors.Surface)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // Заголовок секции
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1057,7 +1036,6 @@ fun ActiveExpressesSection(
                 }
             }
             
-            // Лимит
             if (expresses.isNotEmpty() && expresses.size >= maxActiveExpresses && isBotRunning) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Surface(
@@ -1075,7 +1053,6 @@ fun ActiveExpressesSection(
             
             Spacer(modifier = Modifier.height(8.dp))
             
-            // Список экспрессов
             if (expresses.isEmpty()) {
                 Box(
                     modifier = Modifier
@@ -1148,7 +1125,6 @@ fun BybitExpressCard(
         colors = CardDefaults.cardColors(containerColor = BybitColors.SurfaceLight)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            // Верхняя строка
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1188,7 +1164,6 @@ fun BybitExpressCard(
             
             Spacer(modifier = Modifier.height(4.dp))
             
-            // Статус и кэф
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -1207,7 +1182,6 @@ fun BybitExpressCard(
                 )
             }
             
-            // Прогресс
             if (!isFullyCompleted && matches.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(6.dp))
                 val completedCount = matches.count { it.isFinalized == 1 }
@@ -1230,7 +1204,6 @@ fun BybitExpressCard(
                 )
             }
             
-            // Прибыль/убыток
             if (express.stsAll == 1 || express.stsAll == 2) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Row(
@@ -1246,7 +1219,6 @@ fun BybitExpressCard(
                 }
             }
             
-            // Развёрнутая информация
             if (isExpanded) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Divider(color = BybitColors.Divider)
@@ -1575,7 +1547,8 @@ fun StatRow(label: String, value: String, valueColor: Color = BybitColors.TextPr
 fun ProfileContent(
     authData: AuthData?,
     dbHelper: DatabaseHelper,
-    onLogout: () -> Unit
+    onLogout: () -> Unit,
+    onNavigateToSettings: () -> Unit
 ) {
     val context = LocalContext.current
     
@@ -1604,7 +1577,6 @@ fun ProfileContent(
                     modifier = Modifier.padding(20.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Аватар
                     Box(
                         modifier = Modifier
                             .size(72.dp)
@@ -1681,6 +1653,18 @@ fun ProfileContent(
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("Копировать")
                         }
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        OutlinedButton(
+                            onClick = onNavigateToSettings,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = BybitColors.TextSecondary)
+                        ) {
+                            Icon(Icons.Default.Settings, null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Настройки")
+                        }
                     }
                 }
             }
@@ -1698,6 +1682,314 @@ fun ProfileContent(
         }
     }
 }
+
+// ==================== ЭКРАН НАСТРОЕК ====================
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun BybitSettingsScreen(
+    onBack: () -> Unit,
+    onSave: () -> Unit,
+    dbHelper: DatabaseHelper
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val prefs = remember { context.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE) }
+    
+    var maxMatchesPerExpress by remember { mutableStateOf(prefs.getInt("max_matches_per_express", 2).toString()) }
+    var multiply by remember { mutableStateOf(prefs.getInt("multiply", 2).toString()) }
+    var allMinKef by remember { mutableStateOf(prefs.getFloat("all_min_kef", 1.67f).toDouble().toString()) }
+    var maxActiveExpresses by remember { mutableStateOf(prefs.getInt("max_active_expresses", 5).toString()) }
+    
+    var type924Min by remember { mutableStateOf(prefs.getFloat("type_924_min", 1.15f).toString()) }
+    var type924Max by remember { mutableStateOf(prefs.getFloat("type_924_max", 1.35f).toString()) }
+    var type924Start by remember { mutableStateOf(prefs.getInt("type_924_start", 80).toString()) }
+    var type924End by remember { mutableStateOf(prefs.getInt("type_924_end", 100).toString()) }
+    
+    var type927Min by remember { mutableStateOf(prefs.getFloat("type_927_min", 1.15f).toString()) }
+    var type927Max by remember { mutableStateOf(prefs.getFloat("type_927_max", 1.35f).toString()) }
+    var type927Start by remember { mutableStateOf(prefs.getInt("type_927_start", 1).toString()) }
+    var type927End by remember { mutableStateOf(prefs.getInt("type_927_end", 45).toString()) }
+    
+    var type928Min by remember { mutableStateOf(prefs.getFloat("type_928_min", 1.15f).toString()) }
+    var type928Max by remember { mutableStateOf(prefs.getFloat("type_928_max", 1.35f).toString()) }
+    var type928Start by remember { mutableStateOf(prefs.getInt("type_928_start", 1).toString()) }
+    var type928End by remember { mutableStateOf(prefs.getInt("type_928_end", 45).toString()) }
+    
+    var checkInterval by remember { mutableStateOf(prefs.getString("check_interval", "60") ?: "60") }
+    var betAmount by remember { mutableStateOf(prefs.getString("bet_amount", "30") ?: "30") }
+    var testMode by remember { mutableStateOf(prefs.getBoolean("test_mode", true)) }
+    var testBalance by remember { mutableStateOf(prefs.getString("test_balance", "1000") ?: "1000") }
+    var showClearDialog by remember { mutableStateOf(false) }
+    var isClearing by remember { mutableStateOf(false) }
+    
+    Scaffold(
+        containerColor = BybitColors.Background,
+        topBar = {
+            TopAppBar(
+                title = { Text("⚙️ Настройки", color = BybitColors.TextPrimary) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, "Назад", tint = BybitColors.TextPrimary)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = BybitColors.Surface
+                )
+            )
+        }
+    ) { paddingValues ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Основные настройки
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = BybitColors.Surface)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("🎯 Основные", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = BybitColors.TextPrimary)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        OutlinedTextField(
+                            value = maxMatchesPerExpress,
+                            onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) maxMatchesPerExpress = it },
+                            label = { Text("Матчей в экспрессе") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            colors = bybitTextFieldColors()
+                        )
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        OutlinedTextField(
+                            value = maxActiveExpresses,
+                            onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) maxActiveExpresses = it },
+                            label = { Text("Макс. экспрессов") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            colors = bybitTextFieldColors()
+                        )
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        OutlinedTextField(
+                            value = allMinKef,
+                            onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) allMinKef = it },
+                            label = { Text("Мин. коэффициент") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            colors = bybitTextFieldColors()
+                        )
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        OutlinedTextField(
+                            value = multiply,
+                            onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) multiply = it },
+                            label = { Text("Множитель") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            colors = bybitTextFieldColors()
+                        )
+                    }
+                }
+            }
+            
+            // Общие настройки
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = BybitColors.Surface)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("🔧 Общие", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = BybitColors.TextPrimary)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        OutlinedTextField(
+                            value = betAmount,
+                            onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) betAmount = it },
+                            label = { Text("Сумма ставки (₽)") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            colors = bybitTextFieldColors()
+                        )
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        OutlinedTextField(
+                            value = checkInterval,
+                            onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) checkInterval = it },
+                            label = { Text("Интервал проверки (сек)") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            colors = bybitTextFieldColors()
+                        )
+                    }
+                }
+            }
+            
+            // Тестовый режим
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (testMode) BybitColors.Surface else BybitColors.Red.copy(alpha = 0.1f)
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("🧪 Тестовый режим", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = BybitColors.TextPrimary)
+                            Switch(
+                                checked = testMode,
+                                onCheckedChange = { testMode = it },
+                                colors = SwitchDefaults.colors(checkedThumbColor = BybitColors.Yellow)
+                            )
+                        }
+                        
+                        if (testMode) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = testBalance,
+                                onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) testBalance = it },
+                                label = { Text("Виртуальный баланс (₽)") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                colors = bybitTextFieldColors()
+                            )
+                        }
+                    }
+                }
+            }
+            
+            // Кнопки
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onBack,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = BybitColors.TextSecondary)
+                    ) {
+                        Text("Отмена")
+                    }
+                    
+                    Button(
+                        onClick = {
+                            prefs.edit()
+                                .putInt("max_matches_per_express", maxMatchesPerExpress.toIntOrNull() ?: 2)
+                                .putInt("multiply", multiply.toIntOrNull() ?: 2)
+                                .putFloat("all_min_kef", allMinKef.toFloatOrNull() ?: 1.67f)
+                                .putInt("max_active_expresses", maxActiveExpresses.toIntOrNull() ?: 5)
+                                .putFloat("type_924_min", type924Min.toFloatOrNull() ?: 1.15f)
+                                .putFloat("type_924_max", type924Max.toFloatOrNull() ?: 1.35f)
+                                .putInt("type_924_start", type924Start.toIntOrNull() ?: 80)
+                                .putInt("type_924_end", type924End.toIntOrNull() ?: 100)
+                                .putFloat("type_927_min", type927Min.toFloatOrNull() ?: 1.15f)
+                                .putFloat("type_927_max", type927Max.toFloatOrNull() ?: 1.35f)
+                                .putInt("type_927_start", type927Start.toIntOrNull() ?: 1)
+                                .putInt("type_927_end", type927End.toIntOrNull() ?: 45)
+                                .putFloat("type_928_min", type928Min.toFloatOrNull() ?: 1.15f)
+                                .putFloat("type_928_max", type928Max.toFloatOrNull() ?: 1.35f)
+                                .putInt("type_928_start", type928Start.toIntOrNull() ?: 1)
+                                .putInt("type_928_end", type928End.toIntOrNull() ?: 45)
+                                .putString("check_interval", checkInterval)
+                                .putString("bet_amount", betAmount)
+                                .putBoolean("test_mode", testMode)
+                                .putString("test_balance", testBalance)
+                                .apply()
+                            
+                            Toast.makeText(context, "Настройки сохранены", Toast.LENGTH_SHORT).show()
+                            onSave()
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = BybitColors.Yellow),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Сохранить", color = Color.Black)
+                    }
+                }
+            }
+            
+            // Очистка данных
+            item {
+                Button(
+                    onClick = { showClearDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = BybitColors.Red),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("🗑 Очистить все данные")
+                }
+            }
+        }
+        
+        if (showClearDialog) {
+            AlertDialog(
+                onDismissRequest = { showClearDialog = false },
+                containerColor = BybitColors.Surface,
+                titleContentColor = BybitColors.TextPrimary,
+                textContentColor = BybitColors.TextSecondary,
+                title = { Text("⚠️ Очистка данных") },
+                text = { Text("Удалить ВСЕ данные?\n\nЭто действие нельзя отменить!") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showClearDialog = false
+                            isClearing = true
+                            scope.launch {
+                                dbHelper.clearAllData(context)
+                                isClearing = false
+                                Toast.makeText(context, "Данные удалены", Toast.LENGTH_SHORT).show()
+                                onBack()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = BybitColors.Red)
+                    ) {
+                        Text("Удалить")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showClearDialog = false }) {
+                        Text("Отмена", color = BybitColors.TextSecondary)
+                    }
+                }
+            )
+        }
+    }
+}
+
+@Composable
+fun bybitTextFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedBorderColor = BybitColors.Yellow,
+    unfocusedBorderColor = BybitColors.Divider,
+    focusedLabelColor = BybitColors.Yellow,
+    unfocusedLabelColor = BybitColors.TextTertiary,
+    cursorColor = BybitColors.Yellow,
+    focusedTextColor = BybitColors.TextPrimary,
+    unfocusedTextColor = BybitColors.TextPrimary
+)
 
 // ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 
