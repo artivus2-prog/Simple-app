@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 // DatabaseHelper.kt - ПОЛНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ (убраны лишние поля, упрощена структура)
+=======
+// DatabaseHelper.kt - ПОЛНАЯ ВЕРСИЯ С НОВЫМИ ПОЛЯМИ
+>>>>>>> 7aeb79ec158f0e1a97be445c09011536f9c3be32
 package com.example.fonbetbot
 
 import android.content.ContentValues
@@ -14,7 +18,11 @@ class DatabaseHelper(context: Context) :
     
     companion object {
         private const val DATABASE_NAME = "fonbet_bot.db"
+<<<<<<< HEAD
         private const val DATABASE_VERSION = 5  // Версия 5: убраны дублирующиеся поля
+=======
+        private const val DATABASE_VERSION = 6
+>>>>>>> 7aeb79ec158f0e1a97be445c09011536f9c3be32
         private const val TAG = "DatabaseHelper"
     }
     
@@ -109,7 +117,11 @@ class DatabaseHelper(context: Context) :
                 )
             """)
             
+<<<<<<< HEAD
             // Таблица событий/матчей
+=======
+            // Таблица событий/матчей (m_id УНИКАЛЕН)
+>>>>>>> 7aeb79ec158f0e1a97be445c09011536f9c3be32
             db.execSQL("""
                 CREATE TABLE IF NOT EXISTS express_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -124,6 +136,9 @@ class DatabaseHelper(context: Context) :
                     start_odds REAL,
                     current_odds REAL,
                     match_time INTEGER DEFAULT 0,
+                    match_start_time INTEGER DEFAULT 0,
+                    expected_end_time INTEGER DEFAULT 0,
+                    sport_type TEXT DEFAULT 'football',
                     home_score INTEGER DEFAULT 0,
                     away_score INTEGER DEFAULT 0,
                     bet_type INTEGER,
@@ -149,6 +164,7 @@ class DatabaseHelper(context: Context) :
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_mid ON express_events(m_id)")
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_status ON express_events(status)")
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_finalized ON express_events(is_finalized)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_expected_end ON express_events(expected_end_time)")
             
             Log.d(TAG, "Database created successfully")
         } catch (e: Exception) {
@@ -159,6 +175,7 @@ class DatabaseHelper(context: Context) :
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         Log.d(TAG, "Upgrading database from $oldVersion to $newVersion")
         
+<<<<<<< HEAD
         if (oldVersion < 5) {
             // Полная перестройка таблиц экспрессов для версии 5
             try {
@@ -175,6 +192,23 @@ class DatabaseHelper(context: Context) :
                     CREATE TABLE express_bets (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         id_exp INTEGER NOT NULL UNIQUE,
+=======
+        if (oldVersion < 2) {
+            db.execSQL("ALTER TABLE express_events ADD COLUMN is_finalized INTEGER DEFAULT 0")
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_finalized ON express_events(is_finalized)")
+        }
+        
+        if (oldVersion < 3) {
+            db.execSQL("ALTER TABLE users ADD COLUMN username TEXT")
+        }
+        
+        if (oldVersion < 4) {
+            try {
+                db.execSQL("""
+                    CREATE TABLE express_bets_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        id_exp INTEGER NOT NULL,
+>>>>>>> 7aeb79ec158f0e1a97be445c09011536f9c3be32
                         kfall REAL,
                         profloss REAL DEFAULT 0,
                         balans REAL,
@@ -187,18 +221,46 @@ class DatabaseHelper(context: Context) :
                         total_odds REAL,
                         bet_amount REAL,
                         potential_win REAL,
+<<<<<<< HEAD
                         profit_loss REAL,
                         is_bet_placed INTEGER DEFAULT 0,
+=======
+                        balance REAL,
+                        profit_loss REAL,
+                        is_bet_placed INTEGER DEFAULT 0,
+                        created_time INTEGER,
+>>>>>>> 7aeb79ec158f0e1a97be445c09011536f9c3be32
                         created_at INTEGER DEFAULT (strftime('%s', 'now')),
                         updated_at INTEGER DEFAULT (strftime('%s', 'now'))
                     )
                 """)
                 
                 db.execSQL("""
+<<<<<<< HEAD
                     CREATE TABLE express_events (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         id_exp INTEGER NOT NULL,
                         m_id INTEGER NOT NULL UNIQUE,
+=======
+                    INSERT INTO express_bets_new (id, id_exp, kfall, profloss, balans, sumbet, sts_all, ct, 
+                        strategy, id_exp_replace, events_count, total_odds, bet_amount, potential_win, 
+                        balance, profit_loss, is_bet_placed, created_time, created_at, updated_at)
+                    SELECT id, id_exp, kfall, profloss, balans, sumbet, sts_all, ct, 
+                        strategy, id_exp_replace, events_count, total_odds, bet_amount, potential_win, 
+                        balance, profit_loss, is_bet_placed, created_time, created_at, updated_at
+                    FROM express_bets
+                """)
+                
+                db.execSQL("DROP TABLE express_bets")
+                db.execSQL("ALTER TABLE express_bets_new RENAME TO express_bets")
+                
+                db.execSQL("""
+                    CREATE TABLE express_events_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        express_id INTEGER NOT NULL,
+                        id_exp INTEGER NOT NULL,
+                        m_id INTEGER NOT NULL,
+>>>>>>> 7aeb79ec158f0e1a97be445c09011536f9c3be32
                         id_liga INTEGER,
                         league_name TEXT,
                         id_home INTEGER,
@@ -218,6 +280,7 @@ class DatabaseHelper(context: Context) :
                         total_type INTEGER,
                         created_at INTEGER DEFAULT (strftime('%s', 'now')),
                         updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+<<<<<<< HEAD
                         FOREIGN KEY (id_exp) REFERENCES express_bets(id_exp) ON DELETE CASCADE
                     )
                 """)
@@ -251,13 +314,59 @@ class DatabaseHelper(context: Context) :
                 db.execSQL("CREATE INDEX IF NOT EXISTS idx_express_exp ON express_bets(id_exp)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS idx_express_sts ON express_bets(sts_all)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_exp ON express_events(id_exp)")
+=======
+                        FOREIGN KEY (express_id) REFERENCES express_bets(id) ON DELETE CASCADE
+                    )
+                """)
+                
+                db.execSQL("""
+                    INSERT INTO express_events_new (id, express_id, id_exp, m_id, id_liga, league_name, 
+                        id_home, home_team, id_away, away_team, start_odds, current_odds, match_time, 
+                        home_score, away_score, bet_type, status, is_finalized, match_url, uzh, 
+                        total_type, created_at, updated_at)
+                    SELECT id, express_id, id_exp, m_id, id_liga, league_name, 
+                        id_home, home_team, id_away, away_team, start_odds, current_odds, match_time, 
+                        home_score, away_score, bet_type, status, is_finalized, match_url, uzh, 
+                        total_type, created_at, updated_at
+                    FROM express_events
+                """)
+                
+                db.execSQL("DROP TABLE express_events")
+                db.execSQL("ALTER TABLE express_events_new RENAME TO express_events")
+                
+                db.execSQL("CREATE INDEX IF NOT EXISTS idx_express_exp ON express_bets(id_exp)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS idx_express_sts ON express_bets(sts_all)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_express ON express_events(express_id)")
+>>>>>>> 7aeb79ec158f0e1a97be445c09011536f9c3be32
                 db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_mid ON express_events(m_id)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_status ON express_events(status)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_finalized ON express_events(is_finalized)")
                 
+<<<<<<< HEAD
                 Log.d(TAG, "✅ Migration to version 5: simplified express tables structure")
             } catch (e: Exception) {
                 Log.e(TAG, "Error during migration to version 5: ${e.message}")
+=======
+                Log.d(TAG, "✅ Migration to version 4: removed user_id from express tables")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error during migration to version 4: ${e.message}")
+            }
+        }
+        
+        if (oldVersion < 5) {
+            Log.d(TAG, "Migration to version 5: new status codes (-2 = отменен)")
+        }
+        
+        if (oldVersion < 6) {
+            try {
+                db.execSQL("ALTER TABLE express_events ADD COLUMN match_start_time INTEGER DEFAULT 0")
+                db.execSQL("ALTER TABLE express_events ADD COLUMN expected_end_time INTEGER DEFAULT 0")
+                db.execSQL("ALTER TABLE express_events ADD COLUMN sport_type TEXT DEFAULT 'football'")
+                db.execSQL("CREATE INDEX IF NOT EXISTS idx_events_expected_end ON express_events(expected_end_time)")
+                Log.d(TAG, "✅ Migration to version 6: added time tracking fields")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error adding time fields: ${e.message}")
+>>>>>>> 7aeb79ec158f0e1a97be445c09011536f9c3be32
             }
         }
     }
@@ -620,6 +729,7 @@ class DatabaseHelper(context: Context) :
 
     // ==================== МЕТОДЫ ДЛЯ ТАБЛИЦ ЭКСПРЕССОВ ====================
     
+<<<<<<< HEAD
     /**
      * Получить все экспрессы
      */
@@ -690,6 +800,8 @@ class DatabaseHelper(context: Context) :
     /**
      * Получить все матчи
      */
+=======
+>>>>>>> 7aeb79ec158f0e1a97be445c09011536f9c3be32
     fun getAllMatches(): List<MatchInfo> {
         val db = readableDatabase
         val matches = mutableListOf<MatchInfo>()
@@ -702,6 +814,9 @@ class DatabaseHelper(context: Context) :
                 COALESCE(e.away_team, '') as away_team,
                 e.id_home, e.id_away, 
                 e.start_odds, e.current_odds, e.match_time,
+                COALESCE(e.match_start_time, 0) as match_start_time,
+                COALESCE(e.expected_end_time, 0) as expected_end_time,
+                COALESCE(e.sport_type, 'football') as sport_type,
                 e.home_score, e.away_score, e.bet_type, e.status,
                 e.is_finalized,
                 COALESCE(e.match_url, '') as match_url,
@@ -714,6 +829,7 @@ class DatabaseHelper(context: Context) :
         while (cursor.moveToNext()) {
             matches.add(MatchInfo(
                 id = cursor.getLong(0),
+<<<<<<< HEAD
                 idExp = cursor.getInt(1),
                 mId = cursor.getInt(2),
                 idLiga = if (cursor.isNull(3)) null else cursor.getInt(3),
@@ -735,6 +851,33 @@ class DatabaseHelper(context: Context) :
                 totalType = if (cursor.isNull(19)) null else cursor.getInt(19),
                 createdAt = cursor.getLong(20),
                 updatedAt = cursor.getLong(21)
+=======
+                expressId = cursor.getLong(1),
+                idExp = cursor.getInt(2),
+                mId = cursor.getInt(3),
+                idLiga = if (cursor.isNull(4)) null else cursor.getInt(4),
+                leagueName = cursor.getString(5),
+                homeTeam = cursor.getString(6),
+                awayTeam = cursor.getString(7),
+                idHome = if (cursor.isNull(8)) null else cursor.getInt(8),
+                idAway = if (cursor.isNull(9)) null else cursor.getInt(9),
+                startOdds = cursor.getDouble(10),
+                currentOdds = if (cursor.isNull(11)) null else cursor.getDouble(11),
+                matchTime = cursor.getInt(12),
+                matchStartTime = cursor.getInt(13),
+                expectedEndTime = cursor.getLong(14),
+                sportType = cursor.getString(15),
+                homeScore = cursor.getInt(16),
+                awayScore = cursor.getInt(17),
+                betType = cursor.getInt(18),
+                status = cursor.getInt(19),
+                isFinalized = cursor.getInt(20),
+                matchUrl = cursor.getString(21),
+                uzh = cursor.getString(22),
+                totalType = if (cursor.isNull(23)) null else cursor.getInt(23),
+                createdAt = cursor.getLong(24),
+                updatedAt = cursor.getLong(25)
+>>>>>>> 7aeb79ec158f0e1a97be445c09011536f9c3be32
             ))
         }
         cursor.close()
@@ -742,10 +885,75 @@ class DatabaseHelper(context: Context) :
         return matches
     }
     
+<<<<<<< HEAD
     /**
      * Получить матчи по id_exp экспресса
      */
     fun getMatchesByExpId(idExp: Int): List<MatchInfo> {
+=======
+    fun getAllExpresses(): List<ExpressInfo> {
+        val db = readableDatabase
+        val expresses = mutableListOf<ExpressInfo>()
+        
+        try {
+            val cursor = db.rawQuery("""
+                SELECT 
+                    id, id_exp, 
+                    COALESCE(kfall, 1.0) as kfall,
+                    COALESCE(profloss, 0.0) as profloss,
+                    COALESCE(balans, 0.0) as balans,
+                    COALESCE(sumbet, 0.0) as sumbet,
+                    sts_all, ct,
+                    COALESCE(strategy, '') as strategy,
+                    COALESCE(id_exp_replace, 0) as id_exp_replace,
+                    COALESCE(events_count, 0) as events_count,
+                    COALESCE(total_odds, 1.0) as total_odds,
+                    COALESCE(bet_amount, 0.0) as bet_amount,
+                    COALESCE(potential_win, 0.0) as potential_win,
+                    COALESCE(balance, 0.0) as balance,
+                    COALESCE(profit_loss, 0.0) as profit_loss,
+                    COALESCE(is_bet_placed, 0) as is_bet_placed,
+                    COALESCE(created_time, 0) as created_time,
+                    created_at, updated_at
+                FROM express_bets
+                ORDER BY ct DESC
+            """, null)
+            
+            while (cursor.moveToNext()) {
+                try {
+                    expresses.add(ExpressInfo(
+                        id = cursor.getLong(0),
+                        idExp = cursor.getInt(1),
+                        kfall = cursor.getDouble(2),
+                        profLoss = cursor.getDouble(3),
+                        balans = cursor.getDouble(4),
+                        sumbet = cursor.getDouble(5),
+                        stsAll = cursor.getInt(6),
+                        ct = cursor.getLong(7),
+                        strategy = cursor.getString(8),
+                        idExpReplace = cursor.getInt(9),
+                        eventsCount = cursor.getInt(10),
+                        totalOdds = cursor.getDouble(11),
+                        betAmount = cursor.getDouble(12),
+                        potentialWin = cursor.getDouble(13),
+                        createdAt = cursor.getLong(18),
+                        updatedAt = cursor.getLong(19)
+                    ))
+                } catch (e: Exception) {
+                    Log.e(TAG, "Ошибка чтения строки в getAllExpresses: ${e.message}")
+                }
+            }
+            cursor.close()
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка getAllExpresses: ${e.message}")
+        }
+        
+        return expresses
+    }
+    
+    fun getMatchesByExpressId(expressId: Long): List<MatchInfo> {
+>>>>>>> 7aeb79ec158f0e1a97be445c09011536f9c3be32
         val db = readableDatabase
         val matches = mutableListOf<MatchInfo>()
         
@@ -757,6 +965,9 @@ class DatabaseHelper(context: Context) :
                 COALESCE(e.away_team, '') as away_team,
                 e.id_home, e.id_away, 
                 e.start_odds, e.current_odds, e.match_time,
+                COALESCE(e.match_start_time, 0) as match_start_time,
+                COALESCE(e.expected_end_time, 0) as expected_end_time,
+                COALESCE(e.sport_type, 'football') as sport_type,
                 e.home_score, e.away_score, e.bet_type, e.status,
                 e.is_finalized,
                 COALESCE(e.match_url, '') as match_url,
@@ -770,6 +981,7 @@ class DatabaseHelper(context: Context) :
         while (cursor.moveToNext()) {
             matches.add(MatchInfo(
                 id = cursor.getLong(0),
+<<<<<<< HEAD
                 idExp = cursor.getInt(1),
                 mId = cursor.getInt(2),
                 idLiga = if (cursor.isNull(3)) null else cursor.getInt(3),
@@ -791,6 +1003,33 @@ class DatabaseHelper(context: Context) :
                 totalType = if (cursor.isNull(19)) null else cursor.getInt(19),
                 createdAt = cursor.getLong(20),
                 updatedAt = cursor.getLong(21)
+=======
+                expressId = cursor.getLong(1),
+                idExp = cursor.getInt(2),
+                mId = cursor.getInt(3),
+                idLiga = if (cursor.isNull(4)) null else cursor.getInt(4),
+                leagueName = cursor.getString(5),
+                homeTeam = cursor.getString(6),
+                awayTeam = cursor.getString(7),
+                idHome = if (cursor.isNull(8)) null else cursor.getInt(8),
+                idAway = if (cursor.isNull(9)) null else cursor.getInt(9),
+                startOdds = cursor.getDouble(10),
+                currentOdds = if (cursor.isNull(11)) null else cursor.getDouble(11),
+                matchTime = cursor.getInt(12),
+                matchStartTime = cursor.getInt(13),
+                expectedEndTime = cursor.getLong(14),
+                sportType = cursor.getString(15),
+                homeScore = cursor.getInt(16),
+                awayScore = cursor.getInt(17),
+                betType = cursor.getInt(18),
+                status = cursor.getInt(19),
+                isFinalized = cursor.getInt(20),
+                matchUrl = cursor.getString(21),
+                uzh = cursor.getString(22),
+                totalType = if (cursor.isNull(23)) null else cursor.getInt(23),
+                createdAt = cursor.getLong(24),
+                updatedAt = cursor.getLong(25)
+>>>>>>> 7aeb79ec158f0e1a97be445c09011536f9c3be32
             ))
         }
         cursor.close()
@@ -1064,6 +1303,9 @@ data class MatchInfo(
     val startOdds: Double,
     val currentOdds: Double?,
     val matchTime: Int,
+    val matchStartTime: Int,
+    val expectedEndTime: Long,
+    val sportType: String,
     val homeScore: Int,
     val awayScore: Int,
     val betType: Int,
