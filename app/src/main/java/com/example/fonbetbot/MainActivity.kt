@@ -208,7 +208,7 @@ fun FonbetBotApp(dbHelper: DatabaseHelper) {
             onNavItemSelected = { selectedNavItem = it },
             onNavigateToWebAuth = { currentScreen = "webAuth" },
             onNavigateToSettings = { currentScreen = "settings" },
-onNavigateToAnalytics = { currentScreen = "analytics" }, 
+            onNavigateToAnalytics = { currentScreen = "analytics" }, 
             onLogout = {
                 currentScreen = "main"
                 clearAuthData()
@@ -244,7 +244,7 @@ fun BybitMainScreen(
     onNavItemSelected: (BottomNavItem) -> Unit,
     onNavigateToWebAuth: () -> Unit,
     onNavigateToSettings: () -> Unit,
-onNavigateToAnalytics: () -> Unit, 
+    onNavigateToAnalytics: () -> Unit, 
     onLogout: () -> Unit,
     dbHelper: DatabaseHelper
 ) {
@@ -578,7 +578,7 @@ LaunchedEffect(isBotRunning) {
                                 isBotRunning = isBotRunning,
                                 onNavigateToAuth = onNavigateToWebAuth,
                                 onNavigateToSettings = onNavigateToSettings,
-onNavigateToAnalytics = onNavigateToAnalytics
+                                onNavigateToAnalytics = onNavigateToAnalytics
                             )
                         }
                         
@@ -991,7 +991,8 @@ fun ActionButtonsRow(
     onStartStopBot: () -> Unit,
     isBotRunning: Boolean,
     onNavigateToAuth: () -> Unit,
-    onNavigateToSettings: () -> Unit
+    onNavigateToSettings: () -> Unit,
+    onNavigateToAnalytics: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
