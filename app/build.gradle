@@ -87,9 +87,6 @@ dependencies {
     implementation 'org.apache.commons:commons-compress:1.24.0'
     implementation 'org.apache.commons:commons-collections4:4.4'
     implementation 'org.apache.xmlbeans:xmlbeans:5.1.1'
-}
-
-    }
     
     // Добавляем совместимую версию logging
     implementation 'org.slf4j:slf4j-api:2.0.9'
