@@ -244,7 +244,7 @@ fun BybitMainScreen(
     onNavItemSelected: (BottomNavItem) -> Unit,
     onNavigateToWebAuth: () -> Unit,
     onNavigateToSettings: () -> Unit,
-    onNavigateToAnalytics: () -> Unit, 
+onNavigateToAnalytics: () -> Unit, 
     onLogout: () -> Unit,
     dbHelper: DatabaseHelper
 ) {
@@ -578,7 +578,7 @@ LaunchedEffect(isBotRunning) {
                                 isBotRunning = isBotRunning,
                                 onNavigateToAuth = onNavigateToWebAuth,
                                 onNavigateToSettings = onNavigateToSettings,
-                                onNavigateToAnalytics = onNavigateToAnalytics
+onNavigateToAnalytics = onNavigateToAnalytics
                             )
                         }
                         
@@ -991,8 +991,7 @@ fun ActionButtonsRow(
     onStartStopBot: () -> Unit,
     isBotRunning: Boolean,
     onNavigateToAuth: () -> Unit,
-    onNavigateToSettings: () -> Unit,
-    onNavigateToAnalytics: () -> Unit
+    onNavigateToSettings: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),

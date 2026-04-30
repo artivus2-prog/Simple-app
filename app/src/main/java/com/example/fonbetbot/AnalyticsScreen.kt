@@ -1444,9 +1444,3 @@ private fun calculateHourlyStats(expresses: List<ExpressInfo>): List<HourlyStats
     }
 }
 
-private fun typeName(type: Int): String = when (type) {
-    924 -> "1X"
-    927 -> "Ф1(+1.5)"
-    928 -> "Ф2(+1.5)"
-    else -> "Тип $type"
-}
