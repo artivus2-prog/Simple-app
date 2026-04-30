@@ -986,14 +986,15 @@ fun BalanceHeaderCard(
 }
 
 // ==================== ПАНЕЛЬ ДЕЙСТВИЙ ====================
-
 @Composable
 fun ActionButtonsRow(
     onStartStopBot: () -> Unit,
     isBotRunning: Boolean,
     onNavigateToAuth: () -> Unit,
-    onNavigateToSettings: () -> Unit
-) {
+    onNavigateToSettings: () -> Unit,
+    onNavigateToAnalytics: () -> Unit
+)
+ {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
