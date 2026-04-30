@@ -45,6 +45,7 @@ import java.text.SimpleDateFormat
 import android.util.Log
 import android.webkit.CookieManager
 import android.content.ContentValues
+import android.net.Uri
 import java.util.*
 
 // ==================== ЦВЕТОВАЯ ПАЛИТРА BYBIT ====================
@@ -207,6 +208,7 @@ fun FonbetBotApp(dbHelper: DatabaseHelper) {
             onNavItemSelected = { selectedNavItem = it },
             onNavigateToWebAuth = { currentScreen = "webAuth" },
             onNavigateToSettings = { currentScreen = "settings" },
+onNavigateToAnalytics = { currentScreen = "analytics" }, 
             onLogout = {
                 currentScreen = "main"
                 clearAuthData()
@@ -225,6 +227,10 @@ fun FonbetBotApp(dbHelper: DatabaseHelper) {
             onSave = { currentScreen = "main" },
             dbHelper = dbHelper
         )
+"analytics" -> AnalyticsScreen(  // ДОБАВИТЬ
+        dbHelper = dbHelper,
+        onBack = { currentScreen = "main" }
+    )
     }
 }
 
@@ -238,6 +244,7 @@ fun BybitMainScreen(
     onNavItemSelected: (BottomNavItem) -> Unit,
     onNavigateToWebAuth: () -> Unit,
     onNavigateToSettings: () -> Unit,
+onNavigateToAnalytics: () -> Unit, 
     onLogout: () -> Unit,
     dbHelper: DatabaseHelper
 ) {
@@ -570,7 +577,8 @@ LaunchedEffect(isBotRunning) {
                                 onStartStopBot = { if (isBotRunning) stopBot() else startBot() },
                                 isBotRunning = isBotRunning,
                                 onNavigateToAuth = onNavigateToWebAuth,
-                                onNavigateToSettings = onNavigateToSettings
+                                onNavigateToSettings = onNavigateToSettings,
+onNavigateToAnalytics = onNavigateToAnalytics
                             )
                         }
                         
@@ -1013,11 +1021,11 @@ fun ActionButtonsRow(
                 label = "Настройки",
                 onClick = onNavigateToSettings
             )
-            
+
             ActionButton(
-                icon = { Icon(Icons.Default.CardGiftcard, null, tint = BybitColors.TextSecondary, modifier = Modifier.size(28.dp)) },
-                label = "Бонусы",
-                onClick = { /* Заглушка */ }
+                icon = { Icon(Icons.Default.TrendingUp, null, tint = BybitColors.TextSecondary, modifier = Modifier.size(28.dp)) },
+                label = "Аналитика",
+                onClick =onNavigateToAnalytics
             )
         }
     }
