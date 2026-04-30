@@ -273,20 +273,11 @@ fun loadActiveExpresses() {
     scope.launch(Dispatchers.IO) {
         try {
             val allExpresses = dbHelper.getAllExpresses()
-            val currentTime = System.currentTimeMillis() / 1000
-            val maxAgeSeconds = 2 * 60 * 60 // 2 часа в секундах
             
-            // Фильтруем: только активные (0,1,2) и не старше 2 часов
+            // Показываем: активные (0), выигранные (2), проигранные (1, -1)
+            // Не показываем: отменённые (-2, -3)
             val filtered = allExpresses.filter { express ->
-                val ageSeconds = currentTime - express.createdAt
-                val isActive = express.stsAll in listOf(0, 1, 2)
-                val isRecent = ageSeconds <= maxAgeSeconds
-                
-                if (isActive && !isRecent) {
-                    Log.d("BybitMainScreen", "⏰ Экспресс #${express.idExp} старше 2 часов (${ageSeconds/60}мин), скрыт из UI")
-                }
-                
-                isActive && isRecent
+                express.stsAll in listOf(0, 1, -1, 2)
             }.sortedByDescending { it.createdAt }
             
             val matchesMap = mutableMapOf<Long, List<MatchInfo>>()
@@ -297,14 +288,6 @@ fun loadActiveExpresses() {
             withContext(Dispatchers.Main) {
                 activeExpresses = filtered
                 matchesByExpress = matchesMap
-                
-                // Логируем статистику
-                val hiddenCount = allExpresses.count { 
-                    it.stsAll in listOf(0, 1, 2) && (currentTime - it.createdAt) > maxAgeSeconds 
-                }
-                if (hiddenCount > 0) {
-                    logs.add(0, "[${getCurrentTime()}] ⏰ Скрыто $hiddenCount экспрессов старше 2ч")
-                }
             }
         } catch (e: Exception) {
             withContext(Dispatchers.Main) {
@@ -315,7 +298,10 @@ fun loadActiveExpresses() {
 }
     // Внутри BybitMainScreen, добавьте эту функцию:
 
-// Исправленная версия finalizeOldExpresses (без конфликта имён)
+/**
+ * Проверяет активные экспрессы старше 2 часов и пересчитывает их статус
+ * на основе результатов матчей. Статусы 1 и 2 НЕ меняет!
+ */
 fun finalizeOldExpresses() {
     scope.launch(Dispatchers.IO) {
         try {
@@ -323,11 +309,11 @@ fun finalizeOldExpresses() {
             val currentTime = System.currentTimeMillis() / 1000
             val maxAgeSeconds = 2 * 60 * 60
             
-            // Находим экспрессы старше 2 часов со статусом 0 (активные)
+            // Находим только АКТИВНЫЕ экспрессы (sts_all = 0) старше 2 часов
             val cursor = db.rawQuery("""
-                SELECT id, id_exp, sts_all, ct 
+                SELECT id, id_exp, ct 
                 FROM express_bets 
-                WHERE sts_all IN (0, 1, 2) 
+                WHERE sts_all = 0 
                 AND ct < ?
             """, arrayOf((currentTime - maxAgeSeconds).toString()))
             
@@ -335,38 +321,134 @@ fun finalizeOldExpresses() {
             while (cursor.moveToNext()) {
                 val expressId = cursor.getLong(0)
                 val idExp = cursor.getInt(1)
-                val ageSeconds = currentTime - cursor.getLong(3)
+                val ageSeconds = currentTime - cursor.getLong(2)
                 
-                // Используем полное имя класса для избежания конфликта
-                val updateValues = android.content.ContentValues().apply {
-                    put("sts_all", -3)
-                    put("updated_at", currentTime)
+                // Пересчитываем статус на основе матчей
+                val newStatus = recalculateExpressStatusFromMatches(db, expressId)
+                
+                // Обновляем статус только если он изменился с 0 на 1 или 2
+                if (newStatus != 0) {
+                    val updateValues = ContentValues().apply {
+                        put("sts_all", newStatus)
+                        put("updated_at", currentTime)
+                        
+                        // Если проиграл - считаем убыток
+                        if (newStatus == 1) {
+                            val expressCursor = db.rawQuery(
+                                "SELECT sumbet FROM express_bets WHERE id = ?", 
+                                arrayOf(expressId.toString())
+                            )
+                            if (expressCursor.moveToFirst()) {
+                                val sumbet = expressCursor.getDouble(0)
+                                put("profit_loss", -sumbet)
+                                put("potential_win", 0.0)
+                            }
+                            expressCursor.close()
+                        }
+                    }
+                    db.update("express_bets", updateValues, "id = ?", arrayOf(expressId.toString()))
+                    
+                    // Финализируем ВСЕ незавершенные матчи
+                    val eventValues = ContentValues().apply {
+                        put("is_finalized", 1)
+                        put("updated_at", currentTime)
+                    }
+                    db.update("express_events", eventValues, 
+                        "express_id = ? AND is_finalized = 0", 
+                        arrayOf(expressId.toString()))
+                    
+                    finalizedCount++
+                    
+                    val statusText = when (newStatus) {
+                        2 -> "ВЫИГРАЛ ✅"
+                        1 -> "ПРОИГРАЛ ❌"
+                        else -> "ЗАВЕРШЁН"
+                    }
+                    
+                    Log.d("BybitMainScreen", "⏰ Экспресс #$idExp завершён (возраст: ${ageSeconds/3600}ч, статус: $statusText)")
                 }
-                db.update("express_bets", updateValues, "id = ?", arrayOf(expressId.toString()))
-                
-                val eventValues = android.content.ContentValues().apply {
-                    put("is_finalized", 1)
-                    put("status", 0)
-                    put("updated_at", currentTime)
-                }
-                db.update("express_events", eventValues, 
-                    "express_id = ? AND is_finalized = 0", 
-                    arrayOf(expressId.toString()))
-                
-                finalizedCount++
-                Log.d("BybitMainScreen", "⏰ Экспресс #$idExp финализирован (возраст: ${ageSeconds/3600}ч)")
             }
             cursor.close()
             
             if (finalizedCount > 0) {
                 withContext(Dispatchers.Main) {
-                    logs.add(0, "[${getCurrentTime()}] ⏰ Автоматически завершено $finalizedCount старых экспрессов")
+                    logs.add(0, "[${getCurrentTime()}] ⏰ Завершено $finalizedCount активных экспрессов")
                     loadActiveExpresses()
                 }
             }
         } catch (e: Exception) {
             Log.e("BybitMainScreen", "Ошибка финализации: ${e.message}")
         }
+    }
+}
+
+/**
+ * Пересчитывает статус экспресса на основе реальных результатов матчей
+ * Использует ТОЛЬКО счет (home_score, away_score) и тип ставки (bet_type)
+ * 
+ * Возвращает:
+ *   2 - выиграл (все матчи зашли)
+ *   1 - проиграл (хотя бы один матч не зашёл)
+ *  -1 - проиграл и будет заменён (если есть id_exp_replace)
+ *   0 - ещё активен (есть незавершенные матчи)
+ */
+fun recalculateExpressStatusFromMatches(db: SQLiteDatabase, expressId: Long): Int {
+    val cursor = db.rawQuery("""
+        SELECT ee.bet_type, ee.home_score, ee.away_score, ee.is_finalized,
+               eb.id_exp_replace
+        FROM express_events ee
+        JOIN express_bets eb ON eb.id = ee.express_id
+        WHERE ee.express_id = ?
+    """, arrayOf(expressId.toString()))
+    
+    var allWin = true
+    var hasLoss = false
+    var hasUnfinished = false
+    var hasReplace = false
+    
+    while (cursor.moveToNext()) {
+        val betType = cursor.getInt(0)
+        val homeScore = cursor.getInt(1)
+        val awayScore = cursor.getInt(2)
+        val isFinalized = cursor.getInt(3) == 1
+        val idExpReplace = cursor.getInt(4)
+        
+        if (idExpReplace > 0) {
+            hasReplace = true
+        }
+        
+        if (!isFinalized) {
+            hasUnfinished = true
+            continue
+        }
+        
+        // Пересчитываем статус матча на основе счета и типа ставки
+        val matchResult = when (betType) {
+            924 -> if (homeScore >= awayScore) 2 else 1  // 1X: хозяева не проиграют
+            927 -> if (homeScore + 1.5 > awayScore) 2 else 1  // Ф1(+1.5): хозяева с форой +1.5
+            928 -> if (awayScore + 1.5 > homeScore) 2 else 1  // Ф2(+1.5): гости с форой +1.5
+            else -> {
+                Log.w("recalculateStatus", "Неизвестный тип ставки: $betType, считаем проигрышем")
+                1
+            }
+        }
+        
+        when (matchResult) {
+            2 -> { /* Матч зашёл - ок */ }
+            1 -> { hasLoss = true; allWin = false }
+        }
+    }
+    cursor.close()
+    
+    // Если есть незавершенные матчи - экспресс ещё активен
+    if (hasUnfinished) return 0
+    
+    // Все матчи завершены
+    return when {
+        hasLoss && hasReplace -> -1  // Проиграл и заменён
+        hasLoss -> 1                 // Проиграл
+        allWin -> 2                  // Выиграл
+        else -> -1                   // По умолчанию - проиграл
     }
 }
 

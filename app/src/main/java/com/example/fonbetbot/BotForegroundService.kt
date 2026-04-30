@@ -660,7 +660,7 @@ class BotForegroundService : Service() {
             val cursor = db.rawQuery("""
                 SELECT eb.id, eb.id_exp, eb.sts_all
                 FROM express_bets eb
-                WHERE eb.sts_all IN (0, 1, 2) AND eb.is_bet_placed = 1
+                WHERE eb.sts_all IN (0, 1, 2, -1) AND eb.is_bet_placed = 1
             """, null)
             
             val expressIds = mutableListOf<Pair<Long, Int>>()
@@ -1635,68 +1635,94 @@ class BotForegroundService : Service() {
         }
     }
     
-    private fun checkAndCreateReplacementExpress() {
-        val db = dbHelper.writableDatabase
-        val currentTime = System.currentTimeMillis() / 1000
-        val twelveHoursAgo = currentTime - (12 * 3600)
+    /**
+ * Ищет проигравшие экспрессы старше 12 часов со статусом 1
+ * При появлении нового экспресса заменяет старый (меняет статус на -1)
+ */
+fun checkAndCreateReplacementExpress() {
+    val db = dbHelper.writableDatabase
+    val currentTime = System.currentTimeMillis() / 1000
+    val twelveHoursAgo = currentTime - (12 * 3600)
+    
+    // Ищем проигравший экспресс старше 12 часов (статус 1, ещё не заменён)
+    val cursor = db.rawQuery(
+        """SELECT id, id_exp, sumbet 
+           FROM express_bets 
+           WHERE sts_all = 1 
+           AND ct < ? 
+           AND id_exp_replace = 0 
+           ORDER BY ct ASC LIMIT 1""",
+        arrayOf(twelveHoursAgo.toString())
+    )
+    
+    if (cursor.moveToFirst()) {
+        val oldExpressId = cursor.getLong(0)
+        val oldExpId = cursor.getInt(1)
+        val currentBetAmount = cursor.getDouble(2)
+        cursor.close()
         
-        val cursor = db.rawQuery(
-            "SELECT id, id_exp, sumbet FROM express_bets WHERE sts_all = 1 AND ct < ? AND id_exp_replace = 0 ORDER BY ct ASC LIMIT 1",
+        // Проверяем, есть ли новый экспресс для замены
+        // (новый экспресс создаётся ботом при получении сигнала)
+        val newExpressCursor = db.rawQuery(
+            """SELECT id, id_exp 
+               FROM express_bets 
+               WHERE sts_all = 0 
+               AND ct > ? 
+               ORDER BY ct DESC LIMIT 1""",
             arrayOf(twelveHoursAgo.toString())
         )
         
-        if (cursor.moveToFirst()) {
-            val oldExpressId = cursor.getLong(0)
-            val oldExpId = cursor.getInt(1)
-            val currentBetAmount = cursor.getDouble(2)
-            cursor.close()
+        if (newExpressCursor.moveToFirst()) {
+            val newExpressId = newExpressCursor.getLong(0)
+            val newExpId = newExpressCursor.getInt(1)
+            newExpressCursor.close()
             
+            // Связываем старый экспресс с новым
+            val updateValues = ContentValues().apply {
+                put("sts_all", -1)  // Меняем статус на "проиграл и заменён"
+                put("id_exp_replace", newExpId)
+                put("updated_at", currentTime)
+            }
+            db.update("express_bets", updateValues, "id = ?", arrayOf(oldExpressId.toString()))
+            
+            // Рассчитываем новую ставку для догона
             val multiply = prefs.getInt("multiply", 2)
             val initialBet = prefs.getString("bet_amount", "30")?.toDoubleOrNull() ?: 30.0
             val maxBetMultiplier = prefs.getInt("max_bet_multiplier", 3)
             val maxAllowedBet = initialBet * maxBetMultiplier
-            var newBetAmount = currentBetAmount * multiply
             
+            var newBetAmount = currentBetAmount * multiply
             if (newBetAmount > maxAllowedBet) {
                 newBetAmount = initialBet + 1.0
-                onLogUpdate?.invoke("[${getCurrentTime()}] ⚠️ Ставка превысила лимит (${maxAllowedBet.toInt()} ₽), сброс до начальной + 1: ${newBetAmount.toInt()} ₽")
-                
-                authData?.let { data ->
-                    val user = dbHelper.getUser(data.fsid, data.deviceId)
-                    user?.let { dbHelper.addLog(it.id, "bet_reset", "Ставка сброшена до ${newBetAmount.toInt()} ₽") }
-                }
+                Log.d(TAG, "⚠️ Ставка превысила лимит, сброс до $newBetAmount")
             }
             
-            val eventsCursor = db.query("express_events", arrayOf("m_id", "bet_type"),
-                "express_id = ?", arrayOf(oldExpressId.toString()), null, null, null)
-            val bets = mutableListOf<Pair<Int, Int>>()
-            while (eventsCursor.moveToNext()) bets.add(Pair(eventsCursor.getInt(0), eventsCursor.getInt(1)))
-            eventsCursor.close()
+            // Обновляем ставку в новом экспрессе
+            val updateNewExpress = ContentValues().apply {
+                put("sumbet", newBetAmount)
+                put("bet_amount", newBetAmount)
+                put("updated_at", currentTime)
+            }
+            db.update("express_bets", updateNewExpress, "id = ?", arrayOf(newExpressId.toString()))
             
-            if (bets.isNotEmpty()) {
-                val newExpId = (System.currentTimeMillis() / 1000).toInt()
-                onLogUpdate?.invoke("[${getCurrentTime()}] 🔄 Замена экспресса #$oldExpId → #$newExpId (ставка: ${currentBetAmount.toInt()} → ${newBetAmount.toInt()} ₽)")
-                
-                prefs.edit().putString("bet_amount", newBetAmount.toInt().toString()).apply()
-                
-                db.update("express_bets", ContentValues().apply {
-                    put("sts_all", -1)
-                    put("id_exp_replace", newExpId)
-                    put("updated_at", currentTime)
-                }, "id = ?", arrayOf(oldExpressId.toString()))
-                
-                authData?.let { data ->
-                    val user = dbHelper.getUser(data.fsid, data.deviceId)
-                    user?.let {
-                        dbHelper.addLog(it.id, "express_replaced",
-                            "Экспресс #$oldExpId заменен на #$newExpId, ставка: ${newBetAmount.toInt()} ₽")
-                    }
+            Log.d(TAG, "🔄 Экспресс #$oldExpId (проиграл) заменён на #$newExpId (новая ставка: $newBetAmount)")
+            
+            onLogUpdate?.invoke("[${getCurrentTime()}] 🔄 Догон: #$oldExpId → #$newExpId (${currentBetAmount.toInt()} → ${newBetAmount.toInt()} ₽)")
+            
+            authData?.let { data ->
+                val user = dbHelper.getUser(data.fsid, data.deviceId)
+                user?.let {
+                    dbHelper.addLog(it.id, "express_replaced",
+                        "Экспресс #$oldExpId заменён на #$newExpId, ставка: ${newBetAmount.toInt()} ₽")
                 }
             }
         } else {
-            cursor.close()
+            newExpressCursor.close()
         }
+    } else {
+        cursor.close()
     }
+}
     
     fun canCreateNewExpress(): Boolean {
         val maxActive = prefs.getInt("max_active_expresses", 5)

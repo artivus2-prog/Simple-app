@@ -1557,12 +1557,11 @@ fun MatchRow(match: MatchDbItem, onEdit: () -> Unit) {
 @Composable
 fun StatusBadge(status: Int) {
     val (text, color) = when (status) {
-        2 -> "Выиграл" to BybitColors.Green
-        1, -1 -> "Проиграл" to BybitColors.Red
-        0 -> "Активен" to BybitColors.Yellow
-        -2, -3 -> "Отменён" to BybitColors.TextTertiary
-        else -> "Неизв." to BybitColors.TextTertiary
-    }
+        2 -> "Выиграл ✅" to BybitColors.Green
+        1 -> "Проиграл ❌" to BybitColors.Red
+        -1 -> "Заменён 🔄" to BybitColors.Yellow
+        0 -> "Активен 🟢" to BybitColors.Yellow
+        else -> "Завершён" to BybitColors.TextTertiary}
     
     Surface(
         shape = RoundedCornerShape(4.dp),
@@ -2288,19 +2287,20 @@ private fun filterByPeriod(expresses: List<ExpressInfo>, period: Int): List<Expr
 
 private fun calculateSummary(expresses: List<ExpressInfo>): AnalyticsSummary {
     val totalExpresses = expresses.size
+    
     val wonExpresses = expresses.count { it.stsAll == 2 }
-    val lostExpresses = expresses.count { it.stsAll in listOf(1, -1) }
+    val lostExpresses = expresses.count { it.stsAll in listOf(1, -1) }  // Включаем -1
     val activeExpresses = expresses.count { it.stsAll == 0 }
     val cancelledExpresses = expresses.count { it.stsAll in listOf(-2, -3) }
-
+    
     val totalProfit = expresses.filter { it.stsAll == 2 }.sumOf { it.potentialWin - it.sumbet }
     val totalLoss = expresses.filter { it.stsAll in listOf(1, -1) }.sumOf { it.sumbet }
     val netProfit = totalProfit - totalLoss
     val totalBetsAmount = expresses.sumOf { it.sumbet }
-
+    
     val winRate = if (totalExpresses > 0) (wonExpresses.toDouble() / totalExpresses * 100) else 0.0
     val roi = if (totalBetsAmount > 0) (netProfit / totalBetsAmount * 100) else 0.0
-
+    
     val kfalls = expresses.map { it.kfall }
     val avgOdds = if (kfalls.isNotEmpty()) kfalls.average() else 0.0
     val bestOdds = kfalls.maxOrNull() ?: 0.0
