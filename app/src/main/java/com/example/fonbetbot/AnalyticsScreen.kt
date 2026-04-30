@@ -2451,15 +2451,3 @@ private fun calculateHourlyStats(expresses: List<ExpressInfo>): List<HourlyStats
         )
     }
 }
-
-// Вспомогательная функция для цветов текстовых полей
-@Composable
-fun bybitTextFieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedBorderColor = BybitColors.Yellow,
-    unfocusedBorderColor = BybitColors.Divider,
-    focusedLabelColor = BybitColors.Yellow,
-    unfocusedLabelColor = BybitColors.TextTertiary,
-    cursorColor = BybitColors.Yellow,
-    focusedTextColor = BybitColors.TextPrimary,
-    unfocusedTextColor = BybitColors.TextPrimary
-)
