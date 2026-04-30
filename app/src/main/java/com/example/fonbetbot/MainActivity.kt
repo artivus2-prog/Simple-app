@@ -384,13 +384,6 @@ fun finalizeOldExpresses() {
 
 /**
  * Пересчитывает статус экспресса на основе реальных результатов матчей
- * Использует ТОЛЬКО счет (home_score, away_score) и тип ставки (bet_type)
- * 
- * Возвращает:
- *   2 - выиграл (все матчи зашли)
- *   1 - проиграл (хотя бы один матч не зашёл)
- *  -1 - проиграл и будет заменён (если есть id_exp_replace)
- *   0 - ещё активен (есть незавершенные матчи)
  */
 fun recalculateExpressStatusFromMatches(db: SQLiteDatabase, expressId: Long): Int {
     val cursor = db.rawQuery("""
@@ -422,36 +415,29 @@ fun recalculateExpressStatusFromMatches(db: SQLiteDatabase, expressId: Long): In
             continue
         }
         
-        // Пересчитываем статус матча на основе счета и типа ставки
         val matchResult = when (betType) {
-            924 -> if (homeScore >= awayScore) 2 else 1  // 1X: хозяева не проиграют
-            927 -> if (homeScore + 1.5 > awayScore) 2 else 1  // Ф1(+1.5): хозяева с форой +1.5
-            928 -> if (awayScore + 1.5 > homeScore) 2 else 1  // Ф2(+1.5): гости с форой +1.5
-            else -> {
-                Log.w("recalculateStatus", "Неизвестный тип ставки: $betType, считаем проигрышем")
-                1
-            }
+            924 -> if (homeScore >= awayScore) 2 else 1
+            927 -> if (homeScore + 1.5 > awayScore) 2 else 1
+            928 -> if (awayScore + 1.5 > homeScore) 2 else 1
+            else -> 1
         }
         
         when (matchResult) {
-            2 -> { /* Матч зашёл - ок */ }
+            2 -> { /* зашёл */ }
             1 -> { hasLoss = true; allWin = false }
         }
     }
     cursor.close()
     
-    // Если есть незавершенные матчи - экспресс ещё активен
     if (hasUnfinished) return 0
     
-    // Все матчи завершены
     return when {
-        hasLoss && hasReplace -> -1  // Проиграл и заменён
-        hasLoss -> 1                 // Проиграл
-        allWin -> 2                  // Выиграл
-        else -> -1                   // По умолчанию - проиграл
+        hasLoss && hasReplace -> -1
+        hasLoss -> 1
+        allWin -> 2
+        else -> 1
     }
 }
-
     fun fetchBalanceFromApi() {
         if (authData == null) {
             logs.add(0, "[${getCurrentTime()}] ❌ Нет данных авторизации")
