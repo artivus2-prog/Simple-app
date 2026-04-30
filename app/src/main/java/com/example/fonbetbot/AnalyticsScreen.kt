@@ -120,8 +120,8 @@ fun AnalyticsScreen(
     var isLoading by remember { mutableStateOf(true) }
     
     // UI состояния
-    var selectedMainTab by remember { mutableStateOf(0) } // 0 - Основная, 1 - Пай чарт
-    var selectedPeriod by remember { mutableStateOf(0) } // 0 - сегодня, 1 - неделя, 2 - месяц, 3 - всё время
+    var selectedMainTab by remember { mutableStateOf(0) }
+    var selectedPeriod by remember { mutableStateOf(0) }
     
     // Импорт
     var isImporting by remember { mutableStateOf(false) }
@@ -149,6 +149,7 @@ fun AnalyticsScreen(
                         if (result.errors.isNotEmpty()) {
                             importResult += "\n⚠️ ${result.errors.take(3).joinToString("\n")}"
                         }
+                        // ВАЖНО: Перезагружаем данные после успешного импорта
                         isLoading = true
                     }
                 } catch (e: Exception) {
@@ -175,6 +176,7 @@ fun AnalyticsScreen(
                         importResult = "✅ Экспрессы: ${result.successCount} импортировано" +
                             if (result.errorCount > 0) ", ${result.errorCount} ошибок" else ""
                         isImporting = false
+                        // ВАЖНО: Перезагружаем данные после успешного импорта
                         isLoading = true
                     }
                 } catch (e: Exception) {
@@ -461,7 +463,7 @@ fun PieChartTab(
     hourlyStats: List<HourlyStats>,
     analyticsSummary: AnalyticsSummary?
 ) {
-    var selectedPieSubTab by remember { mutableStateOf(0) } // 0 - Круговая, 1 - По часам
+    var selectedPieSubTab by remember { mutableStateOf(0) }
     
     Column(modifier = Modifier.fillMaxSize()) {
         // Подвкладки
@@ -496,12 +498,11 @@ fun PieChartContent(
     pieSlices: List<PieSlice>,
     summary: AnalyticsSummary?
 ) {
-    // Цвета для сегментов
     val sliceColors = listOf(
-        Color(0xFF0ECB81), // Зеленый - выигрыши
-        Color(0xFFF6465D), // Красный - проигрыши
-        Color(0xFFF0B90B), // Желтый - активные
-        Color(0xFF848E9C)  // Серый - другое
+        Color(0xFF0ECB81),
+        Color(0xFFF6465D),
+        Color(0xFFF0B90B),
+        Color(0xFF848E9C)
     )
     
     LazyColumn(
@@ -561,7 +562,6 @@ fun PieChartContent(
                                     startAngle += sweepAngle
                                 }
                                 
-                                // Белый центр (пончик)
                                 drawCircle(
                                     color = BybitColors.Surface,
                                     radius = size.minDimension * 0.32f
@@ -1443,4 +1443,3 @@ private fun calculateHourlyStats(expresses: List<ExpressInfo>): List<HourlyStats
         )
     }
 }
-
