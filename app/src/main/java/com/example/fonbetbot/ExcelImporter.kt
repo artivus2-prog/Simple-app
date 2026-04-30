@@ -1,4 +1,4 @@
-﻿// ExcelImporter.kt
+﻿// ExcelImporter.kt - ПОЛНЫЙ ИМПОРТЕР С ПРАВИЛЬНОЙ СВЯЗЬЮ ТАБЛИЦ
 package com.example.fonbetbot
 
 import android.content.ContentValues
@@ -8,7 +8,6 @@ import android.net.Uri
 import android.util.Log
 import org.apache.poi.ss.usermodel.*
 import org.apache.poi.xssf.usermodel.XSSFWorkbook
-import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -19,386 +18,383 @@ class ExcelImporter(private val dbHelper: DatabaseHelper) {
     }
     
     data class ImportResult(
-        val successCount: Int,
-        val errorCount: Int,
-        val errors: List<String>
+        val successCount: Int = 0,
+        val errorCount: Int = 0,
+        val errors: List<String> = emptyList()
     )
     
     /**
-     * Импорт матчей из XLSX файла (data)
+     * Импорт матчей из data.xlsx
+     * Колонки: id_exp, m_id, id_liga, league_name, id_home, home_team, id_away, away_team,
+     *          start_odds, current_odds, match_time, match_start_time, expected_end_time,
+     *          sport_type, home_score, away_score, bet_type, status, is_finalized,
+     *          match_url, uzh, total_type
      */
     fun importMatches(context: Context, uri: Uri): ImportResult {
-        val successCount = mutableListOf<Int>()
+        val db = dbHelper.writableDatabase
+        var successCount = 0
+        var updateCount = 0
         val errors = mutableListOf<String>()
         
         try {
-            val inputStream: InputStream = context.contentResolver.openInputStream(uri)
-                ?: return ImportResult(0, 0, listOf("Не удалось открыть файл"))
-            
-            val workbook = XSSFWorkbook(inputStream)
-            val sheet = workbook.getSheetAt(0)
-            
-            val db = dbHelper.writableDatabase
-            
-            db.beginTransaction()
-            try {
+            context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                val workbook = XSSFWorkbook(inputStream)
+                val sheet = workbook.getSheetAt(0)
+                
+                Log.d(TAG, "📥 Импорт матчей: строк в файле = ${sheet.lastRowNum + 1}")
+                
                 // Пропускаем заголовок (строка 0)
                 for (rowIndex in 1..sheet.lastRowNum) {
+                    val row = sheet.getRow(rowIndex) ?: continue
+                    
                     try {
-                        val row = sheet.getRow(rowIndex) ?: continue
+                        val idExp = getCellIntValue(row, 0)
+                        val mId = getCellIntValue(row, 1)
                         
-                        val matchData = parseMatchRow(row) ?: continue
+                        if (idExp <= 0 || mId <= 0) {
+                            Log.w(TAG, "Строка $rowIndex: пустой id_exp или m_id, пропускаем")
+                            continue
+                        }
                         
-                        // Вставляем или обновляем матч
-                        val eventValues = ContentValues().apply {
-                            put("id_exp", matchData.idExp)
-                            put("m_id", matchData.mId)
-                            matchData.idLiga?.let { put("id_liga", it) }
-                            put("league_name", matchData.ligaName ?: "")
-                            matchData.idHome?.let { put("id_home", it) }
-                            put("home_team", matchData.home ?: "")
-                            matchData.idAway?.let { put("id_away", it) }
-                            put("away_team", matchData.away ?: "")
-                            put("start_odds", matchData.startKf)
-                            put("current_odds", matchData.lastKf)
-                            put("match_time", parseTimeToMinutes(matchData.curTime))
-                            put("home_score", matchData.sh)
-                            put("away_score", matchData.sa)
-                            put("bet_type", matchData.type)
-                            put("status", matchData.sts)
-                            put("is_finalized", if (matchData.sts in listOf(1, 2)) 1 else 0)
-                            if (matchData.url != null) put("match_url", matchData.url)
-                            put("uzh", matchData.uzh?.toString() ?: "0")
-                            matchData.tbType?.let { put("total_type", it) }
+                        val idLiga = getCellLongValue(row, 2)
+                        val leagueName = getCellStringValue(row, 3)
+                        val idHome = getCellLongValue(row, 4)
+                        val homeTeam = getCellStringValue(row, 5)
+                        val idAway = getCellLongValue(row, 6)
+                        val awayTeam = getCellStringValue(row, 7)
+                        val startOdds = getCellDoubleValue(row, 8)
+                        val currentOdds = getCellDoubleValue(row, 9)
+                        val matchTime = getCellIntValue(row, 10)
+                        val matchStartTime = getCellIntValue(row, 11)
+                        val expectedEndTime = getCellLongValue(row, 12) ?: 0L
+                        val sportType = getCellStringValue(row, 13).ifEmpty { "football" }
+                        val homeScore = getCellIntValue(row, 14)
+                        val awayScore = getCellIntValue(row, 15)
+                        val betType = getCellIntValue(row, 16)
+                        val status = getCellIntValue(row, 17)
+                        val isFinalized = getCellIntValue(row, 18)
+                        val matchUrl = getCellStringValue(row, 19)
+                        val uzh = getCellStringValue(row, 20)
+                        val totalType = getCellLongValue(row, 21)
+                        
+                        // Находим express_id по id_exp
+                        val expressId = findExpressIdByIdExp(db, idExp)
+                        
+                        val values = ContentValues().apply {
+                            put("id_exp", idExp)
+                            put("express_id", expressId ?: 0) // Связь с express_bets
+                            put("m_id", mId)
+                            idLiga?.let { put("id_liga", it) }
+                            if (leagueName.isNotEmpty()) put("league_name", leagueName)
+                            idHome?.let { put("id_home", it) }
+                            if (homeTeam.isNotEmpty()) put("home_team", homeTeam)
+                            idAway?.let { put("id_away", it) }
+                            if (awayTeam.isNotEmpty()) put("away_team", awayTeam)
+                            put("start_odds", startOdds)
+                            currentOdds?.let { put("current_odds", it) }
+                            put("match_time", matchTime)
+                            put("match_start_time", matchStartTime)
+                            put("expected_end_time", expectedEndTime)
+                            put("sport_type", sportType)
+                            put("home_score", homeScore)
+                            put("away_score", awayScore)
+                            put("bet_type", betType)
+                            put("status", status)
+                            put("is_finalized", isFinalized)
+                            if (matchUrl.isNotEmpty()) put("match_url", matchUrl)
+                            if (uzh.isNotEmpty()) put("uzh", uzh)
+                            totalType?.let { put("total_type", it) }
                             put("created_at", System.currentTimeMillis() / 1000)
                             put("updated_at", System.currentTimeMillis() / 1000)
                         }
                         
-                        // Пробуем вставить, если конфликт по m_id - обновляем
-                        val existingCursor = db.query(
-                            "express_events",
-                            arrayOf("id", "express_id"),
-                            "m_id = ?",
-                            arrayOf(matchData.mId.toString()),
-                            null, null, null
-                        )
-                        
-                        if (existingCursor.moveToFirst()) {
-                            val eventId = existingCursor.getLong(0)
-                            val expressId = existingCursor.getLong(1)
-                            existingCursor.close()
-                            
-                            eventValues.put("express_id", expressId)
-                            db.update("express_events", eventValues, "m_id = ?", 
-                                arrayOf(matchData.mId.toString()))
+                        // Вставляем или обновляем по m_id (уникальный ключ)
+                        val existingEventId = findEventIdByMId(db, mId)
+                        if (existingEventId != null) {
+                            db.update("express_events", values, "id = ?", arrayOf(existingEventId.toString()))
+                            updateCount++
+                            Log.d(TAG, "  🔄 Обновлён матч #$mId (event_id=$existingEventId, express_id=$expressId)")
                         } else {
-                            existingCursor.close()
-                            
-                            // Проверяем существование экспресса
-                            val expressCursor = db.query(
-                                "express_bets",
-                                arrayOf("id"),
-                                "id_exp = ?",
-                                arrayOf(matchData.idExp.toString()),
-                                null, null, null
-                            )
-                            
-                            val expressId = if (expressCursor.moveToFirst()) {
-                                expressCursor.getLong(0)
+                            val newId = db.insert("express_events", null, values)
+                            if (newId != -1L) {
+                                successCount++
+                                Log.d(TAG, "  ✅ Добавлен матч #$mId (event_id=$newId, express_id=$expressId)")
                             } else {
-                                // Создаём экспресс если не существует
-                                val expressValues = ContentValues().apply {
-                                    put("id_exp", matchData.idExp)
-                                    put("kfall", matchData.startKf)
-                                    put("sumbet", 30.0)
-                                    put("sts_all", if (matchData.sts in listOf(1, 2)) matchData.sts else 0)
-                                    put("ct", System.currentTimeMillis() / 1000)
-                                    put("strategy", "imported")
-                                    put("created_at", System.currentTimeMillis() / 1000)
-                                    put("updated_at", System.currentTimeMillis() / 1000)
-                                }
-                                db.insert("express_bets", null, expressValues)
+                                errors.add("Строка $rowIndex: не удалось вставить матч #$mId")
                             }
-                            expressCursor.close()
-                            
-                            eventValues.put("express_id", expressId)
-                            db.insertWithOnConflict(
-                                "express_events", null, eventValues,
-                                SQLiteDatabase.CONFLICT_REPLACE
-                            )
                         }
                         
-                        successCount.add(rowIndex)
-                        
                     } catch (e: Exception) {
-                        errors.add("Строка $rowIndex: ${e.message}")
-                        Log.e(TAG, "Ошибка в строке $rowIndex: ${e.message}")
+                        val error = "Строка $rowIndex: ${e.message}"
+                        errors.add(error)
+                        Log.e(TAG, error, e)
                     }
                 }
                 
-                db.setTransactionSuccessful()
-            } finally {
-                db.endTransaction()
+                workbook.close()
             }
-            
-            workbook.close()
-            inputStream.close()
-            
-            Log.d(TAG, "✅ Импортировано ${successCount.size} матчей, ошибок: ${errors.size}")
-            
         } catch (e: Exception) {
-            Log.e(TAG, "Ошибка импорта: ${e.message}", e)
-            return ImportResult(0, 0, listOf("Ошибка: ${e.message}"))
+            val error = "Ошибка открытия файла: ${e.message}"
+            errors.add(error)
+            Log.e(TAG, error, e)
         }
         
-        return ImportResult(
-            successCount = successCount.size,
-            errorCount = errors.size,
-            errors = errors
-        )
+        Log.d(TAG, "📥 Импорт матчей завершён: добавлено $successCount, обновлено $updateCount, ошибок ${errors.size}")
+        return ImportResult(successCount + updateCount, errors.size, errors)
     }
     
     /**
-     * Импорт экспрессов из XLSX файла (exp)
+     * Импорт экспрессов из exp.xlsx
+     * Колонки: id_exp, kfall, profloss, balans, sumbet, sts_all, ct, strategy,
+     *          id_exp_replace, events_count, total_odds, bet_amount, potential_win,
+     *          balance, profit_loss, is_bet_placed
      */
     fun importExpresses(context: Context, uri: Uri): ImportResult {
-        val successCount = mutableListOf<Int>()
+        val db = dbHelper.writableDatabase
+        var successCount = 0
+        var updateCount = 0
         val errors = mutableListOf<String>()
         
         try {
-            val inputStream: InputStream = context.contentResolver.openInputStream(uri)
-                ?: return ImportResult(0, 0, listOf("Не удалось открыть файл"))
-            
-            val workbook = XSSFWorkbook(inputStream)
-            val sheet = workbook.getSheetAt(0)
-            
-            val db = dbHelper.writableDatabase
-            val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-            
-            db.beginTransaction()
-            try {
+            context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                val workbook = XSSFWorkbook(inputStream)
+                val sheet = workbook.getSheetAt(0)
+                
+                Log.d(TAG, "📥 Импорт экспрессов: строк в файле = ${sheet.lastRowNum + 1}")
+                
+                // Пропускаем заголовок (строка 0)
                 for (rowIndex in 1..sheet.lastRowNum) {
+                    val row = sheet.getRow(rowIndex) ?: continue
+                    
                     try {
-                        val row = sheet.getRow(rowIndex) ?: continue
+                        val idExp = getCellIntValue(row, 0)
                         
-                        val expressData = parseExpressRow(row, dateFormat) ?: continue
+                        if (idExp <= 0) {
+                            Log.w(TAG, "Строка $rowIndex: пустой id_exp, пропускаем")
+                            continue
+                        }
+                        
+                        val kfall = getCellDoubleValue(row, 1) ?: 1.0
+                        val profLoss = getCellDoubleValue(row, 2) ?: 0.0
+                        val balans = getCellDoubleValue(row, 3) ?: 0.0
+                        val sumbet = getCellDoubleValue(row, 4) ?: 0.0
+                        val stsAll = getCellIntValue(row, 5)
+                        val ct = getCellLongValue(row, 6) ?: (System.currentTimeMillis() / 1000)
+                        val strategy = getCellStringValue(row, 7)
+                        val idExpReplace = getCellIntValue(row, 8)
+                        val eventsCount = getCellIntValue(row, 9)
+                        val totalOdds = getCellDoubleValue(row, 10) ?: kfall
+                        val betAmount = getCellDoubleValue(row, 11) ?: sumbet
+                        val potentialWin = getCellDoubleValue(row, 12) ?: (sumbet * kfall)
+                        val balance = getCellDoubleValue(row, 13) ?: balans
+                        val profitLoss = getCellDoubleValue(row, 14) ?: profLoss
+                        val isBetPlaced = getCellIntValue(row, 15)
                         
                         val values = ContentValues().apply {
-                            put("id_exp", expressData.idExp)
-                            put("kfall", expressData.kfall)
-                            put("sts_all", expressData.stsAll)
-                            put("profloss", expressData.profLoss)
-                            put("balans", expressData.balans)
-                            put("sumbet", expressData.sumBet)
-                            put("strategy", expressData.strategy ?: "")
-                            put("id_exp_replace", expressData.idExpReplace)
-                            put("is_bet_placed", 1)
-                            put("created_at", System.currentTimeMillis() / 1000)
+                            put("id_exp", idExp)
+                            put("kfall", kfall)
+                            put("profloss", profLoss)
+                            put("balans", balans)
+                            put("sumbet", sumbet)
+                            put("sts_all", stsAll)
+                            put("ct", ct)
+                            if (strategy.isNotEmpty()) put("strategy", strategy)
+                            put("id_exp_replace", idExpReplace)
+                            put("events_count", eventsCount)
+                            put("total_odds", totalOdds)
+                            put("bet_amount", betAmount)
+                            put("potential_win", potentialWin)
+                            put("balance", balance)
+                            put("profit_loss", profitLoss)
+                            put("is_bet_placed", isBetPlaced)
+                            put("created_at", ct)
+                            put("created_time", ct)
                             put("updated_at", System.currentTimeMillis() / 1000)
+                        }
+                        
+                        // Вставляем или обновляем по id_exp (уникальный ключ)
+                        val existingExpressId = findExpressIdByIdExp(db, idExp)
+                        if (existingExpressId != null) {
+                            db.update("express_bets", values, "id = ?", arrayOf(existingExpressId.toString()))
+                            updateCount++
                             
-                            // Парсим дату если есть
-                            if (expressData.ct != null) {
-                                try {
-                                    val date = dateFormat.parse(expressData.ct)
-                                    put("ct", date.time / 1000)
-                                } catch (e: Exception) {
-                                    put("ct", System.currentTimeMillis() / 1000)
+                            // Обновляем express_id в express_events
+                            val eventValues = ContentValues().apply {
+                                put("express_id", existingExpressId)
+                            }
+                            db.update("express_events", eventValues, "id_exp = ? AND express_id = 0", arrayOf(idExp.toString()))
+                            
+                            Log.d(TAG, "  🔄 Обновлён экспресс #$idExp (db_id=$existingExpressId, ct=$ct)")
+                        } else {
+                            val newId = db.insert("express_bets", null, values)
+                            if (newId != -1L) {
+                                successCount++
+                                
+                                // Обновляем express_id в express_events для этого id_exp
+                                val eventValues = ContentValues().apply {
+                                    put("express_id", newId)
                                 }
+                                val updatedEvents = db.update("express_events", eventValues, "id_exp = ?", arrayOf(idExp.toString()))
+                                
+                                Log.d(TAG, "  ✅ Добавлен экспресс #$idExp (db_id=$newId, ct=$ct, обновлено матчей: $updatedEvents)")
                             } else {
-                                put("ct", System.currentTimeMillis() / 1000)
+                                errors.add("Строка $rowIndex: не удалось вставить экспресс #$idExp")
                             }
                         }
                         
-                        // Проверяем существование
-                        val cursor = db.query(
-                            "express_bets",
-                            arrayOf("id"),
-                            "id_exp = ?",
-                            arrayOf(expressData.idExp.toString()),
-                            null, null, null
-                        )
-                        
-                        if (cursor.moveToFirst()) {
-                            db.update("express_bets", values, "id_exp = ?", 
-                                arrayOf(expressData.idExp.toString()))
-                        } else {
-                            db.insert("express_bets", null, values)
-                        }
-                        cursor.close()
-                        
-                        successCount.add(rowIndex)
-                        
                     } catch (e: Exception) {
-                        errors.add("Строка $rowIndex: ${e.message}")
-                        Log.e(TAG, "Ошибка в строке $rowIndex: ${e.message}")
+                        val error = "Строка $rowIndex: ${e.message}"
+                        errors.add(error)
+                        Log.e(TAG, error, e)
                     }
                 }
                 
-                db.setTransactionSuccessful()
-            } finally {
-                db.endTransaction()
+                workbook.close()
             }
-            
-            workbook.close()
-            inputStream.close()
-            
-            Log.d(TAG, "✅ Импортировано ${successCount.size} экспрессов, ошибок: ${errors.size}")
-            
         } catch (e: Exception) {
-            Log.e(TAG, "Ошибка импорта: ${e.message}", e)
-            return ImportResult(0, 0, listOf("Ошибка: ${e.message}"))
+            val error = "Ошибка открытия файла: ${e.message}"
+            errors.add(error)
+            Log.e(TAG, error, e)
         }
         
-        return ImportResult(
-            successCount = successCount.size,
-            errorCount = errors.size,
-            errors = errors
-        )
-    }
-    
-    // ==================== ПАРСИНГ СТРОК ====================
-    
-    private fun parseMatchRow(row: Row): MatchImportData? {
-        return try {
-            MatchImportData(
-                id = getCellInt(row, 0),
-                idExp = getCellInt(row, 2) ?: return null,
-                mId = getCellInt(row, 3) ?: return null,
-                idLiga = getCellInt(row, 4),
-                ligaName = getCellString(row, 5),
-                idHome = getCellInt(row, 6),
-                home = getCellString(row, 7),
-                idAway = getCellInt(row, 8),
-                away = getCellString(row, 9),
-                startKf = getCellDouble(row, 10) ?: 1.0,
-                lastKf = getCellDouble(row, 11) ?: 1.0,
-                curTime = getCellString(row, 12) ?: "0",
-                sh = getCellInt(row, 13) ?: 0,
-                sa = getCellInt(row, 14) ?: 0,
-                type = getCellInt(row, 15) ?: 924,
-                sts = getCellInt(row, 16) ?: 0,
-                url = getCellString(row, 17),
-                uzh = getCellDouble(row, 18),
-                tbType = getCellInt(row, 19)
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Ошибка парсинга строки матча: ${e.message}")
-            null
-        }
-    }
-    
-    private fun parseExpressRow(row: Row, dateFormat: SimpleDateFormat): ExpressImportData? {
-        return try {
-            ExpressImportData(
-                id = getCellInt(row, 0),
-                idExp = getCellInt(row, 2) ?: return null,
-                kfall = getCellDouble(row, 3) ?: 1.0,
-                stsAll = getCellInt(row, 4) ?: 0,
-                ct = getCellString(row, 5),
-                profLoss = getCellDouble(row, 6) ?: 0.0,
-                balans = getCellDouble(row, 7) ?: 0.0,
-                sumBet = getCellDouble(row, 8) ?: 0.0,
-                strategy = getCellString(row, 9),
-                idExpReplace = getCellInt(row, 10) ?: 0
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Ошибка парсинга строки экспресса: ${e.message}")
-            null
-        }
+        Log.d(TAG, "📥 Импорт экспрессов завершён: добавлено $successCount, обновлено $updateCount, ошибок ${errors.size}")
+        return ImportResult(successCount + updateCount, errors.size, errors)
     }
     
     // ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ====================
     
-    private fun getCellString(row: Row, index: Int): String? {
-        return try {
-            val cell = row.getCell(index) ?: return null
-            when (cell.cellType) {
-                CellType.STRING -> cell.stringCellValue
-                CellType.NUMERIC -> {
-                    if (DateUtil.isCellDateFormatted(cell)) {
-                        cell.localDateTimeCellValue.toString()
-                    } else {
-                        val value = cell.numericCellValue
-                        if (value == value.toLong().toDouble()) {
-                            value.toLong().toString()
-                        } else {
-                            value.toString()
-                        }
+    /**
+     * Находит express_id в таблице express_bets по полю id_exp
+     */
+    private fun findExpressIdByIdExp(db: SQLiteDatabase, idExp: Int): Long? {
+        val cursor = db.query(
+            "express_bets",
+            arrayOf("id"),
+            "id_exp = ?",
+            arrayOf(idExp.toString()),
+            null, null, null
+        )
+        cursor.use {
+            return if (it.moveToFirst()) it.getLong(0) else null
+        }
+    }
+    
+    /**
+     * Находит id записи в таблице express_events по m_id
+     */
+    private fun findEventIdByMId(db: SQLiteDatabase, mId: Int): Long? {
+        val cursor = db.query(
+            "express_events",
+            arrayOf("id"),
+            "m_id = ?",
+            arrayOf(mId.toString()),
+            null, null, null
+        )
+        cursor.use {
+            return if (it.moveToFirst()) it.getLong(0) else null
+        }
+    }
+    
+    // ==================== МЕТОДЫ ЧТЕНИЯ ЯЧЕЕК ====================
+    
+    private fun getCellStringValue(row: Row, columnIndex: Int): String {
+        val cell = row.getCell(columnIndex) ?: return ""
+        
+        return when (cell.cellType) {
+            CellType.STRING -> cell.stringCellValue.trim()
+            CellType.NUMERIC -> {
+                val value = cell.numericCellValue
+                if (value == Math.floor(value) && !value.isInfinite()) {
+                    value.toLong().toString()
+                } else {
+                    value.toString()
+                }
+            }
+            CellType.BOOLEAN -> cell.booleanCellValue.toString()
+            CellType.FORMULA -> {
+                try {
+                    cell.stringCellValue.trim()
+                } catch (e: Exception) {
+                    try {
+                        cell.numericCellValue.toString()
+                    } catch (e2: Exception) {
+                        ""
                     }
                 }
-                CellType.BOOLEAN -> cell.booleanCellValue.toString()
-                CellType.FORMULA -> cell.cellFormula
-                else -> null
             }
-        } catch (e: Exception) {
-            null
+            CellType.BLANK -> ""
+            else -> ""
         }
     }
     
-    private fun getCellInt(row: Row, index: Int): Int? {
-        return try {
-            val cell = row.getCell(index) ?: return null
-            when (cell.cellType) {
-                CellType.NUMERIC -> cell.numericCellValue.toInt()
-                CellType.STRING -> cell.stringCellValue.toIntOrNull()
-                else -> null
+    private fun getCellIntValue(row: Row, columnIndex: Int): Int {
+        val cell = row.getCell(columnIndex) ?: return 0
+        
+        return when (cell.cellType) {
+            CellType.NUMERIC -> cell.numericCellValue.toInt()
+            CellType.STRING -> cell.stringCellValue.trim().toIntOrNull() ?: 0
+            CellType.FORMULA -> {
+                try {
+                    cell.numericCellValue.toInt()
+                } catch (e: Exception) {
+                    try {
+                        cell.stringCellValue.trim().toIntOrNull() ?: 0
+                    } catch (e2: Exception) {
+                        0
+                    }
+                }
             }
-        } catch (e: Exception) {
-            null
+            else -> 0
         }
     }
     
-    private fun getCellDouble(row: Row, index: Int): Double? {
-        return try {
-            val cell = row.getCell(index) ?: return null
-            when (cell.cellType) {
-                CellType.NUMERIC -> cell.numericCellValue
-                CellType.STRING -> cell.stringCellValue.toDoubleOrNull()
-                else -> null
+    private fun getCellLongValue(row: Row, columnIndex: Int): Long? {
+        val cell = row.getCell(columnIndex) ?: return null
+        
+        return when (cell.cellType) {
+            CellType.NUMERIC -> cell.numericCellValue.toLong()
+            CellType.STRING -> {
+                val str = cell.stringCellValue.trim()
+                str.toLongOrNull()
             }
-        } catch (e: Exception) {
-            null
+            CellType.FORMULA -> {
+                try {
+                    cell.numericCellValue.toLong()
+                } catch (e: Exception) {
+                    try {
+                        cell.stringCellValue.trim().toLongOrNull()
+                    } catch (e2: Exception) {
+                        null
+                    }
+                }
+            }
+            CellType.BLANK -> null
+            else -> null
         }
     }
     
-    private fun parseTimeToMinutes(timeStr: String): Int {
-        return timeStr.toIntOrNull() ?: 0
+    private fun getCellDoubleValue(row: Row, columnIndex: Int): Double? {
+        val cell = row.getCell(columnIndex) ?: return null
+        
+        return when (cell.cellType) {
+            CellType.NUMERIC -> cell.numericCellValue
+            CellType.STRING -> {
+                val str = cell.stringCellValue.trim().replace(",", ".")
+                str.toDoubleOrNull()
+            }
+            CellType.FORMULA -> {
+                try {
+                    cell.numericCellValue
+                } catch (e: Exception) {
+                    try {
+                        cell.stringCellValue.trim().replace(",", ".").toDoubleOrNull()
+                    } catch (e2: Exception) {
+                        null
+                    }
+                }
+            }
+            CellType.BLANK -> null
+            else -> null
+        }
     }
-    
-    // ==================== DATA CLASSES ====================
-    
-    data class MatchImportData(
-        val id: Int?,
-        val idExp: Int,
-        val mId: Int,
-        val idLiga: Int?,
-        val ligaName: String?,
-        val idHome: Int?,
-        val home: String?,
-        val idAway: Int?,
-        val away: String?,
-        val startKf: Double,
-        val lastKf: Double,
-        val curTime: String,
-        val sh: Int,
-        val sa: Int,
-        val type: Int,
-        val sts: Int,
-        val url: String?,
-        val uzh: Double?,
-        val tbType: Int?
-    )
-    
-    data class ExpressImportData(
-        val id: Int?,
-        val idExp: Int,
-        val kfall: Double,
-        val stsAll: Int,
-        val ct: String?,
-        val profLoss: Double,
-        val balans: Double,
-        val sumBet: Double,
-        val strategy: String?,
-        val idExpReplace: Int
-    )
 }

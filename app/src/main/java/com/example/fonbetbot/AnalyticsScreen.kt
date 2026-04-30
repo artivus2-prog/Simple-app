@@ -2397,6 +2397,69 @@ private fun calculateMatchAnalytics(expresses: List<ExpressInfo>, matches: List<
     return teamMap.values.toList()
 }
 
+private fun calculateHourlyStats(expresses: List<ExpressInfo>): List<HourlyStats> {
+    val hoursMap = mutableMapOf<Int, MutableList<ExpressInfo>>()
+    
+    expresses.forEach { express ->
+        // Используем поле ct (created time) вместо createdAt
+        val timestamp = express.ct
+        
+        val hour = if (timestamp > 0) {
+            try {
+                // ct хранится в секундах (Unix timestamp)
+                val date = Date(timestamp * 1000)
+                val calendar = Calendar.getInstance().apply { time = date }
+                calendar.get(Calendar.HOUR_OF_DAY)
+            } catch (e: Exception) {
+                // Пробуем альтернативный парсинг
+                try {
+                    val sdf = SimpleDateFormat("HH", Locale.getDefault())
+                    sdf.format(Date(timestamp * 1000)).toInt()
+                } catch (e2: Exception) {
+                    -1
+                }
+            }
+        } else {
+            // Если ct = 0, пробуем createdAt
+            try {
+                val date = Date(express.createdAt * 1000)
+                val calendar = Calendar.getInstance().apply { time = date }
+                calendar.get(Calendar.HOUR_OF_DAY)
+            } catch (e: Exception) {
+                -1
+            }
+        }
+        
+        if (hour in 0..23) {
+            hoursMap.getOrPut(hour) { mutableListOf() }.add(express)
+        } else {
+            Log.w("calculateHourlyStats", "Не удалось определить час для экспресса #${express.idExp}, ct=${express.ct}, createdAt=${express.createdAt}")
+        }
+    }
+    
+    // Логируем распределение для отладки
+    Log.d("calculateHourlyStats", "Распределение по часам:")
+    hoursMap.forEach { (hour, list) ->
+        Log.d("calculateHourlyStats", "  ${hour}:00 - ${list.size} экспрессов")
+    }
+    
+    return (0..23).map { hour ->
+        val list = hoursMap[hour] ?: emptyList()
+        val wonCount = list.count { it.stsAll == 2 }
+        val lostCount = list.count { it.stsAll in listOf(1, -1) }
+        
+        HourlyStats(
+            hour = hour,
+            totalExpresses = list.size,
+            wonExpresses = wonCount,
+            lostExpresses = lostCount,
+            winRate = if (list.isNotEmpty()) (wonCount.toDouble() / list.size * 100) else 0.0,
+            totalProfit = list.filter { it.stsAll == 2 }.sumOf { it.potentialWin - it.sumbet } -
+                list.filter { it.stsAll in listOf(1, -1) }.sumOf { it.sumbet }
+        )
+    }
+}
+
 private fun calculatePieSlices(expresses: List<ExpressInfo>): List<PieSlice> {
     val wonCount = expresses.count { it.stsAll == 2 }
     val lostCount = expresses.count { it.stsAll in listOf(1, -1) }
@@ -2420,34 +2483,4 @@ private fun calculatePieSlices(expresses: List<ExpressInfo>): List<PieSlice> {
             Color(0xFF848E9C), 0.0
         ).takeIf { otherCount > 0 }
     )
-}
-
-private fun calculateHourlyStats(expresses: List<ExpressInfo>): List<HourlyStats> {
-    val hoursMap = mutableMapOf<Int, MutableList<ExpressInfo>>()
-
-    expresses.forEach { express ->
-        val hour = try {
-            SimpleDateFormat("HH", Locale.getDefault()).format(Date(express.createdAt * 1000)).toInt()
-        } catch (e: Exception) { -1 }
-
-        if (hour in 0..23) {
-            hoursMap.getOrPut(hour) { mutableListOf() }.add(express)
-        }
-    }
-
-    return (0..23).map { hour ->
-        val list = hoursMap[hour] ?: emptyList()
-        val wonCount = list.count { it.stsAll == 2 }
-        val lostCount = list.count { it.stsAll in listOf(1, -1) }
-
-        HourlyStats(
-            hour = hour,
-            totalExpresses = list.size,
-            wonExpresses = wonCount,
-            lostExpresses = lostCount,
-            winRate = if (list.isNotEmpty()) (wonCount.toDouble() / list.size * 100) else 0.0,
-            totalProfit = list.filter { it.stsAll == 2 }.sumOf { it.potentialWin - it.sumbet } -
-                list.filter { it.stsAll in listOf(1, -1) }.sumOf { it.sumbet }
-        )
-    }
 }
