@@ -1,7 +1,9 @@
-﻿// AnalyticsScreen.kt - ЭКРАН АНАЛИТИКИ С ВКЛАДКАМИ
+﻿// AnalyticsScreen.kt - ПОЛНЫЙ ЭКРАН АНАЛИТИКИ С ВКЛАДКАМИ, ИМПОРТОМ, ПРОСМОТРОМ И РЕДАКТИРОВАНИЕМ БД
 package com.example.fonbetbot
 
+import android.content.ContentValues
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -13,6 +15,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -24,7 +27,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
@@ -32,6 +37,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
+import android.util.Log
 
 // ==================== МОДЕЛИ ДАННЫХ ====================
 
@@ -99,6 +105,103 @@ data class HourlyStats(
     val totalProfit: Double = 0.0
 )
 
+// Модели для таблиц БД
+data class ExpressDbItem(
+    val id: Long,
+    val idExp: Int,
+    val kfall: Double,
+    val sumbet: Double,
+    val stsAll: Int,
+    val ct: Long,
+    val strategy: String,
+    val eventsCount: Int,
+    val potentialWin: Double,
+    val profitLoss: Double
+)
+
+data class MatchDbItem(
+    val id: Long,
+    val expressId: Long,
+    val mId: Int,
+    val homeTeam: String,
+    val awayTeam: String,
+    val startOdds: Double,
+    val betType: Int,
+    val status: Int,
+    val homeScore: Int,
+    val awayScore: Int,
+    val matchTime: Int,
+    val isFinalized: Int
+)
+
+// ==================== ФУНКЦИЯ ЗАГРУЗКИ ДАННЫХ БД ====================
+
+private fun loadDatabaseData(
+    dbHelper: DatabaseHelper,
+    callback: (List<ExpressDbItem>, Map<Long, List<MatchDbItem>>) -> Unit
+) {
+    try {
+        val db = dbHelper.readableDatabase
+        
+        // Загружаем экспрессы
+        val expresses = mutableListOf<ExpressDbItem>()
+        val expressCursor = db.rawQuery("""
+            SELECT id, id_exp, kfall, sumbet, sts_all, ct, strategy, events_count, potential_win, profit_loss
+            FROM express_bets ORDER BY ct DESC
+        """, null)
+        
+        while (expressCursor.moveToNext()) {
+            expresses.add(ExpressDbItem(
+                id = expressCursor.getLong(0),
+                idExp = expressCursor.getInt(1),
+                kfall = expressCursor.getDouble(2),
+                sumbet = expressCursor.getDouble(3),
+                stsAll = expressCursor.getInt(4),
+                ct = expressCursor.getLong(5),
+                strategy = expressCursor.getString(6) ?: "",
+                eventsCount = expressCursor.getInt(7),
+                potentialWin = expressCursor.getDouble(8),
+                profitLoss = expressCursor.getDouble(9)
+            ))
+        }
+        expressCursor.close()
+        
+        // Загружаем все матчи
+        val matchesMap = mutableMapOf<Long, MutableList<MatchDbItem>>()
+        val matchesCursor = db.rawQuery("""
+            SELECT id, express_id, m_id, COALESCE(home_team, ''), COALESCE(away_team, ''), 
+                   start_odds, bet_type, status, home_score, away_score, match_time, is_finalized
+            FROM express_events ORDER BY id ASC
+        """, null)
+        
+        while (matchesCursor.moveToNext()) {
+            val expressId = matchesCursor.getLong(1)
+            val match = MatchDbItem(
+                id = matchesCursor.getLong(0),
+                expressId = expressId,
+                mId = matchesCursor.getInt(2),
+                homeTeam = matchesCursor.getString(3) ?: "",
+                awayTeam = matchesCursor.getString(4) ?: "",
+                startOdds = matchesCursor.getDouble(5),
+                betType = matchesCursor.getInt(6),
+                status = matchesCursor.getInt(7),
+                homeScore = matchesCursor.getInt(8),
+                awayScore = matchesCursor.getInt(9),
+                matchTime = matchesCursor.getInt(10),
+                isFinalized = matchesCursor.getInt(11)
+            )
+            
+            matchesMap.getOrPut(expressId) { mutableListOf() }.add(match)
+        }
+        matchesCursor.close()
+        
+        callback(expresses, matchesMap)
+    } catch (e: Exception) {
+        Log.e("loadDatabaseData", "Ошибка: ${e.message}")
+        callback(emptyList(), emptyMap())
+    }
+}
+
 // ==================== ОСНОВНОЙ ЭКРАН АНАЛИТИКИ ====================
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -120,18 +223,31 @@ fun AnalyticsScreen(
     var isLoading by remember { mutableStateOf(true) }
     
     // UI состояния
-    var selectedMainTab by remember { mutableStateOf(0) }
+    var selectedMainTab by remember { mutableStateOf(0) } // 0 - Основная, 1 - Пай чарт, 2 - База данных
     var selectedPeriod by remember { mutableStateOf(0) }
     
     // Импорт
     var isImporting by remember { mutableStateOf(false) }
     var importResult by remember { mutableStateOf<String?>(null) }
     var showImportSection by remember { mutableStateOf(false) }
+    
+    // База данных
+    var databaseExpresses by remember { mutableStateOf<List<ExpressDbItem>>(emptyList()) }
+    var databaseMatches by remember { mutableStateOf<Map<Long, List<MatchDbItem>>>(emptyMap()) }
+    var expandedDbExpressIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var selectedDbTab by remember { mutableStateOf(0) } // 0 - Экспрессы, 1 - Все матчи
+    var showEditDialog by remember { mutableStateOf(false) }
+    var editingItem by remember { mutableStateOf<Any?>(null) }
+    var refreshTrigger by remember { mutableStateOf(0) }
+    
+    // Удаление
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var deleteTarget by remember { mutableStateOf<Any?>(null) }
 
-    val mainTabs = listOf("📊 Основная", "🥧 Пай чарт")
+    val mainTabs = listOf("📊 Основная", "🥧 Пай чарт", "🗄 БД")
     val periodTitles = listOf("Сегодня", "Неделя", "Месяц", "Всё время")
 
-    // Лаунчеры для импорта
+    // Лаунчер для импорта матчей
     val dataFileLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -149,8 +265,11 @@ fun AnalyticsScreen(
                         if (result.errors.isNotEmpty()) {
                             importResult += "\n⚠️ ${result.errors.take(3).joinToString("\n")}"
                         }
-                        // ВАЖНО: Перезагружаем данные после успешного импорта
-                        isLoading = true
+                        refreshTrigger++
+                        loadDatabaseData(dbHelper) { expresses, matches ->
+                            databaseExpresses = expresses
+                            databaseMatches = matches
+                        }
                     }
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
@@ -162,6 +281,7 @@ fun AnalyticsScreen(
         }
     }
     
+    // Лаунчер для импорта экспрессов
     val expFileLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -176,8 +296,11 @@ fun AnalyticsScreen(
                         importResult = "✅ Экспрессы: ${result.successCount} импортировано" +
                             if (result.errorCount > 0) ", ${result.errorCount} ошибок" else ""
                         isImporting = false
-                        // ВАЖНО: Перезагружаем данные после успешного импорта
-                        isLoading = true
+                        refreshTrigger++
+                        loadDatabaseData(dbHelper) { expresses, matches ->
+                            databaseExpresses = expresses
+                            databaseMatches = matches
+                        }
                     }
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
@@ -189,31 +312,34 @@ fun AnalyticsScreen(
         }
     }
 
-    // Загрузка данных
-    LaunchedEffect(isLoading) {
-        if (isLoading) {
-            try {
+    // Загрузка данных аналитики
+    LaunchedEffect(isLoading, refreshTrigger, selectedPeriod) {
+        try {
+            isLoading = true
+            withContext(Dispatchers.IO) {
                 val allExpresses = dbHelper.getAllExpresses()
                 val allMatches = dbHelper.getAllMatches()
-
                 val filteredExpresses = filterByPeriod(allExpresses, selectedPeriod)
-
-                analyticsSummary = calculateSummary(filteredExpresses)
-                typeAnalytics = calculateTypeAnalytics(filteredExpresses, allMatches)
-                dailyStats = calculateDailyStats(allExpresses, selectedPeriod)
-                matchAnalytics = calculateMatchAnalytics(filteredExpresses, allMatches)
-                pieSlices = calculatePieSlices(filteredExpresses)
-                hourlyStats = calculateHourlyStats(filteredExpresses)
-            } catch (e: Exception) {
-                // Обработка ошибок
+                
+                withContext(Dispatchers.Main) {
+                    analyticsSummary = calculateSummary(filteredExpresses)
+                    typeAnalytics = calculateTypeAnalytics(filteredExpresses, allMatches)
+                    dailyStats = calculateDailyStats(allExpresses, selectedPeriod)
+                    matchAnalytics = calculateMatchAnalytics(filteredExpresses, allMatches)
+                    pieSlices = calculatePieSlices(filteredExpresses)
+                    hourlyStats = calculateHourlyStats(filteredExpresses)
+                }
             }
-            isLoading = false
+            
+            // Загружаем данные БД
+            loadDatabaseData(dbHelper) { expresses, matches ->
+                databaseExpresses = expresses
+                databaseMatches = matches
+            }
+        } catch (e: Exception) {
+            Log.e("AnalyticsScreen", "❌ Ошибка загрузки: ${e.message}")
         }
-    }
-
-    // Перезагрузка при смене периода
-    LaunchedEffect(selectedPeriod) {
-        isLoading = true
+        isLoading = false
     }
 
     Scaffold(
@@ -227,6 +353,11 @@ fun AnalyticsScreen(
                     }
                 },
                 actions = {
+                    // Кнопка обновления
+                    IconButton(onClick = { refreshTrigger++ }) {
+                        Icon(Icons.Default.Refresh, "Обновить", tint = BybitColors.Yellow)
+                    }
+                    // Кнопка импорта
                     IconButton(onClick = { showImportSection = !showImportSection }) {
                         Icon(
                             Icons.Default.FileUpload,
@@ -284,25 +415,27 @@ fun AnalyticsScreen(
                 }
             }
             
-            // Переключатель периода
-            TabRow(
-                selectedTabIndex = selectedPeriod,
-                containerColor = BybitColors.Surface,
-                contentColor = BybitColors.Yellow,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                periodTitles.forEachIndexed { index, title ->
-                    Tab(
-                        selected = selectedPeriod == index,
-                        onClick = { selectedPeriod = index },
-                        text = {
-                            Text(
-                                title,
-                                fontSize = 12.sp,
-                                color = if (selectedPeriod == index) BybitColors.Yellow else BybitColors.TextTertiary
-                            )
-                        }
-                    )
+            // Переключатель периода (только для вкладок аналитики)
+            if (selectedMainTab != 2) {
+                TabRow(
+                    selectedTabIndex = selectedPeriod,
+                    containerColor = BybitColors.Surface,
+                    contentColor = BybitColors.Yellow,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    periodTitles.forEachIndexed { index, title ->
+                        Tab(
+                            selected = selectedPeriod == index,
+                            onClick = { selectedPeriod = index },
+                            text = {
+                                Text(
+                                    title,
+                                    fontSize = 12.sp,
+                                    color = if (selectedPeriod == index) BybitColors.Yellow else BybitColors.TextTertiary
+                                )
+                            }
+                        )
+                    }
                 }
             }
 
@@ -331,11 +464,101 @@ fun AnalyticsScreen(
                         hourlyStats = hourlyStats,
                         analyticsSummary = analyticsSummary
                     )
+                    2 -> DatabaseViewerTab(
+                        expresses = databaseExpresses,
+                        matches = databaseMatches,
+                        expandedExpressIds = expandedDbExpressIds,
+                        selectedSubTab = selectedDbTab,
+                        onToggleExpand = { expressId ->
+                            expandedDbExpressIds = if (expandedDbExpressIds.contains(expressId)) {
+                                expandedDbExpressIds - expressId
+                            } else {
+                                expandedDbExpressIds + expressId
+                            }
+                        },
+                        onSubTabChange = { selectedDbTab = it },
+                        onEditItem = { item ->
+                            editingItem = item
+                            showEditDialog = true
+                        },
+                        onDeleteItem = { item ->
+                            deleteTarget = item
+                            showDeleteDialog = true
+                        },
+                        dbHelper = dbHelper,
+                        onDataChanged = {
+                            refreshTrigger++
+                        }
+                    )
                 }
             }
         }
     }
-}
+    
+    // Диалог редактирования
+    if (showEditDialog && editingItem != null) {
+        when (editingItem) {
+            is ExpressDbItem -> {
+                EditExpressDialog(
+                    express = editingItem as ExpressDbItem,
+                    dbHelper = dbHelper,
+                    onDismiss = {
+                        showEditDialog = false
+                        editingItem = null
+                    },
+                    onSave = {
+                        refreshTrigger++
+                        showEditDialog = false
+                        editingItem = null
+                        loadDatabaseData(dbHelper) { expresses, matches ->
+                            databaseExpresses = expresses
+                            databaseMatches = matches
+                        }
+                    }
+                )
+            }
+            is MatchDbItem -> {
+                EditMatchDialog(
+                    match = editingItem as MatchDbItem,
+                    dbHelper = dbHelper,
+                    onDismiss = {
+                        showEditDialog = false
+                        editingItem = null
+                    },
+                    onSave = {
+                        refreshTrigger++
+                        showEditDialog = false
+                        editingItem = null
+                        loadDatabaseData(dbHelper) { expresses, matches ->
+                            databaseExpresses = expresses
+                            databaseMatches = matches
+                        }
+                    }
+                )
+            }
+        }
+    }
+    
+    // Диалог удаления
+    if (showDeleteDialog && deleteTarget != null) {
+        DeleteConfirmDialog(
+            target = deleteTarget,
+            dbHelper = dbHelper,
+            onDismiss = {
+                showDeleteDialog = false
+                deleteTarget = null
+            },
+            onConfirmed = {
+                showDeleteDialog = false
+                deleteTarget = null
+                refreshTrigger++
+                loadDatabaseData(dbHelper) { expresses, matches ->
+                    databaseExpresses = expresses
+                    databaseMatches = matches
+                }
+            }
+        )
+  }
 
 // ==================== ВКЛАДКА "ОСНОВНАЯ" ====================
 
@@ -882,6 +1105,790 @@ fun HourlyStatsContent(hourlyStats: List<HourlyStats>) {
             Spacer(modifier = Modifier.height(32.dp))
         }
     }
+}
+
+// ==================== НОВАЯ ВКЛАДКА "БАЗА ДАННЫХ" ====================
+
+@Composable
+fun DatabaseViewerTab(
+    expresses: List<ExpressDbItem>,
+    matches: Map<Long, List<MatchDbItem>>,
+    expandedExpressIds: Set<Long>,
+    selectedSubTab: Int,
+    onToggleExpand: (Long) -> Unit,
+    onSubTabChange: (Int) -> Unit,
+    onEditItem: (Any) -> Unit,
+    onDeleteItem: (Any) -> Unit,
+    dbHelper: DatabaseHelper,
+    onDataChanged: () -> Unit
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Подвкладки
+        TabRow(
+            selectedTabIndex = selectedSubTab,
+            containerColor = BybitColors.Surface,
+            contentColor = BybitColors.Yellow
+        ) {
+            Tab(
+                selected = selectedSubTab == 0,
+                onClick = { onSubTabChange(0) },
+                text = { Text("🎯 Экспрессы (${expresses.size})", fontSize = 13.sp) }
+            )
+            Tab(
+                selected = selectedSubTab == 1,
+                onClick = { onSubTabChange(1) },
+                text = { 
+                    val totalMatches = matches.values.sumOf { it.size }
+                    Text("⚽ Матчи ($totalMatches)", fontSize = 13.sp) 
+                }
+            )
+        }
+        
+        when (selectedSubTab) {
+            0 -> ExpressesListView(
+                expresses = expresses,
+                matches = matches,
+                expandedExpressIds = expandedExpressIds,
+                onToggleExpand = onToggleExpand,
+                onEditItem = onEditItem,
+                onDeleteItem = onDeleteItem,
+                dbHelper = dbHelper,
+                onDataChanged = onDataChanged
+            )
+            1 -> AllMatchesListView(
+                matches = matches,
+                onEditItem = onEditItem
+            )
+        }
+    }
+}
+
+// ==================== СПИСОК ЭКСПРЕССОВ ====================
+
+@Composable
+fun ExpressesListView(
+    expresses: List<ExpressDbItem>,
+    matches: Map<Long, List<MatchDbItem>>,
+    expandedExpressIds: Set<Long>,
+    onToggleExpand: (Long) -> Unit,
+    onEditItem: (Any) -> Unit,
+    onDeleteItem: (Any) -> Unit,
+    dbHelper: DatabaseHelper,
+    onDataChanged: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    
+    if (expresses.isEmpty()) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("🗄 База данных пуста", fontSize = 16.sp, color = BybitColors.TextPrimary)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Импортируйте Excel файлы", fontSize = 13.sp, color = BybitColors.TextTertiary)
+            }
+        }
+    } else {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        "Экспрессов: ${expresses.size}",
+                        fontSize = 13.sp,
+                        color = BybitColors.TextSecondary
+                    )
+                    Text(
+                        "Нажмите для деталей | ✏️ для редактирования",
+                        fontSize = 10.sp,
+                        color = BybitColors.TextTertiary
+                    )
+                }
+            }
+            
+            items(expresses) { express ->
+                val isExpanded = expandedExpressIds.contains(express.id)
+                val expressMatches = matches[express.id] ?: emptyList()
+                
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onToggleExpand(express.id) },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = BybitColors.SurfaceLight)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        // Заголовок экспресса
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        "#${express.idExp}",
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = BybitColors.TextPrimary
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    StatusBadge(status = express.stsAll)
+                                }
+                                
+                                Text(
+                                    "Ставка: ${express.sumbet.toInt()} ₽ | Кэф: ${String.format("%.2f", express.kfall)}",
+                                    fontSize = 12.sp,
+                                    color = BybitColors.TextSecondary
+                                )
+                                
+                                if (express.strategy.isNotEmpty()) {
+                                    Text(
+                                        express.strategy,
+                                        fontSize = 11.sp,
+                                        color = BybitColors.TextTertiary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                            
+                            Row {
+                                // Кнопка удаления
+                                IconButton(
+                                    onClick = { onDeleteItem(express) },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(Icons.Default.Delete, "Удалить", tint = BybitColors.Red, modifier = Modifier.size(18.dp))
+                                }
+                                
+                                // Кнопка редактирования
+                                IconButton(
+                                    onClick = { onEditItem(express) },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(Icons.Default.Edit, "Редактировать", tint = BybitColors.Blue, modifier = Modifier.size(18.dp))
+                                }
+                                
+                                // Кнопка раскрытия
+                                Icon(
+                                    if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                    null,
+                                    tint = BybitColors.TextSecondary,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
+                        
+                        // Детали при раскрытии
+                        if (isExpanded) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            HorizontalDivider(color = BybitColors.Divider)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Потенц. выигрыш:", fontSize = 11.sp, color = BybitColors.TextTertiary)
+                                Text(
+                                    "${String.format("%.2f", express.potentialWin)} ₽",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = BybitColors.Green
+                                )
+                            }
+                            
+                            if (express.profitLoss != 0.0) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Прибыль/убыток:", fontSize = 11.sp, color = BybitColors.TextTertiary)
+                                    Text(
+                                        "${if (express.profitLoss > 0) "+" else ""}${String.format("%.2f", express.profitLoss)} ₽",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (express.profitLoss > 0) BybitColors.Green else BybitColors.Red
+                                    )
+                                }
+                            }
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Создан:", fontSize = 11.sp, color = BybitColors.TextTertiary)
+                                Text(
+                                    SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
+                                        .format(Date(express.ct * 1000)),
+                                    fontSize = 11.sp,
+                                    color = BybitColors.TextSecondary
+                                )
+                            }
+                            
+                            // Список матчей экспресса
+                            if (expressMatches.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    "Матчи (${expressMatches.size}):",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = BybitColors.TextPrimary
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                
+                                expressMatches.forEach { match ->
+                                    MatchRow(match = match, onEdit = { onEditItem(match) })
+                                    if (match != expressMatches.last()) {
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==================== ВСЕ МАТЧИ ====================
+
+@Composable
+fun AllMatchesListView(
+    matches: Map<Long, List<MatchDbItem>>,
+    onEditItem: (Any) -> Unit
+) {
+    val allMatches = matches.values.flatten()
+    
+    if (allMatches.isEmpty()) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("Нет матчей в базе", color = BybitColors.TextTertiary)
+        }
+    } else {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        "Всего матчей: ${allMatches.size}",
+                        fontSize = 13.sp,
+                        color = BybitColors.TextSecondary
+                    )
+                    Text(
+                        "✏️ Нажмите для редактирования",
+                        fontSize = 10.sp,
+                        color = BybitColors.TextTertiary
+                    )
+                }
+            }
+            
+            items(allMatches.sortedByDescending { it.id }) { match ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onEditItem(match) },
+                    shape = RoundedCornerShape(8.dp),
+                    colors = CardDefaults.cardColors(containerColor = BybitColors.SurfaceLight)
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    if (match.homeTeam.isNotEmpty()) "${match.homeTeam} vs ${match.awayTeam}" else "Матч #${match.mId}",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = BybitColors.TextPrimary
+                                )
+                                Text(
+                                    "Экспресс #${match.expressId} | ${typeName(match.betType)} | Кэф: ${String.format("%.2f", match.startOdds)}",
+                                    fontSize = 11.sp,
+                                    color = BybitColors.TextTertiary
+                                )
+                            }
+                            
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = when {
+                                    match.isFinalized == 1 && match.status == 2 -> BybitColors.Green.copy(alpha = 0.2f)
+                                    match.isFinalized == 1 && match.status == 1 -> BybitColors.Red.copy(alpha = 0.2f)
+                                    else -> BybitColors.Yellow.copy(alpha = 0.2f)
+                                }
+                            ) {
+                                Text(
+                                    when {
+                                        match.isFinalized == 1 && match.status == 2 -> "Выиграл"
+                                        match.isFinalized == 1 && match.status == 1 -> "Проиграл"
+                                        else -> "Активен"
+                                    },
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = when {
+                                        match.isFinalized == 1 && match.status == 2 -> BybitColors.Green
+                                        match.isFinalized == 1 && match.status == 1 -> BybitColors.Red
+                                        else -> BybitColors.Yellow
+                                    },
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                "Счёт: ${match.homeScore}:${match.awayScore}" + 
+                                if (match.matchTime > 0) " · ${match.matchTime}'" else "",
+                                fontSize = 11.sp,
+                                color = BybitColors.TextSecondary
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==================== СТРОКА МАТЧА ====================
+
+@Composable
+fun MatchRow(match: MatchDbItem, onEdit: () -> Unit) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onEdit() },
+        shape = RoundedCornerShape(6.dp),
+        color = BybitColors.Surface.copy(alpha = 0.5f)
+    ) {
+        Row(
+            modifier = Modifier.padding(8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    if (match.homeTeam.isNotEmpty()) "${match.homeTeam} vs ${match.awayTeam}" else "Матч #${match.mId}",
+                    fontSize = 12.sp,
+                    color = BybitColors.TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Row {
+                    Text(
+                        "${match.homeScore}:${match.awayScore}",
+                        fontSize = 11.sp,
+                        color = BybitColors.TextSecondary
+                    )
+                    if (match.matchTime > 0) {
+                        Text(
+                            " · ${match.matchTime}'",
+                            fontSize = 11.sp,
+                            color = BybitColors.TextTertiary
+                        )
+                    }
+                    Text(
+                        " · ${typeName(match.betType)}",
+                        fontSize = 11.sp,
+                        color = BybitColors.Yellow
+                    )
+                }
+            }
+            
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = when {
+                        match.isFinalized == 1 && match.status == 2 -> BybitColors.Green.copy(alpha = 0.2f)
+                        match.isFinalized == 1 && match.status == 1 -> BybitColors.Red.copy(alpha = 0.2f)
+                        else -> BybitColors.Yellow.copy(alpha = 0.2f)
+                    }
+                ) {
+                    Text(
+                        when {
+                            match.isFinalized == 1 && match.status == 2 -> "✅"
+                            match.isFinalized == 1 && match.status == 1 -> "❌"
+                            else -> "🔄"
+                        },
+                        fontSize = 14.sp,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                    )
+                }
+                
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    "×${String.format("%.2f", match.startOdds)}",
+                    fontSize = 11.sp,
+                    color = BybitColors.TextSecondary
+                )
+            }
+        }
+    }
+}
+
+// ==================== БЕЙДЖ СТАТУСА ====================
+
+@Composable
+fun StatusBadge(status: Int) {
+    val (text, color) = when (status) {
+        2 -> "Выиграл" to BybitColors.Green
+        1, -1 -> "Проиграл" to BybitColors.Red
+        0 -> "Активен" to BybitColors.Yellow
+        -2, -3 -> "Отменён" to BybitColors.TextTertiary
+        else -> "Неизв." to BybitColors.TextTertiary
+    }
+    
+    Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = color.copy(alpha = 0.2f)
+    ) {
+        Text(
+            text,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = color,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+        )
+    }
+}
+
+// ==================== ДИАЛОГ РЕДАКТИРОВАНИЯ ЭКСПРЕССА ====================
+
+@Composable
+fun EditExpressDialog(
+    express: ExpressDbItem,
+    dbHelper: DatabaseHelper,
+    onDismiss: () -> Unit,
+    onSave: () -> Unit
+) {
+    val context = LocalContext.current
+    var editKfall by remember { mutableStateOf(express.kfall.toString()) }
+    var editSumbet by remember { mutableStateOf(express.sumbet.toString()) }
+    var editStsAll by remember { mutableStateOf(express.stsAll.toString()) }
+    var editPotentialWin by remember { mutableStateOf(express.potentialWin.toString()) }
+    var editProfitLoss by remember { mutableStateOf(express.profitLoss.toString()) }
+    var editStrategy by remember { mutableStateOf(express.strategy) }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = BybitColors.Surface,
+        titleContentColor = BybitColors.TextPrimary,
+        textContentColor = BybitColors.TextSecondary,
+        title = { Text("✏️ Редактировать экспресс #${express.idExp}") },
+        text = {
+            Column(
+                modifier = Modifier.heightIn(max = 500.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = editKfall,
+                    onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) editKfall = it },
+                    label = { Text("Коэффициент") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = bybitTextFieldColors()
+                )
+                
+                OutlinedTextField(
+                    value = editSumbet,
+                    onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) editSumbet = it },
+                    label = { Text("Сумма ставки (₽)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = bybitTextFieldColors()
+                )
+                
+                OutlinedTextField(
+                    value = editStsAll,
+                    onValueChange = { editStsAll = it },
+                    label = { Text("Статус (0=активен, 1=проиграл, 2=выиграл)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = bybitTextFieldColors()
+                )
+                
+                OutlinedTextField(
+                    value = editPotentialWin,
+                    onValueChange = { if (it.matches(Regex("^-?\\d*\\.?\\d*$"))) editPotentialWin = it },
+                    label = { Text("Потенциальный выигрыш (₽)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = bybitTextFieldColors()
+                )
+                
+                OutlinedTextField(
+                    value = editProfitLoss,
+                    onValueChange = { if (it.matches(Regex("^-?\\d*\\.?\\d*$"))) editProfitLoss = it },
+                    label = { Text("Прибыль/убыток (₽)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = bybitTextFieldColors()
+                )
+                
+                OutlinedTextField(
+                    value = editStrategy,
+                    onValueChange = { editStrategy = it },
+                    label = { Text("Стратегия") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = bybitTextFieldColors()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val db = dbHelper.writableDatabase
+                    val values = ContentValues().apply {
+                        put("kfall", editKfall.toDoubleOrNull() ?: express.kfall)
+                        put("sumbet", editSumbet.toDoubleOrNull() ?: express.sumbet)
+                        put("sts_all", editStsAll.toIntOrNull() ?: express.stsAll)
+                        put("potential_win", editPotentialWin.toDoubleOrNull() ?: express.potentialWin)
+                        put("profit_loss", editProfitLoss.toDoubleOrNull() ?: express.profitLoss)
+                        put("strategy", editStrategy)
+                        put("updated_at", System.currentTimeMillis() / 1000)
+                    }
+                    db.update("express_bets", values, "id = ?", arrayOf(express.id.toString()))
+                    Toast.makeText(context, "✅ Экспресс #${express.idExp} обновлён", Toast.LENGTH_SHORT).show()
+                    onSave()
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = BybitColors.Yellow)
+            ) {
+                Text("💾 Сохранить", color = Color.Black, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Отмена", color = BybitColors.TextSecondary)
+            }
+        }
+    )
+}
+
+// ==================== ДИАЛОГ РЕДАКТИРОВАНИЯ МАТЧА ====================
+
+@Composable
+fun EditMatchDialog(
+    match: MatchDbItem,
+    dbHelper: DatabaseHelper,
+    onDismiss: () -> Unit,
+    onSave: () -> Unit
+) {
+    val context = LocalContext.current
+    var editHomeScore by remember { mutableStateOf(match.homeScore.toString()) }
+    var editAwayScore by remember { mutableStateOf(match.awayScore.toString()) }
+    var editMatchTime by remember { mutableStateOf(match.matchTime.toString()) }
+    var editStatus by remember { mutableStateOf(match.status.toString()) }
+    var editIsFinalized by remember { mutableStateOf(match.isFinalized == 1) }
+    var editOdds by remember { mutableStateOf(match.startOdds.toString()) }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = BybitColors.Surface,
+        titleContentColor = BybitColors.TextPrimary,
+        textContentColor = BybitColors.TextSecondary,
+        title = { 
+            Text("✏️ Редактировать матч #${match.mId}") 
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    if (match.homeTeam.isNotEmpty()) "${match.homeTeam} vs ${match.awayTeam}" else "Матч #${match.mId}",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = BybitColors.TextPrimary
+                )
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = editHomeScore,
+                        onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) editHomeScore = it },
+                        label = { Text("Хозяева") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        colors = bybitTextFieldColors()
+                    )
+                    
+                    OutlinedTextField(
+                        value = editAwayScore,
+                        onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) editAwayScore = it },
+                        label = { Text("Гости") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        colors = bybitTextFieldColors()
+                    )
+                }
+                
+                OutlinedTextField(
+                    value = editMatchTime,
+                    onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) editMatchTime = it },
+                    label = { Text("Минута матча") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = bybitTextFieldColors()
+                )
+                
+                OutlinedTextField(
+                    value = editOdds,
+                    onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) editOdds = it },
+                    label = { Text("Коэффициент") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = bybitTextFieldColors()
+                )
+                
+                OutlinedTextField(
+                    value = editStatus,
+                    onValueChange = { editStatus = it },
+                    label = { Text("Статус (0=активен, 1=проиграл, 2=выиграл)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = bybitTextFieldColors()
+                )
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Матч завершён:", color = BybitColors.TextPrimary)
+                    Switch(
+                        checked = editIsFinalized,
+                        onCheckedChange = { editIsFinalized = it },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = BybitColors.Yellow,
+                            checkedTrackColor = BybitColors.Yellow.copy(alpha = 0.3f)
+                        )
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val db = dbHelper.writableDatabase
+                    val values = ContentValues().apply {
+                        put("home_score", editHomeScore.toIntOrNull() ?: match.homeScore)
+                        put("away_score", editAwayScore.toIntOrNull() ?: match.awayScore)
+                        put("match_time", editMatchTime.toIntOrNull() ?: match.matchTime)
+                        put("start_odds", editOdds.toDoubleOrNull() ?: match.startOdds)
+                        put("status", editStatus.toIntOrNull() ?: match.status)
+                        put("is_finalized", if (editIsFinalized) 1 else 0)
+                        put("updated_at", System.currentTimeMillis() / 1000)
+                    }
+                    db.update("express_events", values, "id = ?", arrayOf(match.id.toString()))
+                    Toast.makeText(context, "✅ Матч #${match.mId} обновлён", Toast.LENGTH_SHORT).show()
+                    onSave()
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = BybitColors.Yellow)
+            ) {
+                Text("💾 Сохранить", color = Color.Black, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Отмена", color = BybitColors.TextSecondary)
+            }
+        }
+    )
+}
+
+// ==================== ДИАЛОГ ПОДТВЕРЖДЕНИЯ УДАЛЕНИЯ ====================
+
+@Composable
+fun DeleteConfirmDialog(
+    target: Any?,
+    dbHelper: DatabaseHelper,
+    onDismiss: () -> Unit,
+    onConfirmed: () -> Unit
+) {
+    val context = LocalContext.current
+    
+    val (title, message) = when (target) {
+        is ExpressDbItem -> {
+            "Удалить экспресс #${target.idExp}?" to 
+            "Будут удалены все связанные матчи. Это действие нельзя отменить."
+        }
+        is MatchDbItem -> {
+            "Удалить матч #${target.mId}?" to 
+            "Матч будет удалён из экспресса."
+        }
+        else -> "Подтверждение" to "Вы уверены?"
+    }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = BybitColors.Surface,
+        titleContentColor = BybitColors.TextPrimary,
+        textContentColor = BybitColors.TextSecondary,
+        title = { Text("🗑 $title") },
+        text = { Text(message) },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val db = dbHelper.writableDatabase
+                    when (target) {
+                        is ExpressDbItem -> {
+                            db.delete("express_events", "express_id = ?", arrayOf(target.id.toString()))
+                            db.delete("express_bets", "id = ?", arrayOf(target.id.toString()))
+                            Toast.makeText(context, "🗑 Экспресс #${target.idExp} удалён", Toast.LENGTH_SHORT).show()
+                        }
+                        is MatchDbItem -> {
+                            db.delete("express_events", "id = ?", arrayOf(target.id.toString()))
+                            Toast.makeText(context, "🗑 Матч #${target.mId} удалён", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    onConfirmed()
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = BybitColors.Red)
+            ) {
+                Text("Удалить")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Отмена", color = BybitColors.TextSecondary)
+            }
+        }
+    )
 }
 
 // ==================== КАРТОЧКА ИМПОРТА ====================
@@ -1443,3 +2450,15 @@ private fun calculateHourlyStats(expresses: List<ExpressInfo>): List<HourlyStats
         )
     }
 }
+
+// Вспомогательная функция для цветов текстовых полей
+@Composable
+fun bybitTextFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedBorderColor = BybitColors.Yellow,
+    unfocusedBorderColor = BybitColors.Divider,
+    focusedLabelColor = BybitColors.Yellow,
+    unfocusedLabelColor = BybitColors.TextTertiary,
+    cursorColor = BybitColors.Yellow,
+    focusedTextColor = BybitColors.TextPrimary,
+    unfocusedTextColor = BybitColors.TextPrimary
+)
