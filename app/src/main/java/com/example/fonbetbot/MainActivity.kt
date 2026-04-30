@@ -168,6 +168,7 @@ fun FonbetBotApp(dbHelper: DatabaseHelper) {
     var currentScreen by remember { mutableStateOf("main") }
     var selectedNavItem by remember { mutableStateOf(BottomNavItem.HOME) }
     var authData by remember { mutableStateOf<AuthData?>(null) }
+    var analyticsScreen by remember { mutableStateOf("analytics")}
     
     LaunchedEffect(Unit) {
         val fsid = prefs.getString("fsid", "") ?: ""
@@ -578,7 +579,7 @@ LaunchedEffect(isBotRunning) {
                                 isBotRunning = isBotRunning,
                                 onNavigateToAuth = onNavigateToWebAuth,
                                 onNavigateToSettings = onNavigateToSettings,
-onNavigateToAnalytics = onNavigateToAnalytics
+                                onNavigateToAnalytics = onNavigateToAnalytics
                             )
                         }
                         
