@@ -1,12 +1,13 @@
-﻿// AnalyticsScreen.kt - ЗАГЛУШКА
+// AnalyticsActivity.kt - ЗАГЛУШКА
 package com.example.fonbetbot
 
-import androidx.compose.runtime.Composable
+import android.os.Bundle
+import androidx.appcompat.app.AppCompatActivity
 
-@Composable
-fun AnalyticsScreen(
-    dbHelper: DatabaseHelper,
-    onBack: () -> Unit
-) {
-    // Заглушка
+class AnalyticsActivity : AppCompatActivity() {
+    
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_analytics)
+    }
 }
