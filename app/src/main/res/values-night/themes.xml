@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.FonbetBot" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#F7A600</item>
+        <item name="colorPrimaryVariant">#E59400</item>
+        <item name="colorOnPrimary">#000000</item>
+
+        <item name="colorSecondary">#F7A600</item>
+        <item name="colorSecondaryVariant">#E59400</item>
+        <item name="colorOnSecondary">#000000</item>
+
+        <item name="colorControlActivated">#F7A600</item>
+        <item name="colorControlHighlight">#33F7A600</item>
+
+        <item name="android:colorBackground">#0B0E11</item>
+        <item name="colorSurface">#1E2329</item>
+        <item name="colorOnSurface">#EAECEF</item>
+        <item name="colorOnBackground">#EAECEF</item>
+
+        <item name="colorError">#F6465D</item>
+        <item name="colorOnError">#FFFFFF</item>
+
+        <item name="android:statusBarColor">#0B0E11</item>
+        <item name="android:navigationBarColor">#0B0E11</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+</resources>

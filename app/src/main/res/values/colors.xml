@@ -1,4 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#0ECB81</color>
+    <!-- Основные цвета Bybit -->
+    <color name="bybit_yellow">#F7A600</color>
+    <color name="bybit_yellow_dark">#E59400</color>
+    <color name="bybit_yellow_light">#FFD700</color>
+
+    <!-- Фоны -->
+    <color name="bybit_bg_main">#0B0E11</color>
+    <color name="bybit_bg_card">#1E2329</color>
+    <color name="bybit_bg_hover">#2B3139</color>
+    <color name="bybit_border">#2B3139</color>
+
+    <!-- Текст -->
+    <color name="bybit_text_primary">#EAECEF</color>
+    <color name="bybit_text_secondary">#848E9C</color>
+    <color name="bybit_text_tertiary">#5E6673</color>
+
+    <!-- Функциональные -->
+    <color name="bybit_green">#0ECB81</color>
+    <color name="bybit_red">#F6465D</color>
+    <color name="bybit_blue">#1E80FF</color>
+
+    <!-- Стандартные -->
+    <color name="purple_500">#F7A600</color>
+    <color name="purple_700">#E59400</color>
+    <color name="teal_200">#FFD700</color>
+    <color name="teal_700">#F7A600</color>
+    <color name="white">#FFFFFF</color>
+    <color name="black">#000000</color>
 </resources>
