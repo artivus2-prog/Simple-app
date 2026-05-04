@@ -5,12 +5,12 @@ plugins {
 
 android {
     namespace 'com.example.fonbetbot'
-    compileSdk 33  // Изменено с 34 на 33
+    compileSdk 34  // Изменено с 34 на 33
 
     defaultConfig {
         applicationId "com.example.fonbetbot"
         minSdk 24
-        targetSdk 33  // Изменено с 34 на 33
+        targetSdk 34  // Изменено с 34 на 33
         versionCode 1
         versionName "1.0"
     }
