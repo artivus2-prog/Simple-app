@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<network-security-config>
-    <!-- Разрешить cleartext для конкретного домена -->
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">95.183.11.203</domain>
-    </domain-config>
-    <!-- Или разрешить для всех (менее безопасно) -->
-    <!-- <base-config cleartextTrafficPermitted="true" /> -->
-</network-security-config>
