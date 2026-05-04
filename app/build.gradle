@@ -5,12 +5,12 @@ plugins {
 
 android {
     namespace 'com.example.fonbetbot'
-    compileSdk 34
+    compileSdk 33  // Изменено с 34 на 33
 
     defaultConfig {
         applicationId "com.example.fonbetbot"
-        minSdk 26  // Повышаем до 26 (Android 8.0) для поддержки POI
-        targetSdk 34
+        minSdk 24
+        targetSdk 33  // Изменено с 34 на 33
         versionCode 1
         versionName "1.0"
     }
@@ -18,77 +18,38 @@ android {
     buildTypes {
         release {
             minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
-    
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
-    
+
     kotlinOptions {
         jvmTarget = '17'
     }
-    
+
     buildFeatures {
         compose true
     }
-    
+
     composeOptions {
-        kotlinCompilerExtensionVersion '1.5.8'
-    }
-    
-    // Добавляем упаковку для исключения дубликатов
-    packaging {
-        resources {
-            excludes += '/META-INF/{AL2.0,LGPL2.1}'
-            excludes += '/META-INF/DEPENDENCIES'
-            excludes += '/META-INF/INDEX.LIST'
-            excludes += '/META-INF/NOTICE'
-            excludes += '/META-INF/LICENSE'
-            excludes += '/META-INF/LICENSE.txt'
-            excludes += '/META-INF/NOTICE.txt'
-        }
+        kotlinCompilerExtensionVersion '1.5.4'
     }
 }
 
 dependencies {
     implementation 'androidx.core:core-ktx:1.12.0'
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
-    implementation 'androidx.activity:activity-compose:1.8.0'
+    implementation 'androidx.activity:activity-compose:1.8.2'
     
-    implementation platform('androidx.compose:compose-bom:2024.02.00')
+    implementation platform('androidx.compose:compose-bom:2024.01.00')
     implementation 'androidx.compose.ui:ui'
     implementation 'androidx.compose.ui:ui-graphics'
     implementation 'androidx.compose.ui:ui-tooling-preview'
     implementation 'androidx.compose.material3:material3'
     implementation 'androidx.compose.material:material-icons-extended'
-    implementation "androidx.datastore:datastore-preferences:1.0.0"
     
-    // WebView
-    implementation 'androidx.webkit:webkit:1.10.0'
-    implementation 'androidx.appcompat:appcompat:1.6.1'
-    implementation 'androidx.cardview:cardview:1.0.0'
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
-    
-    // Network
-    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
-    implementation 'org.json:json:20240303'
-    // Apache POI
-    implementation 'org.apache.poi:poi:5.2.5'
-    implementation 'org.apache.poi:poi-ooxml:5.2.5'
-    
-    // Логирование
-    implementation 'org.apache.logging.log4j:log4j-core:2.20.0'
-    implementation 'org.apache.logging.log4j:log4j-api:2.20.0'
-    
-    // Дополнительные
-    implementation 'org.apache.commons:commons-compress:1.24.0'
-    implementation 'org.apache.commons:commons-collections4:4.4'
-    implementation 'org.apache.xmlbeans:xmlbeans:5.1.1'
-    
-    // Добавляем совместимую версию logging
-    implementation 'org.slf4j:slf4j-api:2.0.9'
-    implementation 'org.slf4j:slf4j-simple:2.0.9'
+    debugImplementation 'androidx.compose.ui:ui-tooling'
 }
