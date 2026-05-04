@@ -1,25 +1,14 @@
-// MainActivity.kt - ПОЛНАЯ ВЕРСИЯ С ИСПРАВЛЕНИЯМИ
+// MainActivity.kt - МИНИМАЛЬНАЯ ВЕРСИЯ
 package com.example.fonbetbot
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
-import android.content.Intent
-import android.os.Build
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -29,26 +18,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
-import android.util.Log
-import android.webkit.CookieManager
-import android.content.ContentValues
-import android.net.Uri
 import java.util.*
-
-// ==================== ЦВЕТОВАЯ ПАЛИТРА BYBIT ====================
 
 object BybitColors {
     val Background = Color(0xFF0B0E11)
@@ -65,1004 +41,172 @@ object BybitColors {
     val Blue = Color(0xFF3772FF)
 }
 
-// ==================== МОДЕЛЬ НАВИГАЦИИ ====================
-
-enum class BottomNavItem(
-    val label: String,
-    val icon: @Composable () -> Unit
-) {
-    HOME("Главная", { Icon(Icons.Default.Home, null, tint = BybitColors.TextPrimary) }),
-    BETS("Экспрессы", { Icon(Icons.Default.ListAlt, null, tint = BybitColors.TextPrimary) }),
-    STATS("Статистика", { Icon(Icons.Default.BarChart, null, tint = BybitColors.TextPrimary) }),
-    PROFILE("Аккаунт", { Icon(Icons.Default.Person, null, tint = BybitColors.TextPrimary) })
+enum class Screen {
+    MAIN,
+    AUTH,
+    BETS,
+    STATS,
+    ANALYTICS,
+    PROFILE
 }
 
-// ==================== ОСНОВНАЯ АКТИВНОСТЬ ====================
-
 class MainActivity : ComponentActivity() {
-    
-    private lateinit var dbHelper: DatabaseHelper
-    
-    private val requestPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val allGranted = permissions.values.all { it }
-        if (!allGranted) {
-            Toast.makeText(this, "Требуются разрешения для работы бота", Toast.LENGTH_LONG).show()
-        }
-    }
-    
-    private fun checkAndRequestPermissions() {
-        val permissions = mutableListOf<String>()
-        
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                permissions.add(android.Manifest.permission.POST_NOTIFICATIONS)
-            }
-        }
-        
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            if (checkSelfPermission(android.Manifest.permission.FOREGROUND_SERVICE_DATA_SYNC) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                permissions.add(android.Manifest.permission.FOREGROUND_SERVICE_DATA_SYNC)
-            }
-        }
-        
-        if (permissions.isNotEmpty()) {
-            requestPermissionLauncher.launch(permissions.toTypedArray())
-        }
-    }
-    
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        checkAndRequestPermissions()
-        
-        dbHelper = DatabaseHelper(this)
-        
         setContent {
-            BybitTheme {
+            MaterialTheme(
+                colorScheme = darkColorScheme(
+                    background = BybitColors.Background,
+                    surface = BybitColors.Surface,
+                    primary = BybitColors.Yellow,
+                    secondary = BybitColors.YellowLight,
+                    onBackground = BybitColors.TextPrimary,
+                    onSurface = BybitColors.TextPrimary,
+                    onPrimary = Color.Black,
+                    error = BybitColors.Red,
+                )
+            ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = BybitColors.Background
                 ) {
-                    FonbetBotApp(dbHelper)
+                    MainApp()
                 }
             }
         }
     }
 }
 
-// ==================== ТЕМА BYBIT ====================
-
-@Composable
-fun BybitTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = darkColorScheme(
-            background = BybitColors.Background,
-            surface = BybitColors.Surface,
-            primary = BybitColors.Yellow,
-            secondary = BybitColors.YellowLight,
-            onBackground = BybitColors.TextPrimary,
-            onSurface = BybitColors.TextPrimary,
-            onPrimary = Color.Black,
-            error = BybitColors.Red,
-            onError = Color.White,
-            outline = BybitColors.Divider
-        ),
-        content = content
-    )
-}
-
-// ==================== ГЛАВНЫЙ КОМПОНЕНТ ====================
-
-data class AuthData(
-    val fsid: String,
-    val deviceId: String
-)
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FonbetBotApp(dbHelper: DatabaseHelper) {
-    val context = LocalContext.current
-    val prefs = remember { context.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE) }
-    
-    var currentScreen by remember { mutableStateOf("main") }
-    var selectedNavItem by remember { mutableStateOf(BottomNavItem.HOME) }
-    var authData by remember { mutableStateOf<AuthData?>(null) }
-    var analyticsScreen by remember { mutableStateOf("analytics")}
-    
-    LaunchedEffect(Unit) {
-        val fsid = prefs.getString("fsid", "") ?: ""
-        val deviceId = prefs.getString("device_id", "") ?: ""
-        
-        if (fsid.isNotEmpty() && deviceId.isNotEmpty()) {
-            authData = AuthData(fsid, deviceId)
-            
-            try {
-                val userId = dbHelper.saveUser(fsid, deviceId)
-                dbHelper.addLog(userId, "info", "Приложение запущено")
-            } catch (e: Exception) {}
-        }
-    }
-    
-    fun saveAuthData(fsid: String, deviceId: String) {
-        prefs.edit()
-            .putString("fsid", fsid)
-            .putString("device_id", deviceId)
-            .apply()
-        authData = AuthData(fsid, deviceId)
-        
-        try {
-            val userId = dbHelper.saveUser(fsid, deviceId)
-            dbHelper.addLog(userId, "info", "Пользователь авторизован")
-        } catch (e: Exception) {}
-    }
-    
-    fun clearAuthData() {
-        prefs.edit().clear().apply()
-        authData = null
-    }
+fun MainApp() {
+    var currentScreen by remember { mutableStateOf(Screen.MAIN) }
     
     when (currentScreen) {
-        "main" -> BybitMainScreen(
-            authData = authData,
-            selectedNavItem = selectedNavItem,
-            onNavItemSelected = { selectedNavItem = it },
-            onNavigateToWebAuth = { currentScreen = "webAuth" },
-            onNavigateToSettings = { currentScreen = "settings" },
-            onNavigateToAnalytics = { currentScreen = "analytics" }, 
-            onLogout = {
-                currentScreen = "main"
-                clearAuthData()
-            },
-            dbHelper = dbHelper
+        Screen.MAIN -> MainScreen(
+            onNavigate = { screen -> currentScreen = screen }
         )
-        "webAuth" -> WebViewAuthScreen(
-            onAuthSuccess = { fsid, deviceId ->
-                saveAuthData(fsid, deviceId)
-                currentScreen = "main"
-            },
-            onBack = { currentScreen = "main" }
+        Screen.AUTH -> PlaceholderScreen(
+            title = "Авторизация",
+            icon = Icons.Default.Lock,
+            description = "Здесь будет страница авторизации через WebView",
+            onBack = { currentScreen = Screen.MAIN }
         )
-        "settings" -> BybitSettingsScreen(
-            onBack = { currentScreen = "main" },
-            onSave = { currentScreen = "main" },
-            dbHelper = dbHelper
+        Screen.BETS -> PlaceholderScreen(
+            title = "Экспрессы",
+            icon = Icons.Default.ListAlt,
+            description = "Здесь будут отображаться активные экспрессы",
+            onBack = { currentScreen = Screen.MAIN }
         )
-"analytics" -> AnalyticsScreen(  // ДОБАВИТЬ
-        dbHelper = dbHelper,
-        onBack = { currentScreen = "main" }
-    )
+        Screen.STATS -> PlaceholderScreen(
+            title = "Статистика",
+            icon = Icons.Default.BarChart,
+            description = "Здесь будет статистика ставок и баланса",
+            onBack = { currentScreen = Screen.MAIN }
+        )
+        Screen.ANALYTICS -> PlaceholderScreen(
+            title = "Аналитика",
+            icon = Icons.Default.TrendingUp,
+            description = "Здесь будет детальная аналитика экспрессов",
+            onBack = { currentScreen = Screen.MAIN }
+        )
+        Screen.PROFILE -> PlaceholderScreen(
+            title = "Профиль",
+            icon = Icons.Default.Person,
+            description = "Здесь будет информация о профиле пользователя",
+            onBack = { currentScreen = Screen.MAIN }
+        )
     }
 }
 
-// ==================== ГЛАВНЫЙ ЭКРАН BYBIT ====================
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BybitMainScreen(
-    authData: AuthData?,
-    selectedNavItem: BottomNavItem,
-    onNavItemSelected: (BottomNavItem) -> Unit,
-    onNavigateToWebAuth: () -> Unit,
-    onNavigateToSettings: () -> Unit,
-onNavigateToAnalytics: () -> Unit, 
-    onLogout: () -> Unit,
-    dbHelper: DatabaseHelper
-) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val prefs = remember { context.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE) }
-    
-    var isBotRunning by remember { mutableStateOf(BotForegroundService.isRunning) }
-    var balance by remember { mutableStateOf(0.0) }
-    var profitLoss by remember { mutableStateOf(0.0) }
-    var profitPercent by remember { mutableStateOf(0.0) }
-    val logs = remember { mutableStateListOf<String>() }
-    var showExitDialog by remember { mutableStateOf(false) }
-    var isLoadingBalance by remember { mutableStateOf(false) }
-    
-    var activeExpresses by remember { mutableStateOf<List<ExpressInfo>>(emptyList()) }
-    var matchesByExpress by remember { mutableStateOf<Map<Long, List<MatchInfo>>>(emptyMap()) }
-    var expandedExpressIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
-    
-    val maxActiveExpresses = prefs.getInt("max_active_expresses", 5)
-    
-    // Внутри BybitMainScreen, замените функцию loadActiveExpresses:
-
-fun loadActiveExpresses() {
-    scope.launch(Dispatchers.IO) {
-        try {
-            val allExpresses = dbHelper.getAllExpresses()
-            
-            // Показываем: активные (0), выигранные (2), проигранные (1, -1)
-            // Не показываем: отменённые (-2, -3)
-            val filtered = allExpresses.filter { express ->
-                express.stsAll in listOf(0, 1, -1, 2)
-            }.sortedByDescending { it.createdAt }
-            
-            val matchesMap = mutableMapOf<Long, List<MatchInfo>>()
-            filtered.forEach { express ->
-                matchesMap[express.id] = dbHelper.getMatchesByExpressId(express.id)
-            }
-            
-            withContext(Dispatchers.Main) {
-                activeExpresses = filtered
-                matchesByExpress = matchesMap
-            }
-        } catch (e: Exception) {
-            withContext(Dispatchers.Main) {
-                logs.add(0, "[${getCurrentTime()}] ❌ Ошибка загрузки: ${e.message}")
-            }
-        }
-    }
-}
-    // Внутри BybitMainScreen, добавьте эту функцию:
-
-/**
- * Проверяет активные экспрессы старше 2 часов и пересчитывает их статус
- * на основе результатов матчей. Статусы 1 и 2 НЕ меняет!
- */
-fun finalizeOldExpresses() {
-    scope.launch(Dispatchers.IO) {
-        try {
-            val db = dbHelper.writableDatabase
-            val currentTime = System.currentTimeMillis() / 1000
-            val maxAgeSeconds = 2 * 60 * 60
-            
-            // Находим только АКТИВНЫЕ экспрессы (sts_all = 0) старше 2 часов
-            val cursor = db.rawQuery("""
-                SELECT id, id_exp, ct 
-                FROM express_bets 
-                WHERE sts_all = 0 
-                AND ct < ?
-            """, arrayOf((currentTime - maxAgeSeconds).toString()))
-            
-            var finalizedCount = 0
-            while (cursor.moveToNext()) {
-                val expressId = cursor.getLong(0)
-                val idExp = cursor.getInt(1)
-                val ageSeconds = currentTime - cursor.getLong(2)
-                
-                // Пересчитываем статус на основе матчей
-                val newStatus = recalculateExpressStatusFromMatches(db, expressId)
-                
-                // Обновляем статус только если он изменился с 0 на 1 или 2
-                if (newStatus != 0) {
-                    val updateValues = ContentValues().apply {
-                        put("sts_all", newStatus)
-                        put("updated_at", currentTime)
-                        
-                        // Если проиграл - считаем убыток
-                        if (newStatus == 1) {
-                            val expressCursor = db.rawQuery(
-                                "SELECT sumbet FROM express_bets WHERE id = ?", 
-                                arrayOf(expressId.toString())
-                            )
-                            if (expressCursor.moveToFirst()) {
-                                val sumbet = expressCursor.getDouble(0)
-                                put("profit_loss", -sumbet)
-                                put("potential_win", 0.0)
-                            }
-                            expressCursor.close()
-                        }
-                    }
-                    db.update("express_bets", updateValues, "id = ?", arrayOf(expressId.toString()))
-                    
-                    // Финализируем ВСЕ незавершенные матчи
-                    val eventValues = ContentValues().apply {
-                        put("is_finalized", 1)
-                        put("updated_at", currentTime)
-                    }
-                    db.update("express_events", eventValues, 
-                        "express_id = ? AND is_finalized = 0", 
-                        arrayOf(expressId.toString()))
-                    
-                    finalizedCount++
-                    
-                    val statusText = when (newStatus) {
-                        2 -> "ВЫИГРАЛ ✅"
-                        1 -> "ПРОИГРАЛ ❌"
-                        else -> "ЗАВЕРШЁН"
-                    }
-                    
-                    Log.d("BybitMainScreen", "⏰ Экспресс #$idExp завершён (возраст: ${ageSeconds/3600}ч, статус: $statusText)")
-                }
-            }
-            cursor.close()
-            
-            if (finalizedCount > 0) {
-                withContext(Dispatchers.Main) {
-                    logs.add(0, "[${getCurrentTime()}] ⏰ Завершено $finalizedCount активных экспрессов")
-                    loadActiveExpresses()
-                }
-            }
-        } catch (e: Exception) {
-            Log.e("BybitMainScreen", "Ошибка финализации: ${e.message}")
-        }
-    }
-}
-
-/**
- * Пересчитывает статус экспресса на основе реальных результатов матчей
- */
-fun recalculateExpressStatusFromMatches(db: SQLiteDatabase, expressId: Long): Int {
-    val cursor = db.rawQuery("""
-        SELECT ee.bet_type, ee.home_score, ee.away_score, ee.is_finalized,
-               eb.id_exp_replace
-        FROM express_events ee
-        JOIN express_bets eb ON eb.id = ee.express_id
-        WHERE ee.express_id = ?
-    """, arrayOf(expressId.toString()))
-    
-    var allWin = true
-    var hasLoss = false
-    var hasUnfinished = false
-    var hasReplace = false
-    
-    while (cursor.moveToNext()) {
-        val betType = cursor.getInt(0)
-        val homeScore = cursor.getInt(1)
-        val awayScore = cursor.getInt(2)
-        val isFinalized = cursor.getInt(3) == 1
-        val idExpReplace = cursor.getInt(4)
-        
-        if (idExpReplace > 0) {
-            hasReplace = true
-        }
-        
-        if (!isFinalized) {
-            hasUnfinished = true
-            continue
-        }
-        
-        val matchResult = when (betType) {
-            924 -> if (homeScore >= awayScore) 2 else 1
-            927 -> if (homeScore + 1.5 > awayScore) 2 else 1
-            928 -> if (awayScore + 1.5 > homeScore) 2 else 1
-            else -> 1
-        }
-        
-        when (matchResult) {
-            2 -> { /* зашёл */ }
-            1 -> { hasLoss = true; allWin = false }
-        }
-    }
-    cursor.close()
-    
-    if (hasUnfinished) return 0
-    
-    return when {
-        hasLoss && hasReplace -> -1
-        hasLoss -> 1
-        allWin -> 2
-        else -> 1
-    }
-}
-    fun fetchBalanceFromApi() {
-        if (authData == null) {
-            logs.add(0, "[${getCurrentTime()}] ❌ Нет данных авторизации")
-            return
-        }
-        
-        isLoadingBalance = true
-        
-        val apiClient = ApiClient()
-        apiClient.getSaldo(
-            cookies = emptyMap(),
-            fsid = authData.fsid,
-            deviceId = authData.deviceId,
-            onSuccess = { sessionInfo: ApiClient.SessionInfo? ->
-                isLoadingBalance = false
-                if (sessionInfo != null && sessionInfo.saldo != null) {
-                    val saldo = sessionInfo.saldo
-                    balance = saldo
-                    logs.add(0, "[${getCurrentTime()}] 💰 Баланс обновлён: %.2f ₽".format(saldo))
-                    
-                    scope.launch {
-                        try {
-                            val user = dbHelper.getUser(authData.fsid, authData.deviceId)
-                            user?.let {
-                                dbHelper.saveBalance(it.id, saldo)
-                            }
-                        } catch (e: Exception) {}
-                    }
-                }
-            },
-            onError = { error: String ->
-                isLoadingBalance = false
-                logs.add(0, "[${getCurrentTime()}] ❌ Ошибка API: $error")
-            }
-        )
-    }
-    
-    // Инициализация данных
-    LaunchedEffect(authData, isBotRunning) {
-        authData?.let {
-            try {
-                val user = dbHelper.getUser(it.fsid, it.deviceId)
-                user?.let { userId ->
-                    val stats = dbHelper.getBalanceStats(userId.id)
-                    if (stats.currentBalance > 0) {
-                        balance = stats.currentBalance
-                    }
-                }
-            } catch (e: Exception) {}
-        }
-        
-        if (isBotRunning && authData != null) {
-            fetchBalanceFromApi()
-        }
-    }
-    
-    
-    // Периодическое обновление
-    // В LaunchedEffect при старте:
-LaunchedEffect(Unit) {
-    isBotRunning = BotForegroundService.isRunning
-    if (isBotRunning) {
-        logs.add(0, "[${getCurrentTime()}] 🔄 Подключено к работающему боту")
-        if (BotForegroundService.lastBalance > 0) {
-            balance = BotForegroundService.lastBalance
-        }
-    }
-    loadActiveExpresses()
-    finalizeOldExpresses() // ← Финализируем старые при старте
-}
-
-// Добавьте отдельный цикл для периодической финализации:
-LaunchedEffect(isBotRunning) {
-    if (isBotRunning) {
-        while (true) {
-            delay(60000) // Каждую минуту
-            finalizeOldExpresses()
-        }
-    }
-}
-    
-    // Обработка P&L
-    LaunchedEffect(balance) {
-        val initialBalance = prefs.getFloat("initial_balance", 0f).toDouble()
-        if (initialBalance > 0 && balance > 0) {
-            profitLoss = balance - initialBalance
-            profitPercent = (profitLoss / initialBalance) * 100
-        } else if (balance > 0) {
-            prefs.edit().putFloat("initial_balance", balance.toFloat()).apply()
-        }
-    }
-    
-    // Подписка на обновления из сервиса
-    DisposableEffect(Unit) {
-        BotForegroundService.onBalanceUpdate = { newBalance ->
-            kotlinx.coroutines.MainScope().launch {
-                balance = newBalance
-            }
-        }
-        BotForegroundService.onLogUpdate = { log ->
-            kotlinx.coroutines.MainScope().launch {
-                logs.add(0, log)
-                if (logs.size > 200) {
-                    repeat(logs.size - 200) { logs.removeLast() }
-                }
-            }
-        }
-        BotForegroundService.onBetsUpdate = { bets ->
-            kotlinx.coroutines.MainScope().launch {
-                loadActiveExpresses()
-            }
-        }
-        BotForegroundService.onScoresUpdate = { message ->
-            kotlinx.coroutines.MainScope().launch {
-                logs.add(0, message)
-                loadActiveExpresses()
-            }
-        }
-        BotForegroundService.authData = authData
-        
-        onDispose {
-            BotForegroundService.onBalanceUpdate = null
-            BotForegroundService.onLogUpdate = null
-            BotForegroundService.onBetsUpdate = null
-            BotForegroundService.onScoresUpdate = null
-        }
-    }
-    
-    fun startBot() {
-        if (authData == null) {
-            logs.add(0, "[${getCurrentTime()}] ❌ Нет данных авторизации")
-            return
-        }
-        
-        BotForegroundService.authData = authData
-        
-        val serviceIntent = Intent(context, BotForegroundService::class.java)
-        
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            ContextCompat.startForegroundService(context, serviceIntent)
-        } else {
-            context.startService(serviceIntent)
-        }
-        
-        isBotRunning = true
-        logs.add(0, "[${getCurrentTime()}] 🚀 Бот запущен в фоне")
-        fetchBalanceFromApi()
-    }
-    
-    fun stopBot() {
-        val stopIntent = Intent(context, BotForegroundService::class.java).apply {
-            action = BotForegroundService.ACTION_STOP
-        }
-        context.startService(stopIntent)
-        
-        isBotRunning = false
-        logs.add(0, "[${getCurrentTime()}] ⏹ Бот остановлен")
-    }
-    
-    BackHandler(enabled = isBotRunning) {
-        showExitDialog = true
-    }
-    
+fun MainScreen(onNavigate: (Screen) -> Unit) {
     Scaffold(
-    containerColor = BybitColors.Background,
-    bottomBar = {
-        BybitBottomNavigationBadgeOnly(
-            selectedItem = selectedNavItem,
-            onItemSelected = onNavItemSelected,
-            isBotRunning = isBotRunning,
-            onStartStopBot = { if (isBotRunning) stopBot() else startBot() },
-            activeExpressesCount = activeExpresses.size,
-            maxActiveExpresses = maxActiveExpresses
-        )
-    }
-){ paddingValues ->
-        Column(
+        containerColor = BybitColors.Background,
+        bottomBar = {
+            BottomNavigationBar(onNavigate = onNavigate)
+        }
+    ) { paddingValues ->
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Основной контент в зависимости от выбранной вкладки
-            when (selectedNavItem) {
-                BottomNavItem.HOME -> {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        // Верхняя панель с балансом
-                        item {
-                            BalanceHeaderCard(
-                                balance = balance,
-                                profitLoss = profitLoss,
-                                profitPercent = profitPercent,
-                                isBotRunning = isBotRunning,
-                                isLoadingBalance = isLoadingBalance,
-                                authData = authData,
-                                onRefresh = { fetchBalanceFromApi() }
-                            )
-                        }
-                        
-                        // Панель действий (Депозит, P2P и т.д.)
-                        item {
-                            ActionButtonsRow(
-                                onStartStopBot = { if (isBotRunning) stopBot() else startBot() },
-                                isBotRunning = isBotRunning,
-                                onNavigateToAuth = onNavigateToWebAuth,
-                                onNavigateToSettings = onNavigateToSettings,
-                                onNavigateToAnalytics = onNavigateToAnalytics
-                            )
-                        }
-                        
-                        // Промо-карточка (информационная)
-                        item {
-                            PromoCard()
-                        }
-                        
-                        // Активные экспрессы
-                        item {
-                            ActiveExpressesSection(
-                                expresses = activeExpresses,
-                                matchesByExpress = matchesByExpress,
-                                expandedExpressIds = expandedExpressIds,
-                                onToggleExpand = { expressId ->
-                                    expandedExpressIds = if (expandedExpressIds.contains(expressId)) {
-                                        expandedExpressIds - expressId
-                                    } else {
-                                        expandedExpressIds + expressId
-                                    }
-                                },
-                                maxActiveExpresses = maxActiveExpresses,
-                                isBotRunning = isBotRunning,
-                                onRefresh = { loadActiveExpresses() }
-                            )
-                        }
-                        
-                        // Логи
-                        item {
-                            LogsSection(
-                                logs = logs,
-                                onClear = {
-                                    logs.clear()
-                                    logs.add("[${getCurrentTime()}] 🗑 Логи очищены")
-                                }
-                            )
-                        }
-                    }
-                }
-                
-                BottomNavItem.BETS -> {
-                    ActiveExpressesFullScreen(
-                        expresses = activeExpresses,
-                        matchesByExpress = matchesByExpress,
-                        expandedExpressIds = expandedExpressIds,
-                        onToggleExpand = { expressId ->
-                            expandedExpressIds = if (expandedExpressIds.contains(expressId)) {
-                                expandedExpressIds - expressId
-                            } else {
-                                expandedExpressIds + expressId
-                            }
-                        },
-                        maxActiveExpresses = maxActiveExpresses
-                    )
-                }
-                
-                BottomNavItem.STATS -> {
-                    StatsContent(
-                        dbHelper = dbHelper,
-                        authData = authData,
-                        onNavigateToHistory = {}
-                    )
-                }
-                
-                BottomNavItem.PROFILE -> {
-                    ProfileContent(
-                        authData = authData,
-                        dbHelper = dbHelper,
-                        onLogout = {
-                            onLogout()
-                            onNavItemSelected(BottomNavItem.HOME)
-                        },
-                        onNavigateToSettings = onNavigateToSettings
-                    )
-                }
+            item {
+                BalanceCard()
             }
-        }
-        
-        // Диалог остановки бота
-        if (showExitDialog) {
-            AlertDialog(
-                onDismissRequest = { showExitDialog = false },
-                containerColor = BybitColors.Surface,
-                titleContentColor = BybitColors.TextPrimary,
-                textContentColor = BybitColors.TextSecondary,
-                title = { Text("⚠️ Остановить бота?") },
-                text = { Text("Бот работает в фоновом режиме.\n\nОстановить бота и выйти?") },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            showExitDialog = false
-                            stopBot()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = BybitColors.Red)
-                    ) {
-                        Text("Остановить")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showExitDialog = false }) {
-                        Text("Отмена", color = BybitColors.TextSecondary)
-                    }
-                }
-            )
+            
+            item {
+                ActionButtons(onNavigate = onNavigate)
+            }
+            
+            item {
+                PromoBanner()
+            }
+            
+            item {
+                QuickStatsCard()
+            }
+            
+            item {
+                Spacer(modifier = Modifier.height(32.dp))
+            }
         }
     }
 }
 
-// ==================== НИЖНЯЯ ПАНЕЛЬ НАВИГАЦИИ ====================
 @Composable
-fun BybitBottomNavigationBadgeOnly(
-    selectedItem: BottomNavItem,
-    onItemSelected: (BottomNavItem) -> Unit,
-    isBotRunning: Boolean,
-    onStartStopBot: () -> Unit,
-    activeExpressesCount: Int = 0,
-    maxActiveExpresses: Int = 5
-) {
-    Surface(
-        color = BybitColors.Surface,
-        shadowElevation = 8.dp
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(64.dp)
-                .padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Главная
-            Column(
-                modifier = Modifier
-                    .weight(1f, fill = true)
-                    .clickable { onItemSelected(BottomNavItem.HOME) }
-                    .padding(vertical = 4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    Icons.Default.Home, null,
-                    tint = if (selectedItem == BottomNavItem.HOME) BybitColors.Yellow else BybitColors.TextTertiary,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = "Главная",
-                    fontSize = 11.sp,
-                    fontWeight = if (selectedItem == BottomNavItem.HOME) FontWeight.SemiBold else FontWeight.Normal,
-                    color = if (selectedItem == BottomNavItem.HOME) BybitColors.Yellow else BybitColors.TextTertiary
-                )
-            }
-            
-            // Экспрессы С БЕЙДЖЕМ
-            Column(
-                modifier = Modifier
-                    .weight(1f, fill = true)
-                    .clickable { onItemSelected(BottomNavItem.BETS) }
-                    .padding(vertical = 4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Box(modifier = Modifier.size(28.dp)) {
-                    Icon(
-                        Icons.Default.ListAlt, null,
-                        tint = if (selectedItem == BottomNavItem.BETS) BybitColors.Yellow else BybitColors.TextTertiary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    
-                    // 🔴 Красный бейдж с количеством активных экспрессов
-                    if (activeExpressesCount > 0) {
-                        Badge(
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .offset(x = 4.dp, y = (-4).dp),
-                            containerColor = if (activeExpressesCount >= maxActiveExpresses) 
-                                BybitColors.Red 
-                            else 
-                                BybitColors.Yellow,
-                            contentColor = if (activeExpressesCount >= maxActiveExpresses) 
-                                Color.White 
-                            else 
-                                Color.Black
-                        ) {
-                            Text(
-                                text = if (activeExpressesCount > 99) "99+" 
-                                       else activeExpressesCount.toString(),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-                
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = "Экспрессы",
-                    fontSize = 11.sp,
-                    fontWeight = if (selectedItem == BottomNavItem.BETS) FontWeight.SemiBold else FontWeight.Normal,
-                    color = if (selectedItem == BottomNavItem.BETS) BybitColors.Yellow else BybitColors.TextTertiary
-                )
-            }
-            
-            // Статистика
-            Column(
-                modifier = Modifier
-                    .weight(1f, fill = true)
-                    .clickable { onItemSelected(BottomNavItem.STATS) }
-                    .padding(vertical = 4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    Icons.Default.BarChart, null,
-                    tint = if (selectedItem == BottomNavItem.STATS) BybitColors.Yellow else BybitColors.TextTertiary,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = "Статистика",
-                    fontSize = 11.sp,
-                    fontWeight = if (selectedItem == BottomNavItem.STATS) FontWeight.SemiBold else FontWeight.Normal,
-                    color = if (selectedItem == BottomNavItem.STATS) BybitColors.Yellow else BybitColors.TextTertiary
-                )
-            }
-            
-            // Аккаунт
-            Column(
-                modifier = Modifier
-                    .weight(1f, fill = true)
-                    .clickable { onItemSelected(BottomNavItem.PROFILE) }
-                    .padding(vertical = 4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    Icons.Default.Person, null,
-                    tint = if (selectedItem == BottomNavItem.PROFILE) BybitColors.Yellow else BybitColors.TextTertiary,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = "Аккаунт",
-                    fontSize = 11.sp,
-                    fontWeight = if (selectedItem == BottomNavItem.PROFILE) FontWeight.SemiBold else FontWeight.Normal,
-                    color = if (selectedItem == BottomNavItem.PROFILE) BybitColors.Yellow else BybitColors.TextTertiary
-                )
-            }
-            
-            // Кнопка Старт/Стоп
-            Column(
-                modifier = Modifier
-                    .weight(1.2f, fill = true)
-                    .clickable { onStartStopBot() }
-                    .padding(vertical = 4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(if (isBotRunning) BybitColors.Red else BybitColors.Green),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        if (isBotRunning) Icons.Default.Stop else Icons.Default.PlayArrow, null,
-                        tint = Color.White, modifier = Modifier.size(22.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = if (isBotRunning) "Стоп" else "Старт",
-                    fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
-                    color = BybitColors.TextSecondary
-                )
-            }
-        }
-    }
-}
-// ==================== КАРТОЧКА БАЛАНСА ====================
-
-@Composable
-fun BalanceHeaderCard(
-    balance: Double,
-    profitLoss: Double,
-    profitPercent: Double,
-    isBotRunning: Boolean,
-    isLoadingBalance: Boolean,
-    authData: AuthData?,
-    onRefresh: () -> Unit
-) {
+fun BalanceCard() {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = BybitColors.Surface)
     ) {
-        Column(
-            modifier = Modifier.padding(20.dp)
-        ) {
+        Column(modifier = Modifier.padding(20.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(
-                                if (isBotRunning) BybitColors.Green else BybitColors.Red
-                            )
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = if (isBotRunning) "Бот активен" else "Бот остановлен",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = BybitColors.TextSecondary
-                    )
-                }
-                
-                IconButton(
-                    onClick = onRefresh,
-                    modifier = Modifier.size(32.dp),
-                    enabled = authData != null
-                ) {
-                    if (isLoadingBalance) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.dp,
-                            color = BybitColors.Yellow
-                        )
-                    } else {
-                        Icon(
-                            Icons.Default.Refresh,
-                            "Обновить",
-                            tint = if (authData != null) BybitColors.Yellow else BybitColors.TextTertiary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
+                Text(
+                    text = "Общие активы",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = BybitColors.TextSecondary
+                )
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(BybitColors.Green)
+                )
             }
             
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             
             Text(
-                text = "Общие активы",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-                color = BybitColors.TextSecondary
-            )
-            
-            Spacer(modifier = Modifier.height(4.dp))
-            
-            Text(
-                text = if (balance > 0) String.format("%.2f ₽", balance) else "0.00 ₽",
+                text = "0.00 ₽",
                 fontSize = 32.sp,
                 fontWeight = FontWeight.Bold,
                 color = BybitColors.TextPrimary,
                 fontFamily = FontFamily.Default
             )
             
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             
-            if (profitLoss != 0.0) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "P&L за сегодня ",
-                        fontSize = 13.sp,
-                        color = BybitColors.TextSecondary
-                    )
-                    Text(
-                        text = "${if (profitLoss > 0) "+" else ""}${String.format("%.2f", profitLoss)} ₽",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (profitLoss > 0) BybitColors.Green else BybitColors.Red
-                    )
-                    Text(
-                        text = " (${if (profitPercent > 0) "+" else ""}${String.format("%.2f", profitPercent)}%)",
-                        fontSize = 13.sp,
-                        color = if (profitPercent > 0) BybitColors.Green else BybitColors.Red
-                    )
-                }
-            } else {
-                Text(
-                    text = "P&L за сегодня 0.00 ₽ (0.00%)",
-                    fontSize = 13.sp,
-                    color = BybitColors.TextSecondary
-                )
-            }
-            
-            if (authData == null) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = "⚠️ Требуется авторизация",
-                    fontSize = 12.sp,
-                    color = BybitColors.Red
-                )
-            }
+            Text(
+                text = "P&L за сегодня 0.00 ₽ (0.00%)",
+                fontSize = 13.sp,
+                color = BybitColors.TextSecondary
+            )
         }
     }
 }
 
-// ==================== ПАНЕЛЬ ДЕЙСТВИЙ ====================
 @Composable
-fun ActionButtonsRow(
-    onStartStopBot: () -> Unit,
-    isBotRunning: Boolean,
-    onNavigateToAuth: () -> Unit,
-    onNavigateToSettings: () -> Unit,
-    onNavigateToAnalytics: () -> Unit
-)
- {
+fun ActionButtons(onNavigate: (Screen) -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -1075,27 +219,33 @@ fun ActionButtonsRow(
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
             ActionButton(
-                icon = { Icon(Icons.Default.AddCircle, null, tint = BybitColors.Yellow, modifier = Modifier.size(28.dp)) },
-                label = if (isBotRunning) "Стоп" else "Старт",
-                onClick = onStartStopBot
+                icon = Icons.Default.PlayArrow,
+                label = "Старт",
+                onClick = { /* Заглушка: запуск бота */ }
             )
             
             ActionButton(
-                icon = { Icon(Icons.Default.SwapHoriz, null, tint = BybitColors.TextSecondary, modifier = Modifier.size(28.dp)) },
+                icon = Icons.Default.Lock,
                 label = "Авторизация",
-                onClick = onNavigateToAuth
+                onClick = { onNavigate(Screen.AUTH) }
             )
             
             ActionButton(
-                icon = { Icon(Icons.Default.Settings, null, tint = BybitColors.TextSecondary, modifier = Modifier.size(28.dp)) },
-                label = "Настройки",
-                onClick = onNavigateToSettings
+                icon = Icons.Default.ListAlt,
+                label = "Экспрессы",
+                onClick = { onNavigate(Screen.BETS) }
             )
-
+            
             ActionButton(
-                icon = { Icon(Icons.Default.TrendingUp, null, tint = BybitColors.TextSecondary, modifier = Modifier.size(28.dp)) },
+                icon = Icons.Default.BarChart,
+                label = "Статистика",
+                onClick = { onNavigate(Screen.STATS) }
+            )
+            
+            ActionButton(
+                icon = Icons.Default.TrendingUp,
                 label = "Аналитика",
-                onClick =onNavigateToAnalytics
+                onClick = { onNavigate(Screen.ANALYTICS) }
             )
         }
     }
@@ -1103,7 +253,7 @@ fun ActionButtonsRow(
 
 @Composable
 fun ActionButton(
-    icon: @Composable () -> Unit,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     onClick: () -> Unit
 ) {
@@ -1121,7 +271,12 @@ fun ActionButton(
                 .background(BybitColors.SurfaceLight),
             contentAlignment = Alignment.Center
         ) {
-            icon()
+            Icon(
+                icon,
+                contentDescription = label,
+                tint = BybitColors.TextSecondary,
+                modifier = Modifier.size(24.dp)
+            )
         }
         Spacer(modifier = Modifier.height(6.dp))
         Text(
@@ -1133,10 +288,8 @@ fun ActionButton(
     }
 }
 
-// ==================== ПРОМО-КАРТОЧКА ====================
-
 @Composable
-fun PromoCard() {
+fun PromoBanner() {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -1166,1818 +319,64 @@ fun PromoCard() {
             
             Icon(
                 Icons.Default.TrendingUp,
-                null,
+                contentDescription = null,
                 tint = BybitColors.Yellow,
                 modifier = Modifier.size(36.dp)
             )
         }
-        
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            repeat(6) { index ->
-                Box(
-                    modifier = Modifier
-                        .size(if (index == 0) 8.dp else 6.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (index == 0) BybitColors.Yellow else BybitColors.SurfaceLight
-                        )
-                )
-                if (index < 5) Spacer(modifier = Modifier.width(6.dp))
-            }
-        }
     }
 }
 
-// ==================== СЕКЦИЯ АКТИВНЫХ ЭКСПРЕССОВ ====================
-
 @Composable
-fun ActiveExpressesSection(
-    expresses: List<ExpressInfo>,
-    matchesByExpress: Map<Long, List<MatchInfo>>,
-    expandedExpressIds: Set<Long>,
-    onToggleExpand: (Long) -> Unit,
-    maxActiveExpresses: Int,
-    isBotRunning: Boolean,
-    onRefresh: () -> Unit
-) {
+fun QuickStatsCard() {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = BybitColors.Surface)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "🎯 Экспрессы",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = BybitColors.TextPrimary
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    if (expresses.isNotEmpty()) {
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = if (expresses.size >= maxActiveExpresses) BybitColors.Red.copy(alpha = 0.2f) else BybitColors.Green.copy(alpha = 0.2f)
-                        ) {
-                            Text(
-                                text = "${expresses.size}/$maxActiveExpresses",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (expresses.size >= maxActiveExpresses) BybitColors.Red else BybitColors.Green,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-                }
-                
-                IconButton(onClick = onRefresh, modifier = Modifier.size(28.dp)) {
-                    Icon(
-                        Icons.Default.Refresh,
-                        "Обновить",
-                        tint = BybitColors.Yellow,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-            
-            if (expresses.isNotEmpty() && expresses.size >= maxActiveExpresses && isBotRunning) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = BybitColors.Red.copy(alpha = 0.1f)
-                ) {
-                    Text(
-                        text = "⚠️ Достигнут лимит экспрессов ($maxActiveExpresses). Новые не создаются.",
-                        fontSize = 12.sp,
-                        color = BybitColors.Red,
-                        modifier = Modifier.padding(12.dp)
-                    )
-                }
-            }
-            
-            Spacer(modifier = Modifier.height(8.dp))
-            
-            if (expresses.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(100.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = if (isBotRunning) "Ожидание сигналов..." else "Запустите бота",
-                        fontSize = 14.sp,
-                        color = BybitColors.TextTertiary
-                    )
-                }
-            } else {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    expresses.take(5).forEach { express ->
-                        BybitExpressCard(
-                            express = express,
-                            matches = matchesByExpress[express.id] ?: emptyList(),
-                            isExpanded = expandedExpressIds.contains(express.id),
-                            onToggleExpand = { onToggleExpand(express.id) }
-                        )
-                    }
-                    
-                    if (expresses.size > 5) {
-                        Text(
-                            text = "и ещё ${expresses.size - 5}...",
-                            fontSize = 12.sp,
-                            color = BybitColors.TextTertiary,
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ==================== КАРТОЧКА ЭКСПРЕССА В СТИЛЕ BYBIT ====================
-
-@Composable
-fun BybitExpressCard(
-    express: ExpressInfo,
-    matches: List<MatchInfo>,
-    isExpanded: Boolean,
-    onToggleExpand: () -> Unit
-) {
-    val currentTime = System.currentTimeMillis() / 1000
-    val isFullyCompleted = matches.all { it.isFinalized == 1 }
-    
-    val (statusColor, statusText) = when {
-        express.stsAll == 2 && isFullyCompleted -> BybitColors.Green to "✅ Выигрыш"
-        express.stsAll == 1 && isFullyCompleted -> BybitColors.Red to "❌ Проигрыш"
-        express.stsAll == 0 -> BybitColors.Yellow to "🔄 В игре"
-        else -> BybitColors.TextSecondary to "Ожидание"
-    }
-    
-    val ageSeconds = currentTime - express.createdAt
-    val ageText = when {
-        ageSeconds < 60 -> "только что"
-        ageSeconds < 3600 -> "${ageSeconds / 60}м"
-        else -> "${ageSeconds / 3600}ч ${(ageSeconds % 3600) / 60}м"
-    }
-    
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onToggleExpand() },
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = BybitColors.SurfaceLight)
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "#${express.idExp}",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = BybitColors.TextPrimary
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "· $ageText",
-                        fontSize = 11.sp,
-                        color = BybitColors.TextTertiary
-                    )
-                }
-                
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "${express.sumbet.toInt()} ₽",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = BybitColors.TextPrimary
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Icon(
-                        if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                        null,
-                        tint = BybitColors.TextSecondary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-            
-            Spacer(modifier = Modifier.height(4.dp))
-            
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = statusText,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = statusColor
-                )
-                Text(
-                    text = "×${"%.2f".format(express.kfall)}",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = BybitColors.Yellow
-                )
-            }
-            
-            if (!isFullyCompleted && matches.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(6.dp))
-                val completedCount = matches.count { it.isFinalized == 1 }
-                val progress = completedCount.toFloat() / matches.size
-                
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(3.dp),
-                    color = BybitColors.Yellow,
-                    trackColor = BybitColors.Divider,
-                )
-                
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = "$completedCount/${matches.size} завершено",
-                    fontSize = 10.sp,
-                    color = BybitColors.TextTertiary
-                )
-            }
-            
-            if (express.stsAll == 1 || express.stsAll == 2) {
-                Spacer(modifier = Modifier.height(6.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    Text(
-                        text = "${if (express.profLoss > 0) "+" else ""}${"%.2f".format(express.profLoss)} ₽",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (express.profLoss > 0) BybitColors.Green else BybitColors.Red
-                    )
-                }
-            }
-            
-            if (isExpanded) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Divider(color = BybitColors.Divider)
-                Spacer(modifier = Modifier.height(8.dp))
-                
-                matches.forEach { match ->
-                    MiniMatchRow(match = match)
-                    if (match != matches.last()) Spacer(modifier = Modifier.height(6.dp))
-                }
-                
-                if (express.stsAll == 2) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = BybitColors.Green.copy(alpha = 0.1f)
-                    ) {
-                        Text(
-                            text = "🏆 Выигрыш: ${"%.2f".format(express.potentialWin)} ₽",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = BybitColors.Green,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun MiniMatchRow(match: MatchInfo) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = if (match.homeTeam.isNotEmpty()) "${match.homeTeam} vs ${match.awayTeam}" else "Матч #${match.mId}",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-                color = BybitColors.TextPrimary,
-                maxLines = 1
-            )
-            Text(
-                text = "${match.homeScore} : ${match.awayScore}${if (match.matchTime > 0) " · ${match.matchTime}'" else ""}",
-                fontSize = 11.sp,
-                color = BybitColors.TextSecondary
-            )
-        }
-        
-        Surface(
-            shape = RoundedCornerShape(4.dp),
-            color = when {
-                match.isFinalized == 1 && match.status == 2 -> BybitColors.Green.copy(alpha = 0.15f)
-                match.isFinalized == 1 && match.status == 1 -> BybitColors.Red.copy(alpha = 0.15f)
-                else -> BybitColors.Yellow.copy(alpha = 0.15f)
-            }
-        ) {
-            Text(
-                text = typeName(match.betType),
-                fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = when {
-                    match.isFinalized == 1 && match.status == 2 -> BybitColors.Green
-                    match.isFinalized == 1 && match.status == 1 -> BybitColors.Red
-                    else -> BybitColors.Yellow
-                },
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-            )
-        }
-    }
-}
-
-// ==================== ЭКРАН ЭКСПРЕССОВ (полный) ====================
-
-@Composable
-fun ActiveExpressesFullScreen(
-    expresses: List<ExpressInfo>,
-    matchesByExpress: Map<Long, List<MatchInfo>>,
-    expandedExpressIds: Set<Long>,
-    onToggleExpand: (Long) -> Unit,
-    maxActiveExpresses: Int
-) {
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        item {
-            Text(
-                text = "🎯 Активные экспрессы",
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                color = BybitColors.TextPrimary,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-        }
-        
-        if (expresses.isEmpty()) {
-            item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Нет активных экспрессов",
-                        fontSize = 14.sp,
-                        color = BybitColors.TextTertiary
-                    )
-                }
-            }
-        } else {
-            items(expresses) { express ->
-                BybitExpressCard(
-                    express = express,
-                    matches = matchesByExpress[express.id] ?: emptyList(),
-                    isExpanded = expandedExpressIds.contains(express.id),
-                    onToggleExpand = { onToggleExpand(express.id) }
-                )
-            }
-        }
-    }
-}
-
-// ==================== СЕКЦИЯ ЛОГОВ ====================
-
-@Composable
-fun LogsSection(
-    logs: List<String>,
-    onClear: () -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = BybitColors.Surface)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "📋 Логи",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = BybitColors.TextPrimary
-                )
-                
-                IconButton(onClick = onClear, modifier = Modifier.size(28.dp)) {
-                    Icon(
-                        Icons.Default.Delete,
-                        "Очистить",
-                        tint = BybitColors.TextTertiary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-            }
-            
-            Spacer(modifier = Modifier.height(8.dp))
-            
-            if (logs.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(60.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Логи появятся здесь...",
-                        fontSize = 12.sp,
-                        color = BybitColors.TextTertiary
-                    )
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.heightIn(max = 200.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    items(logs.take(50)) { log ->
-                        val logColor = when {
-                            log.contains("❌") || log.contains("Ошибка") -> BybitColors.Red
-                            log.contains("✅") || log.contains("Профит") -> BybitColors.Green
-                            log.contains("⚠️") || log.contains("Лимит") -> BybitColors.Yellow
-                            log.contains("💰") -> BybitColors.Yellow
-                            else -> BybitColors.TextSecondary
-                        }
-                        
-                        Text(
-                            text = log,
-                            fontSize = 10.sp,
-                            color = logColor,
-                            fontFamily = FontFamily.Monospace,
-                            lineHeight = 14.sp
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ==================== ЭКРАН СТАТИСТИКИ ====================
-
-@Composable
-fun StatsContent(
-    dbHelper: DatabaseHelper,
-    authData: AuthData?,
-    onNavigateToHistory: () -> Unit
-) {
-    var stats by remember { mutableStateOf<BalanceStats?>(null) }
-    
-    LaunchedEffect(authData) {
-        authData?.let {
-            try {
-                val user = dbHelper.getUser(it.fsid, it.deviceId)
-                user?.let { userId ->
-                    stats = dbHelper.getBalanceStats(userId.id)
-                }
-            } catch (e: Exception) {}
-        }
-    }
-    
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        item {
-            Text(
-                text = "📊 Статистика",
-                fontSize = 20.sp,
+                text = "📊 Быстрая статистика",
+                fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
                 color = BybitColors.TextPrimary
             )
-        }
-        
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = BybitColors.Surface)
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Text(
-                        text = "За сегодня",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = BybitColors.TextPrimary
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    
-                    stats?.let {
-                        StatRow("Текущий баланс", String.format("%.2f ₽", it.currentBalance), BybitColors.TextPrimary)
-                        StatRow("Мин. за сегодня", String.format("%.2f ₽", it.todayMin), BybitColors.TextSecondary)
-                        StatRow("Макс. за сегодня", String.format("%.2f ₽", it.todayMax), BybitColors.TextSecondary)
-                        StatRow("Средний", String.format("%.2f ₽", it.todayAvg), BybitColors.TextSecondary)
-                        StatRow("Ошибок", it.todayErrors.toString(), if (it.todayErrors > 0) BybitColors.Red else BybitColors.Green)
-                    } ?: run {
-                        Text("Нет данных", color = BybitColors.TextTertiary)
-                    }
-                }
-            }
-        }
-        
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = BybitColors.Surface)
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Text(
-                        text = "База данных",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = BybitColors.TextPrimary
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    
-                    val tableStats = remember { dbHelper.getTableStats() }
-                    tableStats.forEach { (table, count) ->
-                        StatRow(table, "$count записей", BybitColors.TextSecondary)
-                    }
-                    
-                    Spacer(modifier = Modifier.height(8.dp))
-                    StatRow("Размер", dbHelper.getDatabaseSize(LocalContext.current), BybitColors.TextSecondary)
-                    
-                    Spacer(modifier = Modifier.height(12.dp))
-                    
-                    OutlinedButton(
-                        onClick = onNavigateToHistory,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = BybitColors.Yellow)
-                    ) {
-                        Text("📜 История логов")
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun StatRow(label: String, value: String, valueColor: Color = BybitColors.TextPrimary) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(text = label, fontSize = 13.sp, color = BybitColors.TextSecondary)
-        Text(text = value, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = valueColor)
-    }
-}
-
-// ==================== ЭКРАН ПРОФИЛЯ ====================
-
-// ==================== ЭКРАН ПРОФИЛЯ (ОБНОВЛЁННЫЙ) ====================
-
-@Composable
-fun ProfileContent(
-    authData: AuthData?,
-    dbHelper: DatabaseHelper,
-    onLogout: () -> Unit,
-    onNavigateToSettings: () -> Unit
-) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    
-    // Состояния для данных профиля
-    var isLoadingProfile by remember { mutableStateOf(false) }
-    var profileClientId by remember { mutableStateOf<Long?>(null) }
-    var profileUserName by remember { mutableStateOf<String?>(null) }
-    var profileSaldo by remember { mutableStateOf<Double?>(null) }
-    var profileError by remember { mutableStateOf<String?>(null) }
-    var lastProfileUpdate by remember { mutableStateOf<Long>(0) }
-    
-    // Загружаем сохранённые данные из локальной БД при старте
-    LaunchedEffect(authData) {
-        authData?.let {
-            try {
-                val user = dbHelper.getUser(it.fsid, it.deviceId)
-                user?.let { userData ->
-                    profileClientId = userData.clientId
-                    profileUserName = userData.username
-                    
-                    val stats = dbHelper.getBalanceStats(userData.id)
-                    if (stats.currentBalance > 0) {
-                        profileSaldo = stats.currentBalance
-                    }
-                    
-                    Log.d("ProfileContent", "📊 Загружено из БД: clientId=$profileClientId, userName=$profileUserName, saldo=$profileSaldo")
-                }
-            } catch (e: Exception) {
-                Log.e("ProfileContent", "Ошибка загрузки из БД: ${e.message}")
-            }
-        }
-    }
-    
-    // Функция загрузки данных из API
-    fun fetchProfileFromApi() {
-        if (authData == null) {
-            profileError = "Нет данных авторизации"
-            return
-        }
-        
-        isLoadingProfile = true
-        profileError = null
-        
-        val apiClient = ApiClient()
-        
-        // Получаем куки из WebView если есть
-        val cookieManager = CookieManager.getInstance()
-        val cookieString = cookieManager.getCookie("https://www.fon.bet") ?: ""
-        
-        val cookies = if (cookieString.isNotEmpty()) {
-            cookieString.split("; ").associate { cookie ->
-                val parts = cookie.split("=", limit = 2)
-                parts[0] to (parts.getOrNull(1) ?: "")
-            }
-        } else {
-            emptyMap()
-        }
-        
-        Log.d("ProfileContent", "🔄 Запрос session/info...")
-        
-        apiClient.getSaldo(
-            cookies = cookies,
-            fsid = authData.fsid,
-            deviceId = authData.deviceId,
-            onSuccess = { sessionInfo: ApiClient.SessionInfo? ->
-                isLoadingProfile = false
-                lastProfileUpdate = System.currentTimeMillis()
-                
-                if (sessionInfo != null) {
-                    Log.d("ProfileContent", "✅ session/info успешно получен")
-                    Log.d("ProfileContent", "  clientId: ${sessionInfo.clientId}")
-                    Log.d("ProfileContent", "  saldo: ${sessionInfo.saldo}")
-                    Log.d("ProfileContent", "  userName: ${sessionInfo.userName}")
-                    
-                    // Обновляем UI
-                    sessionInfo.saldo?.let { profileSaldo = it }
-                    sessionInfo.clientId?.let { profileClientId = it }
-                    sessionInfo.userName?.let { profileUserName = it }
-                    
-                    // Сохраняем в локальную БД
-                    scope.launch {
-                        try {
-                            val user = dbHelper.getUser(authData.fsid, authData.deviceId)
-                            if (user != null) {
-                                dbHelper.updateUserInfo(
-                                    userId = user.id,
-                                    clientId = sessionInfo.clientId,
-                                    username = sessionInfo.userName
-                                )
-                                sessionInfo.saldo?.let {
-                                    dbHelper.saveBalance(user.id, it)
-                                }
-                                Log.d("ProfileContent", "💾 Данные сохранены в БД")
-                            } else {
-                                // Создаём пользователя если не существует
-                                val userId = dbHelper.saveUser(
-                                    fsid = authData.fsid,
-                                    deviceId = authData.deviceId,
-                                    username = sessionInfo.userName
-                                )
-                                sessionInfo.saldo?.let {
-                                    dbHelper.saveBalance(userId, it)
-                                }
-                                Log.d("ProfileContent", "💾 Создан новый пользователь id=$userId")
-                            }
-                        } catch (e: Exception) {
-                            Log.e("ProfileContent", "Ошибка сохранения в БД: ${e.message}")
-                        }
-                    }
-                } else {
-                    profileError = "Пустой ответ от API"
-                }
-            },
-            onError = { error: String ->
-                isLoadingProfile = false
-                profileError = error
-                Log.e("ProfileContent", "❌ Ошибка API: $error")
-            }
-        )
-    }
-    
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        // Заголовок с кнопкой обновления
-        item {
+            
+            Spacer(modifier = Modifier.height(12.dp))
+            
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                horizontalArrangement = Arrangement.SpaceEvenly
             ) {
-                Text(
-                    text = "👤 Аккаунт",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = BybitColors.TextPrimary
-                )
-                
-                // Кнопка обновления из API
-                IconButton(
-                    onClick = { fetchProfileFromApi() },
-                    enabled = authData != null && !isLoadingProfile
-                ) {
-                    if (isLoadingProfile) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp,
-                            color = BybitColors.Yellow
-                        )
-                    } else {
-                        Icon(
-                            Icons.Default.Sync,
-                            "Обновить из API",
-                            tint = if (authData != null) BybitColors.Yellow else BybitColors.TextTertiary
-                        )
-                    }
-                }
+                StatItem("0", "Экспрессов")
+                StatItem("0", "Выигрышей")
+                StatItem("0%", "Win rate")
+                StatItem("0.00 ₽", "Прибыль")
             }
-        }
-        
-        // Карточка профиля
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = BybitColors.Surface)
-            ) {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    // Аватар с первой буквой имени
-                    Box(
-                        modifier = Modifier
-                            .size(80.dp)
-                            .clip(CircleShape)
-                            .background(
-                                Brush.linearGradient(
-                                    colors = listOf(BybitColors.Yellow, BybitColors.YellowLight)
-                                )
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = when {
-                                profileUserName != null && profileUserName!!.isNotEmpty() -> 
-                                    profileUserName!!.trim().split(" ").lastOrNull()?.take(1)?.uppercase() ?: "👤"
-                                else -> "👤"
-                            },
-                            fontSize = 36.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.Black
-                        )
-                    }
-                    
-                    Spacer(modifier = Modifier.height(12.dp))
-                    
-                    // Полное имя
-                    if (profileUserName != null && profileUserName!!.isNotEmpty()) {
-                        Text(
-                            text = profileUserName!!,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = BybitColors.TextPrimary,
-                            textAlign = TextAlign.Center
-                        )
-                    } else {
-                        Text(
-                            text = "Загрузка...",
-                            fontSize = 18.sp,
-                            color = BybitColors.TextTertiary
-                        )
-                    }
-                    
-                    Spacer(modifier = Modifier.height(12.dp))
-                    
-                    // Client ID
-                    if (profileClientId != null) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = BybitColors.SurfaceLight
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    Icons.Default.Tag,
-                                    null,
-                                    tint = BybitColors.Yellow,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Column {
-                                    Text(
-                                        text = "Client ID",
-                                        fontSize = 10.sp,
-                                        color = BybitColors.TextTertiary
-                                    )
-                                    Text(
-                                        text = "$profileClientId",
-                                        fontSize = 16.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = BybitColors.TextPrimary,
-                                        fontFamily = FontFamily.Monospace
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    
-                    // Баланс
-                    if (profileSaldo != null) {
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = BybitColors.SurfaceLight
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Text(
-                                    text = "Общие активы",
-                                    fontSize = 12.sp,
-                                    color = BybitColors.TextTertiary
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = String.format("%.0f ₽", profileSaldo),
-                                    fontSize = 28.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = BybitColors.TextPrimary
-                                )
-                            }
-                        }
-                    }
-                    
-                    // Время обновления
-                    if (lastProfileUpdate > 0) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Обновлено: ${SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(lastProfileUpdate))}",
-                            fontSize = 10.sp,
-                            color = BybitColors.TextTertiary
-                        )
-                    }
-                    
-                    // Ошибка
-                    if (profileError != null) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = BybitColors.Red.copy(alpha = 0.1f)
-                        ) {
-                            Text(
-                                text = "❌ $profileError",
-                                fontSize = 12.sp,
-                                color = BybitColors.Red,
-                                modifier = Modifier.padding(12.dp)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Данные авторизации
-        if (authData != null) {
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = BybitColors.Surface)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "🔐 Ключи авторизации",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = BybitColors.TextPrimary
-                            )
-                            
-                            // Кнопка копирования
-                            IconButton(
-                                onClick = {
-                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    val data = buildString {
-                                        appendLine("FSID: ${authData.fsid}")
-                                        appendLine("DeviceID: ${authData.deviceId}")
-                                        profileClientId?.let { appendLine("ClientID: $it") }
-                                    }
-                                    val clip = ClipData.newPlainText("Auth Data", data)
-                                    clipboard.setPrimaryClip(clip)
-                                    Toast.makeText(context, "Скопировано ✅", Toast.LENGTH_SHORT).show()
-                                },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.ContentCopy,
-                                    "Копировать всё",
-                                    tint = BybitColors.Yellow,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
-                        
-                        Spacer(modifier = Modifier.height(12.dp))
-                        
-                        // FSID
-                        ProfileInfoCard(
-                            label = "FSID",
-                            value = authData.fsid,
-                            isMonospace = true
-                        )
-                        
-                        Spacer(modifier = Modifier.height(8.dp))
-                        
-                        // Device ID
-                        ProfileInfoCard(
-                            label = "Device ID",
-                            value = authData.deviceId,
-                            isMonospace = true
-                        )
-                    }
-                }
-            }
-        }
-        
-        // Кнопки действий
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = { fetchProfileFromApi() },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = authData != null && !isLoadingProfile,
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = BybitColors.Yellow)
-                ) {
-                    if (isLoadingProfile) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp,
-                            color = Color.Black
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Загрузка...", color = Color.Black)
-                    } else {
-                        Icon(Icons.Default.Refresh, null, modifier = Modifier.size(18.dp), tint = Color.Black)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("🔄 Обновить данные", color = Color.Black, fontWeight = FontWeight.Bold)
-                    }
-                }
-                
-                OutlinedButton(
-                    onClick = onNavigateToSettings,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = BybitColors.TextSecondary)
-                ) {
-                    Icon(Icons.Default.Settings, null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("⚙️ Настройки")
-                }
-                
-                Button(
-                    onClick = onLogout,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = BybitColors.Red),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(Icons.Default.Logout, null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("🚪 Выйти")
-                }
-            }
-        }
-        
-        // Отступ снизу
-        item {
-            Spacer(modifier = Modifier.height(32.dp))
         }
     }
 }
 
 @Composable
-fun ProfileInfoCard(
-    label: String,
-    value: String,
-    isMonospace: Boolean = false
-) {
-    Surface(
-        shape = RoundedCornerShape(8.dp),
-        color = BybitColors.SurfaceLight
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(
-                text = label,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium,
-                color = BybitColors.TextTertiary
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = value,
-                fontSize = 12.sp,
-                color = BybitColors.TextSecondary,
-                fontFamily = if (isMonospace) FontFamily.Monospace else FontFamily.Default,
-                maxLines = 3
-            )
-        }
-    }
-}
-// 
-// ==================== ЭКРАН НАСТРОЕК (ПОЛНЫЙ) ====================
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun BybitSettingsScreen(
-    onBack: () -> Unit,
-    onSave: () -> Unit,
-    dbHelper: DatabaseHelper
-) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val prefs = remember { context.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE) }
-    
-    // Основные настройки
-    var maxMatchesPerExpress by remember { mutableStateOf(prefs.getInt("max_matches_per_express", 2).toString()) }
-    var multiply by remember { mutableStateOf(prefs.getInt("multiply", 2).toString()) }
-    var allMinKef by remember { mutableStateOf(prefs.getFloat("all_min_kef", 1.67f).toDouble().toString()) }
-    var maxActiveExpresses by remember { mutableStateOf(prefs.getInt("max_active_expresses", 5).toString()) }
-    
-    // Тип 924
-    var type924Min by remember { mutableStateOf(prefs.getFloat("type_924_min", 1.15f).toString()) }
-    var type924Max by remember { mutableStateOf(prefs.getFloat("type_924_max", 1.35f).toString()) }
-    var type924Start by remember { mutableStateOf(prefs.getInt("type_924_start", 80).toString()) }
-    var type924End by remember { mutableStateOf(prefs.getInt("type_924_end", 100).toString()) }
-    var expandedType924 by remember { mutableStateOf(false) }
-    
-    // Тип 927
-    var type927Min by remember { mutableStateOf(prefs.getFloat("type_927_min", 1.15f).toString()) }
-    var type927Max by remember { mutableStateOf(prefs.getFloat("type_927_max", 1.35f).toString()) }
-    var type927Start by remember { mutableStateOf(prefs.getInt("type_927_start", 1).toString()) }
-    var type927End by remember { mutableStateOf(prefs.getInt("type_927_end", 45).toString()) }
-    var expandedType927 by remember { mutableStateOf(false) }
-    
-    // Тип 928
-    var type928Min by remember { mutableStateOf(prefs.getFloat("type_928_min", 1.15f).toString()) }
-    var type928Max by remember { mutableStateOf(prefs.getFloat("type_928_max", 1.35f).toString()) }
-    var type928Start by remember { mutableStateOf(prefs.getInt("type_928_start", 1).toString()) }
-    var type928End by remember { mutableStateOf(prefs.getInt("type_928_end", 45).toString()) }
-    var expandedType928 by remember { mutableStateOf(false) }
-    
-    // Общие настройки
-    var checkInterval by remember { mutableStateOf(prefs.getString("check_interval", "60") ?: "60") }
-    var betAmount by remember { mutableStateOf(prefs.getString("bet_amount", "30") ?: "30") }
-    var testMode by remember { mutableStateOf(prefs.getBoolean("test_mode", true)) }
-    var testBalance by remember { mutableStateOf(prefs.getString("test_balance", "1000") ?: "1000") }
-    var showClearDialog by remember { mutableStateOf(false) }
-    var isClearing by remember { mutableStateOf(false) }
-    
-    Scaffold(
-        containerColor = BybitColors.Background,
-        topBar = {
-            TopAppBar(
-                title = { Text("⚙️ Настройки", color = BybitColors.TextPrimary) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, "Назад", tint = BybitColors.TextPrimary)
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = BybitColors.Surface)
-            )
-        }
-    ) { paddingValues ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            // ==================== ОСНОВНЫЕ НАСТРОЙКИ ====================
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = BybitColors.Surface)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text("🎯 Основные", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = BybitColors.TextPrimary)
-                        Spacer(modifier = Modifier.height(12.dp))
-                        
-                        OutlinedTextField(
-                            value = maxMatchesPerExpress,
-                            onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) maxMatchesPerExpress = it },
-                            label = { Text("Матчей в экспрессе") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            colors = bybitTextFieldColors()
-                        )
-                        
-                        Spacer(modifier = Modifier.height(8.dp))
-                        
-                        OutlinedTextField(
-                            value = maxActiveExpresses,
-                            onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) maxActiveExpresses = it },
-                            label = { Text("Макс. одновременных экспрессов") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            colors = bybitTextFieldColors()
-                        )
-                        
-                        // Быстрый выбор лимита
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            listOf(3, 5, 7, 10).forEach { value ->
-                                FilterChip(
-                                    selected = maxActiveExpresses == value.toString(),
-                                    onClick = { maxActiveExpresses = value.toString() },
-                                    label = { Text(value.toString(), fontSize = 12.sp) },
-                                    modifier = Modifier.weight(1f),
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = BybitColors.Yellow.copy(alpha = 0.2f),
-                                        selectedLabelColor = BybitColors.Yellow
-                                    )
-                                )
-                            }
-                        }
-                        
-                        Spacer(modifier = Modifier.height(8.dp))
-                        
-                        OutlinedTextField(
-                            value = allMinKef,
-                            onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) allMinKef = it },
-                            label = { Text("Мин. коэффициент (ALL_MIN_KEF)") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            colors = bybitTextFieldColors()
-                        )
-                        
-                        Spacer(modifier = Modifier.height(8.dp))
-                        
-                        OutlinedTextField(
-                            value = multiply,
-                            onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) multiply = it },
-                            label = { Text("Множитель ставки (MULTIPLY)") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            colors = bybitTextFieldColors()
-                        )
-                    }
-                }
-            }
-            
-            // ==================== ТИП 924 ====================
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = BybitColors.Surface
-                    )
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { expandedType924 = !expandedType924 },
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column {
-                                Text(
-                                    "924: 1х/футбол/хоккей",
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = BybitColors.TextPrimary
-                                )
-                                if (!expandedType924) {
-                                    Text(
-                                        "Кэф: $type924Min - $type924Max | ${type924Start}' - ${type924End}'",
-                                        fontSize = 11.sp,
-                                        color = BybitColors.TextTertiary
-                                    )
-                                }
-                            }
-                            Icon(
-                                if (expandedType924) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                null,
-                                tint = BybitColors.TextSecondary
-                            )
-                        }
-                        
-                        if (expandedType924) {
-                            Spacer(modifier = Modifier.height(12.dp))
-                            
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                OutlinedTextField(
-                                    value = type924Min,
-                                    onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type924Min = it },
-                                    label = { Text("Мин. кэф", fontSize = 11.sp) },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                    colors = bybitTextFieldColors()
-                                )
-                                
-                                OutlinedTextField(
-                                    value = type924Max,
-                                    onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type924Max = it },
-                                    label = { Text("Макс. кэф", fontSize = 11.sp) },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                    colors = bybitTextFieldColors()
-                                )
-                            }
-                            
-                            Spacer(modifier = Modifier.height(8.dp))
-                            
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                OutlinedTextField(
-                                    value = type924Start,
-                                    onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type924Start = it },
-                                    label = { Text("Мониторинг с (мин)", fontSize = 11.sp) },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    colors = bybitTextFieldColors()
-                                )
-                                
-                                OutlinedTextField(
-                                    value = type924End,
-                                    onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type924End = it },
-                                    label = { Text("Мониторинг до (мин)", fontSize = 11.sp) },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    colors = bybitTextFieldColors()
-                                )
-                            }
-                            
-                            // Визуализация диапазона
-                            Spacer(modifier = Modifier.height(8.dp))
-                            val start = type924Start.toIntOrNull() ?: 80
-                            val end = type924End.toIntOrNull() ?: 100
-                            val progress = (start.toFloat() / 130f).coerceIn(0f, 1f)
-                            val progressEnd = (end.toFloat() / 130f).coerceIn(0f, 1f)
-                            
-                            Column {
-                                Text(
-                                    "Диапазон: ${start}' - ${end}' (матч 130')",
-                                    fontSize = 11.sp,
-                                    color = BybitColors.TextTertiary
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(6.dp)
-                                        .clip(RoundedCornerShape(3.dp))
-                                        .background(BybitColors.SurfaceLight)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxHeight()
-                                            .fillMaxWidth(fraction = progressEnd)
-                                            .clip(RoundedCornerShape(3.dp))
-                                            .background(BybitColors.Yellow.copy(alpha = 0.3f))
-                                    )
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxHeight()
-                                            .fillMaxWidth(fraction = progress)
-                                            .clip(RoundedCornerShape(3.dp))
-                                            .background(BybitColors.Yellow)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text("0'", fontSize = 9.sp, color = BybitColors.TextTertiary)
-                                    Text("65'", fontSize = 9.sp, color = BybitColors.TextTertiary)
-                                    Text("130'", fontSize = 9.sp, color = BybitColors.TextTertiary)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            
-            // ==================== ТИП 927 ====================
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = BybitColors.Surface)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { expandedType927 = !expandedType927 },
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column {
-                                Text(
-                                    "927: ф1(+1.5)/футбол/хоккей",
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = BybitColors.TextPrimary
-                                )
-                                if (!expandedType927) {
-                                    Text(
-                                        "Кэф: $type927Min - $type927Max | ${type927Start}' - ${type927End}'",
-                                        fontSize = 11.sp,
-                                        color = BybitColors.TextTertiary
-                                    )
-                                }
-                            }
-                            Icon(
-                                if (expandedType927) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                null,
-                                tint = BybitColors.TextSecondary
-                            )
-                        }
-                        
-                        if (expandedType927) {
-                            Spacer(modifier = Modifier.height(12.dp))
-                            
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                OutlinedTextField(
-                                    value = type927Min,
-                                    onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type927Min = it },
-                                    label = { Text("Мин. кэф", fontSize = 11.sp) },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                    colors = bybitTextFieldColors()
-                                )
-                                
-                                OutlinedTextField(
-                                    value = type927Max,
-                                    onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type927Max = it },
-                                    label = { Text("Макс. кэф", fontSize = 11.sp) },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                    colors = bybitTextFieldColors()
-                                )
-                            }
-                            
-                            Spacer(modifier = Modifier.height(8.dp))
-                            
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                OutlinedTextField(
-                                    value = type927Start,
-                                    onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type927Start = it },
-                                    label = { Text("Мониторинг с (мин)", fontSize = 11.sp) },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    colors = bybitTextFieldColors()
-                                )
-                                
-                                OutlinedTextField(
-                                    value = type927End,
-                                    onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type927End = it },
-                                    label = { Text("Мониторинг до (мин)", fontSize = 11.sp) },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    colors = bybitTextFieldColors()
-                                )
-                            }
-                            
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                "🎯 Фора 1 (+1.5): команда 1 не проиграет с разницей более 1 мяча",
-                                fontSize = 11.sp,
-                                color = BybitColors.TextTertiary
-                            )
-                        }
-                    }
-                }
-            }
-            
-            // ==================== ТИП 928 ====================
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = BybitColors.Surface)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { expandedType928 = !expandedType928 },
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column {
-                                Text(
-                                    "928: ф2(+1.5)/футбол/хоккей",
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = BybitColors.TextPrimary
-                                )
-                                if (!expandedType928) {
-                                    Text(
-                                        "Кэф: $type928Min - $type928Max | ${type928Start}' - ${type928End}'",
-                                        fontSize = 11.sp,
-                                        color = BybitColors.TextTertiary
-                                    )
-                                }
-                            }
-                            Icon(
-                                if (expandedType928) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                null,
-                                tint = BybitColors.TextSecondary
-                            )
-                        }
-                        
-                        if (expandedType928) {
-                            Spacer(modifier = Modifier.height(12.dp))
-                            
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                OutlinedTextField(
-                                    value = type928Min,
-                                    onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type928Min = it },
-                                    label = { Text("Мин. кэф", fontSize = 11.sp) },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                    colors = bybitTextFieldColors()
-                                )
-                                
-                                OutlinedTextField(
-                                    value = type928Max,
-                                    onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) type928Max = it },
-                                    label = { Text("Макс. кэф", fontSize = 11.sp) },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                    colors = bybitTextFieldColors()
-                                )
-                            }
-                            
-                            Spacer(modifier = Modifier.height(8.dp))
-                            
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                OutlinedTextField(
-                                    value = type928Start,
-                                    onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type928Start = it },
-                                    label = { Text("Мониторинг с (мин)", fontSize = 11.sp) },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    colors = bybitTextFieldColors()
-                                )
-                                
-                                OutlinedTextField(
-                                    value = type928End,
-                                    onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) type928End = it },
-                                    label = { Text("Мониторинг до (мин)", fontSize = 11.sp) },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    colors = bybitTextFieldColors()
-                                )
-                            }
-                            
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                "🎯 Фора 2 (+1.5): команда 2 не проиграет с разницей более 1 мяча",
-                                fontSize = 11.sp,
-                                color = BybitColors.TextTertiary
-                            )
-                        }
-                    }
-                }
-            }
-            
-            // ==================== ОБЩИЕ НАСТРОЙКИ ====================
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = BybitColors.Surface)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text("🔧 Общие", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = BybitColors.TextPrimary)
-                        Spacer(modifier = Modifier.height(12.dp))
-                        
-                        OutlinedTextField(
-                            value = betAmount,
-                            onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) betAmount = it },
-                            label = { Text("Сумма ставки (₽)") },
-                            leadingIcon = { Icon(Icons.Default.AttachMoney, null, tint = BybitColors.Yellow) },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            colors = bybitTextFieldColors()
-                        )
-                        
-                        Spacer(modifier = Modifier.height(8.dp))
-                        
-                        OutlinedTextField(
-                            value = checkInterval,
-                            onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) checkInterval = it },
-                            label = { Text("Интервал проверки (сек)") },
-                            leadingIcon = { Icon(Icons.Default.Timer, null, tint = BybitColors.TextSecondary) },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            colors = bybitTextFieldColors()
-                        )
-                    }
-                }
-            }
-            
-            // ==================== ТЕСТОВЫЙ РЕЖИМ ====================
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (testMode) BybitColors.Surface else BybitColors.Red.copy(alpha = 0.1f)
-                    )
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column {
-                                Text(
-                                    "🧪 Тестовый режим",
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = BybitColors.TextPrimary
-                                )
-                                Text(
-                                    if (testMode) "Ставки виртуальные" else "⚠️ Реальные ставки!",
-                                    fontSize = 11.sp,
-                                    color = if (testMode) BybitColors.Green else BybitColors.Red
-                                )
-                            }
-                            Switch(
-                                checked = testMode,
-                                onCheckedChange = { testMode = it },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = BybitColors.Yellow,
-                                    checkedTrackColor = BybitColors.Yellow.copy(alpha = 0.3f)
-                                )
-                            )
-                        }
-                        
-                        if (testMode) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            OutlinedTextField(
-                                value = testBalance,
-                                onValueChange = { if (it.all { c -> c.isDigit() } || it.isEmpty()) testBalance = it },
-                                label = { Text("Виртуальный баланс (₽)") },
-                                leadingIcon = { Icon(Icons.Default.AccountBalanceWallet, null, tint = BybitColors.Yellow) },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                colors = bybitTextFieldColors()
-                            )
-                        }
-                    }
-                }
-            }
-            
-            // ==================== КНОПКИ СОХРАНЕНИЯ ====================
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = onBack,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = BybitColors.TextSecondary),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text("Отмена")
-                    }
-                    
-                    Button(
-                        onClick = {
-                            prefs.edit()
-                                .putInt("max_matches_per_express", maxMatchesPerExpress.toIntOrNull() ?: 2)
-                                .putInt("multiply", multiply.toIntOrNull() ?: 2)
-                                .putFloat("all_min_kef", allMinKef.toFloatOrNull() ?: 1.67f)
-                                .putInt("max_active_expresses", maxActiveExpresses.toIntOrNull() ?: 5)
-                                // Тип 924
-                                .putFloat("type_924_min", type924Min.toFloatOrNull() ?: 1.15f)
-                                .putFloat("type_924_max", type924Max.toFloatOrNull() ?: 1.35f)
-                                .putInt("type_924_start", type924Start.toIntOrNull() ?: 80)
-                                .putInt("type_924_end", type924End.toIntOrNull() ?: 100)
-                                // Тип 927
-                                .putFloat("type_927_min", type927Min.toFloatOrNull() ?: 1.15f)
-                                .putFloat("type_927_max", type927Max.toFloatOrNull() ?: 1.35f)
-                                .putInt("type_927_start", type927Start.toIntOrNull() ?: 1)
-                                .putInt("type_927_end", type927End.toIntOrNull() ?: 45)
-                                // Тип 928
-                                .putFloat("type_928_min", type928Min.toFloatOrNull() ?: 1.15f)
-                                .putFloat("type_928_max", type928Max.toFloatOrNull() ?: 1.35f)
-                                .putInt("type_928_start", type928Start.toIntOrNull() ?: 1)
-                                .putInt("type_928_end", type928End.toIntOrNull() ?: 45)
-                                // Общие
-                                .putString("check_interval", checkInterval)
-                                .putString("bet_amount", betAmount)
-                                .putBoolean("test_mode", testMode)
-                                .putString("test_balance", testBalance)
-                                .apply()
-                            
-                            Toast.makeText(context, "✅ Настройки сохранены", Toast.LENGTH_SHORT).show()
-                            onSave()
-                        },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = BybitColors.Yellow),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text("💾 Сохранить", color = Color.Black, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-            
-            // ==================== ОЧИСТКА ДАННЫХ ====================
-            item {
-                Button(
-                    onClick = { showClearDialog = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = BybitColors.Red.copy(alpha = 0.8f)),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(Icons.Default.DeleteForever, null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("🗑 Очистить все данные")
-                }
-            }
-            
-            // Отступ снизу
-            item {
-                Spacer(modifier = Modifier.height(32.dp))
-            }
-        }
-        
-        // Диалог очистки
-        if (showClearDialog) {
-            AlertDialog(
-                onDismissRequest = { showClearDialog = false },
-                containerColor = BybitColors.Surface,
-                titleContentColor = BybitColors.TextPrimary,
-                textContentColor = BybitColors.TextSecondary,
-                title = { Text("⚠️ Очистка данных") },
-                text = { 
-                    Text("Удалить ВСЕ данные?\n\nБудут удалены:\n• Данные авторизации\n• История баланса\n• Логи\n• Экспрессы\n\nЭто действие нельзя отменить!")
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            showClearDialog = false
-                            isClearing = true
-                            scope.launch {
-                                val success = dbHelper.clearAllData(context)
-                                isClearing = false
-                                
-                                if (success) {
-                                    context.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
-                                        .edit().clear().apply()
-                                    context.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE)
-                                        .edit().clear().apply()
-                                    Toast.makeText(context, "Данные удалены", Toast.LENGTH_SHORT).show()
-                                    onBack()
-                                } else {
-                                    Toast.makeText(context, "Ошибка", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = BybitColors.Red)
-                    ) {
-                        if (isClearing) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp,
-                                color = Color.White
-                            )
-                        } else {
-                            Text("Удалить всё")
-                        }
-                    }
-                },
-                dismissButton = {
-                    TextButton(
-                        onClick = { showClearDialog = false },
-                        enabled = !isClearing
-                    ) {
-                        Text("Отмена", color = BybitColors.TextSecondary)
-                    }
-                }
-            )
-        }
+fun StatItem(value: String, label: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            text = value,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+            color = BybitColors.TextPrimary
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = label,
+            fontSize = 11.sp,
+            color = BybitColors.TextTertiary
+        )
     }
 }
 
 @Composable
-fun bybitTextFieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedBorderColor = BybitColors.Yellow,
-    unfocusedBorderColor = BybitColors.Divider,
-    focusedLabelColor = BybitColors.Yellow,
-    unfocusedLabelColor = BybitColors.TextTertiary,
-    cursorColor = BybitColors.Yellow,
-    focusedTextColor = BybitColors.TextPrimary,
-    unfocusedTextColor = BybitColors.TextPrimary
-)
-            
-  // РАЗМЕСТИТЕ ЭТУ ФУНКЦИЮ ПОСЛЕ ВСЕХ @Composable ФУНКЦИЙ, НО ДО ВСПОМОГАТЕЛЬНЫХ
-
-@Composable
-fun BybitBottomNavigation(
-    selectedItem: BottomNavItem,
-    onItemSelected: (BottomNavItem) -> Unit,
-    isBotRunning: Boolean,
-    onStartStopBot: () -> Unit,
-    activeExpressesCount: Int = 0,
-    maxActiveExpresses: Int = 5
-) {
+fun BottomNavigationBar(onNavigate: (Screen) -> Unit) {
     Surface(
         color = BybitColors.Surface,
         shadowElevation = 8.dp
@@ -2990,81 +389,35 @@ fun BybitBottomNavigation(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            BottomNavItem.entries.forEach { item ->
-                val isSelected = selectedItem == item
-                
-                Column(
-                    modifier = Modifier
-                        .weight(1f, fill = true)
-                        .clickable { onItemSelected(item) }
-                        .padding(vertical = 4.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Box(modifier = Modifier.size(24.dp), contentAlignment = Alignment.Center) {
-                        when (item) {
-                            BottomNavItem.HOME -> Icon(
-                                Icons.Default.Home, null,
-                                tint = if (isSelected) BybitColors.Yellow else BybitColors.TextTertiary,
-                                modifier = Modifier.size(22.dp)
-                            )
-                            BottomNavItem.BETS -> {
-                                Icon(
-                                    Icons.Default.ListAlt, null,
-                                    tint = if (isSelected) BybitColors.Yellow else BybitColors.TextTertiary,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                                
-                                if (activeExpressesCount > 0) {
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.TopEnd)
-                                            .offset(x = 6.dp, y = (-4).dp)
-                                            .size(18.dp)
-                                            .clip(CircleShape)
-                                            .background(
-                                                if (activeExpressesCount >= maxActiveExpresses) BybitColors.Red 
-                                                else BybitColors.Yellow
-                                            ),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = if (activeExpressesCount > 99) "99+" else "$activeExpressesCount",
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (activeExpressesCount >= maxActiveExpresses) Color.White else Color.Black
-                                        )
-                                    }
-                                }
-                            }
-                            BottomNavItem.STATS -> Icon(
-                                Icons.Default.BarChart, null,
-                                tint = if (isSelected) BybitColors.Yellow else BybitColors.TextTertiary,
-                                modifier = Modifier.size(22.dp)
-                            )
-                            BottomNavItem.PROFILE -> Icon(
-                                Icons.Default.Person, null,
-                                tint = if (isSelected) BybitColors.Yellow else BybitColors.TextTertiary,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                    }
-                    
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = item.label,
-                        fontSize = 11.sp,
-                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                        color = if (isSelected) BybitColors.Yellow else BybitColors.TextTertiary
-                    )
-                }
-            }
+            NavBarItem(
+                icon = Icons.Default.Home,
+                label = "Главная",
+                onClick = { onNavigate(Screen.MAIN) }
+            )
+            
+            NavBarItem(
+                icon = Icons.Default.ListAlt,
+                label = "Экспрессы",
+                onClick = { onNavigate(Screen.BETS) }
+            )
+            
+            NavBarItem(
+                icon = Icons.Default.BarChart,
+                label = "Статистика",
+                onClick = { onNavigate(Screen.STATS) }
+            )
+            
+            NavBarItem(
+                icon = Icons.Default.Person,
+                label = "Профиль",
+                onClick = { onNavigate(Screen.PROFILE) }
+            )
             
             // Кнопка Старт/Стоп
             Column(
                 modifier = Modifier
                     .weight(1.2f, fill = true)
-                    .clickable { onStartStopBot() }
+                    .clickable { /* Заглушка: старт/стоп бота */ }
                     .padding(vertical = 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
@@ -3073,33 +426,145 @@ fun BybitBottomNavigation(
                     modifier = Modifier
                         .size(40.dp)
                         .clip(CircleShape)
-                        .background(if (isBotRunning) BybitColors.Red else BybitColors.Green),
+                        .background(BybitColors.Green),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        if (isBotRunning) Icons.Default.Stop else Icons.Default.PlayArrow, null,
-                        tint = Color.White, modifier = Modifier.size(22.dp)
+                        Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp)
                     )
                 }
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = if (isBotRunning) "Стоп" else "Старт",
-                    fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                    text = "Старт",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
                     color = BybitColors.TextSecondary
                 )
             }
         }
     }
 }
-// ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 
-private fun getCurrentTime(): String {
-    return SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+@Composable
+fun NavBarItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .weight(1f, fill = true)
+            .clickable { onClick() }
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            icon,
+            contentDescription = label,
+            tint = BybitColors.TextTertiary,
+            modifier = Modifier.size(24.dp)
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = label,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Normal,
+            color = BybitColors.TextTertiary
+        )
+    }
 }
 
-fun typeName(type: Int): String = when (type) {
-    924 -> "1X"
-    927 -> "Ф1(+1.5)"
-    928 -> "Ф2(+1.5)"
-    else -> "Тип $type"
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun PlaceholderScreen(
+    title: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    description: String,
+    onBack: () -> Unit
+) {
+    Scaffold(
+        containerColor = BybitColors.Background,
+        topBar = {
+            TopAppBar(
+                title = { Text(title, color = BybitColors.TextPrimary) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.Default.ArrowBack,
+                            contentDescription = "Назад",
+                            tint = BybitColors.TextPrimary
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = BybitColors.Surface
+                )
+            )
+        }
+    ) { paddingValues ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    tint = BybitColors.TextTertiary,
+                    modifier = Modifier.size(64.dp)
+                )
+                
+                Spacer(modifier = Modifier.height(24.dp))
+                
+                Text(
+                    text = title,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = BybitColors.TextPrimary
+                )
+                
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                Text(
+                    text = description,
+                    fontSize = 14.sp,
+                    color = BybitColors.TextSecondary,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 32.dp)
+                )
+                
+                Spacer(modifier = Modifier.height(32.dp))
+                
+                Button(
+                    onClick = onBack,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = BybitColors.Yellow
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(
+                        Icons.Default.ArrowBack,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = Color.Black
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        "Назад",
+                        color = Color.Black,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+    }
 }
