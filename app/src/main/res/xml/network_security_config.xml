@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Разрешаем открытый HTTP для сервера -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">95.183.11.203</domain>
+    </domain-config>
+    
+    <!-- Для всех остальных - только HTTPS -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
