@@ -1,3 +1,4 @@
+<!-- activity_analytics.xml — обновлённый -->
 <?xml version="1.0" encoding="utf-8"?>
 <androidx.constraintlayout.widget.ConstraintLayout 
     xmlns:android="http://schemas.android.com/apk/res/android"
@@ -5,7 +6,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#FFFFFF"
+    android:background="#0B0E11"
     tools:context=".AnalyticsActivity">
 
     <TextView
@@ -13,24 +14,36 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="Аналитика"
-        android:textSize="28sp"
+        android:textSize="24sp"
         android:textStyle="bold"
-        android:textColor="#FF5722"
-        android:layout_marginTop="32dp"
+        android:textColor="#F0B90B"
+        android:layout_marginTop="40dp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
+
+    <TextView
+        android:id="@+id/tv_subtitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Импорт и управление данными"
+        android:textSize="12sp"
+        android:textColor="#848E9C"
+        android:layout_marginTop="6dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/tv_analytics_title" />
 
     <LinearLayout
         android:id="@+id/buttons_layout"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginTop="24dp"
-        android:layout_marginHorizontal="16dp"
+        android:layout_marginTop="28dp"
+        android:layout_marginHorizontal="20dp"
         android:orientation="vertical"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/tv_analytics_title">
+        app:layout_constraintTop_toBottomOf="@+id/tv_subtitle">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -40,50 +53,61 @@
             <Button
                 android:id="@+id/btn_import_exp"
                 android:layout_width="0dp"
-                android:layout_height="50dp"
+                android:layout_height="48dp"
                 android:layout_weight="1"
                 android:layout_marginEnd="8dp"
                 android:text="Импорт Exp"
-                android:textSize="14sp"
-                android:backgroundTint="#2196F3" />
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="#0B0E11"
+                android:backgroundTint="#F0B90B"
+                android:stateListAnimator="@null" />
 
             <Button
                 android:id="@+id/btn_import_data"
                 android:layout_width="0dp"
-                android:layout_height="50dp"
+                android:layout_height="48dp"
                 android:layout_weight="1"
                 android:layout_marginStart="8dp"
                 android:text="Импорт Data"
-                android:textSize="14sp"
-                android:backgroundTint="#4CAF50" />
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="#EAECEF"
+                android:backgroundTint="#2B3139"
+                android:stateListAnimator="@null" />
         </LinearLayout>
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:layout_marginTop="12dp">
+            android:layout_marginTop="10dp">
 
             <Button
                 android:id="@+id/btn_dashboard"
                 android:layout_width="0dp"
-                android:layout_height="50dp"
+                android:layout_height="48dp"
                 android:layout_weight="1"
                 android:layout_marginEnd="8dp"
                 android:text="Дашборд"
-                android:textSize="14sp"
+                android:textSize="13sp"
                 android:textStyle="bold"
-                android:backgroundTint="#FF5722" />
+                android:textColor="#0B0E11"
+                android:backgroundTint="#03A66D"
+                android:stateListAnimator="@null" />
 
             <Button
                 android:id="@+id/btn_clear_data"
                 android:layout_width="0dp"
-                android:layout_height="50dp"
+                android:layout_height="48dp"
                 android:layout_weight="1"
                 android:layout_marginStart="8dp"
                 android:text="Очистить БД"
-                android:textSize="14sp"
-                android:backgroundTint="#F44336" />
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="#EAECEF"
+                android:backgroundTint="#CF304A"
+                android:stateListAnimator="@null" />
         </LinearLayout>
     </LinearLayout>
 
@@ -94,6 +118,7 @@
         android:layout_marginBottom="24dp"
         android:layout_marginStart="16dp"
         android:layout_marginEnd="16dp"
+        android:scrollbars="none"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
@@ -104,11 +129,11 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Данные не загружены"
-            android:textSize="14sp"
+            android:textSize="12sp"
             android:lineSpacingExtra="4dp"
             android:padding="16dp"
-            android:background="#F8F9FA"
-            android:textColor="#333333"
+            android:background="#1E2329"
+            android:textColor="#848E9C"
             android:fontFamily="monospace" />
 
     </ScrollView>
