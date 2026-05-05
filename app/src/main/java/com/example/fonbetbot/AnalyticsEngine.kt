@@ -6,7 +6,7 @@ import kotlinx.coroutines.withContext
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.time.DayOfWeek
-import java.util.Locale
+import java.util.*
 
 data class MatchResult(
     val matchId: Long,
@@ -58,9 +58,9 @@ class AnalyticsEngine(private val database: AppDatabase) {
                 
                 val matchResults = matches.map { match ->
                     val isWin = when (match.type) {
-                        924 -> match.sh >= match.sa  // Тотал или победа
+                        924 -> match.sh >= match.sa  // Победа/тотал
                         927 -> match.sh + 1 > match.sa  // Фора 1 (+1.5)
-                        else -> false
+                        else -> match.sh >= match.sa  // По умолчанию
                     }
                     
                     MatchResult(
@@ -100,10 +100,16 @@ class AnalyticsEngine(private val database: AppDatabase) {
             LocalDateTime.parse(ct, formatter)
         } catch (e: Exception) {
             try {
-                val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+                // Пробуем с миллисекундами
+                val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
                 LocalDateTime.parse(ct, formatter)
             } catch (e2: Exception) {
-                LocalDateTime.now()
+                try {
+                    val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+                    LocalDateTime.parse(ct, formatter)
+                } catch (e3: Exception) {
+                    LocalDateTime.now()
+                }
             }
         }
     }
@@ -127,7 +133,7 @@ class AnalyticsEngine(private val database: AppDatabase) {
                 appendLine("Всего экспрессов: $totalExpress")
                 appendLine("Выигрышных: $winExpress")
                 appendLine("Проигрышных: $loseExpress")
-                appendLine("Процент проходимости: ${String.format("%.1f", winRate)}%")
+                appendLine("Процент проходимости: ${String.format(Locale.US, "%.1f", winRate)}%")
                 appendLine()
             }
         )
@@ -158,7 +164,7 @@ class AnalyticsEngine(private val database: AppDatabase) {
                 if (stats != null) {
                     val (wins, total) = stats
                     val rate = if (total > 0) (wins.toDouble() / total) * 100 else 0.0
-                    appendLine("${dayNames[day] ?: day.name}: $wins/$total (${String.format("%.1f", rate)}%)")
+                    appendLine("${dayNames[day] ?: day.name}: $wins/$total (${String.format(Locale.US, "%.1f", rate)}%)")
                 }
             }
             appendLine()
@@ -186,7 +192,7 @@ class AnalyticsEngine(private val database: AppDatabase) {
                     val rate = if (total > 0) (wins.toDouble() / total) * 100 else 0.0
                     appendLine("${String.format("%02d", hour)}:00-${
                         String.format("%02d", (hour + 1) % 24)
-                    }:00: $wins/$total (${String.format("%.1f", rate)}%)")
+                    }:00: $wins/$total (${String.format(Locale.US, "%.1f", rate)}%)")
                 }
             }
             appendLine()
@@ -197,7 +203,7 @@ class AnalyticsEngine(private val database: AppDatabase) {
         
         // По месяцам
         val byMonth = expressResults.groupBy { it.dateTime.month }
-        val monthStats = mutableMapOf<String, Pair<Int, Int>>()
+        val monthStats = LinkedHashMap<String, Pair<Int, Int>>()
         val monthNames = mapOf(
             1 to "Январь", 2 to "Февраль", 3 to "Март", 4 to "Апрель",
             5 to "Май", 6 to "Июнь", 7 to "Июль", 8 to "Август",
@@ -215,7 +221,7 @@ class AnalyticsEngine(private val database: AppDatabase) {
             monthStats.forEach { (month, stats) ->
                 val (wins, total) = stats
                 val rate = if (total > 0) (wins.toDouble() / total) * 100 else 0.0
-                appendLine("$month: $wins/$total (${String.format("%.1f", rate)}%)")
+                appendLine("$month: $wins/$total (${String.format(Locale.US, "%.1f", rate)}%)")
             }
             appendLine()
         }
@@ -245,23 +251,24 @@ class AnalyticsEngine(private val database: AppDatabase) {
         result["byType"] = typeStats
         result["typeDetails"] = typeDetails
         
-        // Детальная информация по каждому экспрессу
+        // Детальная информация
         val detailedInfo = buildString {
             appendLine("=== ДЕТАЛЬНАЯ ИНФОРМАЦИЯ ===")
-            expressResults.forEach { express ->
+            // Показываем только последние 50 для производительности
+            expressResults.takeLast(50).forEach { express ->
                 val status = if (express.isWin) "✓ ВЫИГРЫШ" else "✗ ПРОИГРЫШ"
                 appendLine("Экспресс #${express.expId} - $status")
                 appendLine("  Дата: ${express.dateTime.format(
                     DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm")
                 )}")
                 if (express.isReplaced) {
-                    appendLine("  (Замененный проигрышный)")
+                    appendLine("  (Замененный)")
                 }
                 express.matches.forEach { match ->
                     val matchStatus = if (match.isWin) "✓" else "✗"
                     val typeName = when (match.type) {
                         924 -> "Тотал"
-                        927 -> "Фора1(+1.5)"
+                        927 -> "Фора1"
                         else -> "Тип${match.type}"
                     }
                     appendLine("  $matchStatus ${match.home} vs ${match.away} (${match.sh}:${match.sa}) [$typeName]")

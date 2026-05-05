@@ -124,36 +124,37 @@ class AnalyticsActivity : AppCompatActivity() {
         }
     }
     
-    private fun loadInfo() {
-        lifecycleScope.launch {
-            try {
-                val expCount = withContext(Dispatchers.IO) {
-                    database.expDao().getAllExp().size
-                }
-                val dataCount = withContext(Dispatchers.IO) {
-                    database.dataDao().getAllData().size
-                }
-                
-                tvAnalytics.text = buildString {
-                    appendLine("Статус базы данных:")
-                    appendLine("Записей в таблице exp: $expCount")
-                    appendLine("Записей в таблице data: $dataCount")
-                    appendLine()
-                    if (expCount > 0 && dataCount > 0) {
-                        appendLine("Данные загружены успешно.")
-                        appendLine("Нажмите \"Дашборд\" для просмотра аналитики.")
-                    } else {
-                        appendLine("Импортируйте файлы Excel:")
-                        appendLine("1. exp10.xlsx (кнопка \"Импорт Exp\")")
-                        appendLine("2. data10.xlsx (кнопка \"Импорт Data\")")
-                    }
-                }
-                
-            } catch (e: Exception) {
-                tvAnalytics.text = "Ошибка загрузки информации:\n${e.message}"
+    // Замените только метод loadInfo в AnalyticsActivity.kt
+private fun loadInfo() {
+    lifecycleScope.launch {
+        try {
+            val expCount = withContext(Dispatchers.IO) {
+                database.expDao().getAllExp().size
             }
+            val dataCount = withContext(Dispatchers.IO) {
+                database.dataDao().getAllData().size
+            }
+            
+            tvAnalytics.text = buildString {
+                appendLine("Статус базы данных:")
+                appendLine("Записей в таблице exp: $expCount")
+                appendLine("Записей в таблице data: $dataCount")
+                appendLine()
+                if (expCount > 0 && dataCount > 0) {
+                    appendLine("Данные загружены успешно.")
+                    appendLine("Нажмите \"Дашборд\" для просмотра аналитики.")
+                } else {
+                    appendLine("Импортируйте файлы Excel:")
+                    appendLine("1. exp10.xlsx (кнопка \"Импорт Exp\")")
+                    appendLine("2. data10.xlsx (кнопка \"Импорт Data\")")
+                }
+            }
+            
+        } catch (e: Exception) {
+            tvAnalytics.text = "Ошибка загрузки информации:\n${e.message}"
         }
     }
+}
     
     private fun clearAllData() {
         lifecycleScope.launch {

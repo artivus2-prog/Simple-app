@@ -7,7 +7,10 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface ExpDao {
     @Query("SELECT * FROM exp ORDER BY id")
-    fun getAllExp(): Flow<List<ExpEntity>>
+    suspend fun getAllExp(): List<ExpEntity>  // Изменено на suspend fun с List
+    
+    @Query("SELECT * FROM exp ORDER BY id")
+    fun getAllExpFlow(): Flow<List<ExpEntity>>  // Версия с Flow
     
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(exp: List<ExpEntity>)
