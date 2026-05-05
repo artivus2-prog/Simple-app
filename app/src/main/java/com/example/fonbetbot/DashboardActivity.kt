@@ -33,6 +33,7 @@ class DashboardActivity : AppCompatActivity() {
     private lateinit var barChartDay: BarChart
     private lateinit var barChartHour: BarChart
     private lateinit var btnRefresh: Button
+    private lateinit var btnBack: Button
     private lateinit var database: AppDatabase
     private lateinit var analyticsEngine: AnalyticsEngine
     
@@ -46,12 +47,17 @@ class DashboardActivity : AppCompatActivity() {
         barChartDay = findViewById(R.id.bar_chart_day)
         barChartHour = findViewById(R.id.bar_chart_hour)
         btnRefresh = findViewById(R.id.btn_refresh)
+        btnBack = findViewById(R.id.btn_back)
         
         database = AppDatabase.getDatabase(this)
         analyticsEngine = AnalyticsEngine(database)
         
         btnRefresh.setOnClickListener {
             loadAnalytics()
+        }
+        
+        btnBack.setOnClickListener {
+            finish()
         }
         
         loadAnalytics()
@@ -154,7 +160,7 @@ class DashboardActivity : AppCompatActivity() {
             description.text = "Общая статистика"
             description.textSize = 14f
             centerText = "Проходимость\n${String.format("%.1f", total.winRate)}%"
-            centerTextSize = 16f
+            setCenterTextSize(16f)
             setUsePercentValues(true)
             isDrawHoleEnabled = true
             holeRadius = 60f
