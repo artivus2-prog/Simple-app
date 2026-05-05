@@ -12,7 +12,7 @@
         android:id="@+id/tv_title"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Моё Приложение"
+        android:text="Fonbet bot"
         android:textSize="32sp"
         android:textStyle="bold"
         android:textColor="#2196F3"
