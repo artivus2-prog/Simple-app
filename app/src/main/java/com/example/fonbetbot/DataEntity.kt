@@ -9,7 +9,7 @@ data class DataEntity(
     @PrimaryKey
     val id: Int,
     val id_exp: Int,
-    val m_id: Long,  // Long потому что числа большие
+    val m_id: Long,
     val id_liga: Int,
     val liganame: String,
     val id_home: Long,
@@ -24,6 +24,6 @@ data class DataEntity(
     val type: Int,
     val sts: Int,
     val url: String = "",
-    val uzh: Double,
+    val uzh: String = "",  // Изменено с Double на String
     val tbtype: Int
 )

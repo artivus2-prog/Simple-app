@@ -16,29 +16,27 @@ class ExcelReader(private val context: Context) {
         
         val dataList = mutableListOf<ExpEntity>()
         
-        // Начинаем с 1, пропуская заголовок
         for (i in 1 until sheet.physicalNumberOfRows) {
             val row = sheet.getRow(i) ?: continue
             try {
                 val exp = ExpEntity(
-                    id = getNumericCellValue(row, 0).toInt(),
-                    id_exp = getNumericCellValue(row, 1).toInt(),
-                    kfall = getNumericCellValue(row, 2),
-                    sts_all = getNumericCellValue(row, 3).toInt(),
-                    ct = getStringCellValue(row, 4),
-                    profloss = getStringCellValue(row, 5).replace(",", ".").toDoubleOrNull() ?: 0.0,
-                    balans = getNumericCellValue(row, 6).toInt(),
-                    sumbet = getNumericCellValue(row, 7).toInt(),
-                    strategy = getStringCellValue(row, 8),
+                    id = getNumericCellValue(row, 1).toInt(),
+                    id_exp = getNumericCellValue(row, 2).toInt(),
+                    kfall = getNumericCellValue(row, 3),
+                    sts_all = getNumericCellValue(row, 4).toInt(),
+                    ct = getStringCellValue(row, 5),
+                    profloss = getNumericCellValue(row, 6),
+                    balans = getNumericCellValue(row, 7).toInt(),
+                    sumbet = getNumericCellValue(row, 8).toInt(),
+                    strategy = getStringCellValue(row, 9),
                     id_exp_replace = try {
-                        getNumericCellValue(row, 9).toInt()
+                        getNumericCellValue(row, 10).toInt()
                     } catch (e: Exception) {
                         0
                     }
                 )
                 dataList.add(exp)
             } catch (e: Exception) {
-                // Логируем ошибку, но продолжаем
                 e.printStackTrace()
                 continue
             }
@@ -60,25 +58,25 @@ class ExcelReader(private val context: Context) {
             val row = sheet.getRow(i) ?: continue
             try {
                 val data = DataEntity(
-                    id = getNumericCellValue(row, 0).toInt(),
-                    id_exp = getNumericCellValue(row, 1).toInt(),
-                    m_id = getNumericCellValue(row, 2).toLong(),
-                    id_liga = getNumericCellValue(row, 3).toInt(),
-                    liganame = getStringCellValue(row, 4),
-                    id_home = getNumericCellValue(row, 5).toLong(),
-                    home = getStringCellValue(row, 6),
-                    id_away = getNumericCellValue(row, 7).toLong(),
-                    away = getStringCellValue(row, 8),
-                    startkf = getNumericCellValue(row, 9),
-                    lastkf = getNumericCellValue(row, 10),
-                    curtime = getNumericCellValue(row, 11).toInt(),
-                    sh = getNumericCellValue(row, 12).toInt(),
-                    sa = getNumericCellValue(row, 13).toInt(),
-                    type = getNumericCellValue(row, 14).toInt(),
-                    sts = getNumericCellValue(row, 15).toInt(),
-                    url = try { getStringCellValue(row, 16) } catch (e: Exception) { "" },
-                    uzh = getNumericCellValue(row, 17),
-                    tbtype = try { getNumericCellValue(row, 18).toInt() } catch (e: Exception) { 0 }
+                    id = getNumericCellValue(row, 1).toInt(),
+                    id_exp = getNumericCellValue(row, 2).toInt(),
+                    m_id = getNumericCellValue(row, 3).toLong(),
+                    id_liga = getNumericCellValue(row, 4).toInt(),
+                    liganame = getStringCellValue(row, 5),
+                    id_home = getNumericCellValue(row, 6).toLong(),
+                    home = getStringCellValue(row, 7),
+                    id_away = getNumericCellValue(row, 8).toLong(),
+                    away = getStringCellValue(row, 9),
+                    startkf = getNumericCellValue(row, 10),
+                    lastkf = getNumericCellValue(row, 11),
+                    curtime = getNumericCellValue(row, 12).toInt(),
+                    sh = getNumericCellValue(row, 13).toInt(),
+                    sa = getNumericCellValue(row, 14).toInt(),
+                    type = getNumericCellValue(row, 15).toInt(),
+                    sts = getNumericCellValue(row, 16).toInt(),
+                    url = try { getStringCellValue(row, 17) } catch (e: Exception) { "" },
+                    uzh = getStringCellValue(row, 18),  // Всегда читаем как строку
+                    tbtype = try { getNumericCellValue(row, 19).toInt() } catch (e: Exception) { 0 }
                 )
                 dataList.add(data)
             } catch (e: Exception) {
@@ -94,19 +92,58 @@ class ExcelReader(private val context: Context) {
     
     private fun getNumericCellValue(row: org.apache.poi.ss.usermodel.Row, cellIndex: Int): Double {
         val cell = row.getCell(cellIndex) ?: return 0.0
-        return when (cell.cellType) {
-            CellType.NUMERIC -> cell.numericCellValue
-            CellType.STRING -> cell.stringCellValue.replace(",", ".").toDoubleOrNull() ?: 0.0
-            else -> 0.0
+        return try {
+            when (cell.cellType) {
+                CellType.NUMERIC -> cell.numericCellValue
+                CellType.STRING -> {
+                    val str = cell.stringCellValue.trim()
+                    if (str.isEmpty()) 0.0 
+                    else str.replace(",", ".").toDoubleOrNull() ?: 0.0
+                }
+                CellType.FORMULA -> {
+                    try {
+                        cell.numericCellValue
+                    } catch (e: Exception) {
+                        cell.stringCellValue.trim().replace(",", ".").toDoubleOrNull() ?: 0.0
+                    }
+                }
+                else -> 0.0
+            }
+        } catch (e: Exception) {
+            0.0
         }
     }
     
     private fun getStringCellValue(row: org.apache.poi.ss.usermodel.Row, cellIndex: Int): String {
         val cell = row.getCell(cellIndex) ?: return ""
-        return when (cell.cellType) {
-            CellType.STRING -> cell.stringCellValue
-            CellType.NUMERIC -> cell.numericCellValue.toLong().toString()
-            else -> cell.toString()
+        return try {
+            when (cell.cellType) {
+                CellType.STRING -> cell.stringCellValue.trim()
+                CellType.NUMERIC -> {
+                    val num = cell.numericCellValue
+                    // Если число целое, возвращаем без десятичной части
+                    if (num == num.toLong().toDouble()) {
+                        num.toLong().toString()
+                    } else {
+                        num.toString()
+                    }
+                }
+                CellType.FORMULA -> {
+                    try {
+                        cell.stringCellValue.trim()
+                    } catch (e: Exception) {
+                        val num = cell.numericCellValue
+                        if (num == num.toLong().toDouble()) {
+                            num.toLong().toString()
+                        } else {
+                            num.toString()
+                        }
+                    }
+                }
+                else -> cell.toString().trim()
+            }
+        } catch (e: Exception) {
+            ""
         }
     }
 }

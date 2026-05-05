@@ -1,4 +1,4 @@
-// DataDao.kt
+// DataDao.kt - обновленная версия
 package com.example.fonbetbot
 
 import androidx.room.*
@@ -7,10 +7,10 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface DataDao {
     @Query("SELECT * FROM data ORDER BY id")
-    suspend fun getAllData(): List<DataEntity>  // Изменено на suspend fun с List
+    suspend fun getAllData(): List<DataEntity>
     
     @Query("SELECT * FROM data ORDER BY id")
-    fun getAllDataFlow(): Flow<List<DataEntity>>  // Версия с Flow
+    fun getAllDataFlow(): Flow<List<DataEntity>>
     
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(data: List<DataEntity>)
