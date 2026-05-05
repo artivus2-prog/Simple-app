@@ -1,84 +1,116 @@
-<!-- activity_analytics.xml -->
-<?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout 
-    xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
-    xmlns:tools="http://schemas.android.com/tools"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="#FFFFFF"
-    tools:context=".AnalyticsActivity">
+// AnalyticsActivity.kt
+package com.example.fonbetbot
 
-    <TextView
-        android:id="@+id/tv_analytics_title"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Аналитика"
-        android:textSize="28sp"
-        android:textStyle="bold"
-        android:textColor="#FF5722"
-        android:layout_marginTop="32dp"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+import android.app.Activity
+import android.content.Intent
+import android.net.Uri
+import android.os.Bundle
+import android.provider.OpenableColumns
+import android.widget.Button
+import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 
-    <LinearLayout
-        android:id="@+id/buttons_layout"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:layout_marginHorizontal="16dp"
-        android:orientation="horizontal"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/tv_analytics_title">
-
-        <Button
-            android:id="@+id/btn_import_exp"
-            android:layout_width="0dp"
-            android:layout_height="50dp"
-            android:layout_weight="1"
-            android:layout_marginEnd="8dp"
-            android:text="Импорт Exp"
-            android:textSize="14sp"
-            android:backgroundTint="#2196F3" />
-
-        <Button
-            android:id="@+id/btn_import_data"
-            android:layout_width="0dp"
-            android:layout_height="50dp"
-            android:layout_weight="1"
-            android:layout_marginStart="8dp"
-            android:text="Импорт Data"
-            android:textSize="14sp"
-            android:backgroundTint="#4CAF50" />
-
-    </LinearLayout>
-
-    <ScrollView
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:layout_marginTop="16dp"
-        android:layout_marginBottom="24dp"
-        android:layout_marginStart="16dp"
-        android:layout_marginEnd="16dp"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/buttons_layout">
-
-        <TextView
-            android:id="@+id/tv_analytics"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Данные не загружены"
-            android:textSize="14sp"
-            android:lineSpacingExtra="4dp"
-            android:padding="16dp"
-            android:background="#F8F9FA"
-            android:textColor="#333333"
-            android:fontFamily="monospace" />
-
-    </ScrollView>
-
-</androidx.constraintlayout.widget.ConstraintLayout>
+class AnalyticsActivity : AppCompatActivity() {
+    
+    private lateinit var tvAnalytics: TextView
+    private lateinit var btnImportExp: Button
+    private lateinit var btnImportData: Button
+    private lateinit var database: AppDatabase
+    private lateinit var excelReader: ExcelReader
+    
+    private val PICK_EXP_FILE = 1
+    private val PICK_DATA_FILE = 2
+    
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_analytics)
+        
+        tvAnalytics = findViewById(R.id.tv_analytics)
+        btnImportExp = findViewById(R.id.btn_import_exp)
+        btnImportData = findViewById(R.id.btn_import_data)
+        
+        database = AppDatabase.getDatabase(this)
+        excelReader = ExcelReader(this)
+        
+        btnImportExp.setOnClickListener {
+            openFilePicker(PICK_EXP_FILE)
+        }
+        
+        btnImportData.setOnClickListener {
+            openFilePicker(PICK_DATA_FILE)
+        }
+        
+        // Загружаем данные при запуске
+        loadData()
+    }
+    
+    private fun openFilePicker(requestCode: Int) {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        }
+        startActivityForResult(intent, requestCode)
+    }
+    
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        
+        if (resultCode == Activity.RESULT_OK && data?.data != null) {
+            val uri = data.data!!
+            
+            lifecycleScope.launch {
+                try {
+                    when (requestCode) {
+                        PICK_EXP_FILE -> {
+                            val expData = excelReader.readExpData(uri)
+                            database.expDao().deleteAll()
+                            database.expDao().insertAll(expData)
+                            Toast.makeText(this@AnalyticsActivity, 
+                                "Загружено ${expData.size} записей exp", 
+                                Toast.LENGTH_SHORT).show()
+                        }
+                        PICK_DATA_FILE -> {
+                            val dataList = excelReader.readDataData(uri)
+                            database.dataDao().deleteAll()
+                            database.dataDao().insertAll(dataList)
+                            Toast.makeText(this@AnalyticsActivity, 
+                                "Загружено ${dataList.size} записей data", 
+                                Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    loadData()
+                } catch (e: Exception) {
+                    Toast.makeText(this@AnalyticsActivity, 
+                        "Ошибка: ${e.message}", 
+                        Toast.LENGTH_LONG).show()
+                    tvAnalytics.text = "Ошибка загрузки: ${e.message}"
+                }
+            }
+        }
+    }
+    
+    private fun loadData() {
+        lifecycleScope.launch {
+            database.dataDao().getDataWithExp().collect { dataList ->
+                if (dataList.isEmpty()) {
+                    tvAnalytics.text = "Нет данных. Импортируйте файлы."
+                } else {
+                    val displayText = buildString {
+                        appendLine("ID | Exp | Матч | Счет | KF | Статус | Стратегия")
+                        appendLine("-".repeat(80))
+                        dataList.take(100).forEach { data ->  // Показываем первые 100
+                            appendLine("${data.id} | ${data.id_exp} | ${data.home} vs ${data.away} | ${data.sh}:${data.sa} | ${data.kfall} | ${data.sts} | ${data.strategy}")
+                        }
+                        if (dataList.size > 100) {
+                            appendLine("... и еще ${dataList.size - 100} записей")
+                        }
+                    }
+                    tvAnalytics.text = displayText
+                }
+            }
+        }
+    }
+}
