@@ -3,6 +3,7 @@ package com.example.fonbetbot
 
 import android.content.Context
 import android.net.Uri
+import org.apache.poi.ss.usermodel.CellType
 import org.apache.poi.ss.usermodel.WorkbookFactory
 import java.io.InputStream
 
@@ -15,24 +16,31 @@ class ExcelReader(private val context: Context) {
         
         val dataList = mutableListOf<ExpEntity>()
         
+        // Начинаем с 1, пропуская заголовок
         for (i in 1 until sheet.physicalNumberOfRows) {
             val row = sheet.getRow(i) ?: continue
             try {
                 val exp = ExpEntity(
-                    id = row.getCell(0).numericCellValue.toInt(),
-                    id_exp = row.getCell(1).numericCellValue.toInt(),
-                    kfall = row.getCell(2).numericCellValue,
-                    sts_all = row.getCell(3).numericCellValue.toInt(),
-                    ct = row.getCell(4).stringCellValue,
-                    profloss = row.getCell(5).numericCellValue,
-                    balans = row.getCell(6).numericCellValue.toInt(),
-                    sumbet = row.getCell(7).numericCellValue.toInt(),
-                    strategy = row.getCell(8).stringCellValue,
-                    id_exp_replace = row.getCell(9)?.numericCellValue?.toInt() ?: 0
+                    id = getNumericCellValue(row, 0).toInt(),
+                    id_exp = getNumericCellValue(row, 1).toInt(),
+                    kfall = getNumericCellValue(row, 2),
+                    sts_all = getNumericCellValue(row, 3).toInt(),
+                    ct = getStringCellValue(row, 4),
+                    profloss = getStringCellValue(row, 5).replace(",", ".").toDoubleOrNull() ?: 0.0,
+                    balans = getNumericCellValue(row, 6).toInt(),
+                    sumbet = getNumericCellValue(row, 7).toInt(),
+                    strategy = getStringCellValue(row, 8),
+                    id_exp_replace = try {
+                        getNumericCellValue(row, 9).toInt()
+                    } catch (e: Exception) {
+                        0
+                    }
                 )
                 dataList.add(exp)
             } catch (e: Exception) {
+                // Логируем ошибку, но продолжаем
                 e.printStackTrace()
+                continue
             }
         }
         
@@ -52,34 +60,53 @@ class ExcelReader(private val context: Context) {
             val row = sheet.getRow(i) ?: continue
             try {
                 val data = DataEntity(
-                    id = row.getCell(0).numericCellValue.toInt(),
-                    id_exp = row.getCell(1).numericCellValue.toInt(),
-                    m_id = row.getCell(2).numericCellValue.toInt(),
-                    id_liga = row.getCell(3).numericCellValue.toInt(),
-                    liganame = row.getCell(4).stringCellValue,
-                    id_home = row.getCell(5).numericCellValue.toInt(),
-                    home = row.getCell(6).stringCellValue,
-                    id_away = row.getCell(7).numericCellValue.toInt(),
-                    away = row.getCell(8).stringCellValue,
-                    startkf = row.getCell(9).numericCellValue,
-                    lastkf = row.getCell(10).numericCellValue,
-                    curtime = row.getCell(11).numericCellValue.toInt(),
-                    sh = row.getCell(12).numericCellValue.toInt(),
-                    sa = row.getCell(13).numericCellValue.toInt(),
-                    type = row.getCell(14).numericCellValue.toInt(),
-                    sts = row.getCell(15).numericCellValue.toInt(),
-                    url = row.getCell(16)?.stringCellValue ?: "",
-                    uzh = row.getCell(17).numericCellValue,
-                    tbtype = row.getCell(18).numericCellValue.toInt()
+                    id = getNumericCellValue(row, 0).toInt(),
+                    id_exp = getNumericCellValue(row, 1).toInt(),
+                    m_id = getNumericCellValue(row, 2).toLong(),
+                    id_liga = getNumericCellValue(row, 3).toInt(),
+                    liganame = getStringCellValue(row, 4),
+                    id_home = getNumericCellValue(row, 5).toLong(),
+                    home = getStringCellValue(row, 6),
+                    id_away = getNumericCellValue(row, 7).toLong(),
+                    away = getStringCellValue(row, 8),
+                    startkf = getNumericCellValue(row, 9),
+                    lastkf = getNumericCellValue(row, 10),
+                    curtime = getNumericCellValue(row, 11).toInt(),
+                    sh = getNumericCellValue(row, 12).toInt(),
+                    sa = getNumericCellValue(row, 13).toInt(),
+                    type = getNumericCellValue(row, 14).toInt(),
+                    sts = getNumericCellValue(row, 15).toInt(),
+                    url = try { getStringCellValue(row, 16) } catch (e: Exception) { "" },
+                    uzh = getNumericCellValue(row, 17),
+                    tbtype = try { getNumericCellValue(row, 18).toInt() } catch (e: Exception) { 0 }
                 )
                 dataList.add(data)
             } catch (e: Exception) {
                 e.printStackTrace()
+                continue
             }
         }
         
         workbook.close()
         inputStream.close()
         return dataList
+    }
+    
+    private fun getNumericCellValue(row: org.apache.poi.ss.usermodel.Row, cellIndex: Int): Double {
+        val cell = row.getCell(cellIndex) ?: return 0.0
+        return when (cell.cellType) {
+            CellType.NUMERIC -> cell.numericCellValue
+            CellType.STRING -> cell.stringCellValue.replace(",", ".").toDoubleOrNull() ?: 0.0
+            else -> 0.0
+        }
+    }
+    
+    private fun getStringCellValue(row: org.apache.poi.ss.usermodel.Row, cellIndex: Int): String {
+        val cell = row.getCell(cellIndex) ?: return ""
+        return when (cell.cellType) {
+            CellType.STRING -> cell.stringCellValue
+            CellType.NUMERIC -> cell.numericCellValue.toLong().toString()
+            else -> cell.toString()
+        }
     }
 }

@@ -9,12 +9,12 @@ data class DataEntity(
     @PrimaryKey
     val id: Int,
     val id_exp: Int,
-    val m_id: Int,
+    val m_id: Long,  // Long потому что числа большие
     val id_liga: Int,
     val liganame: String,
-    val id_home: Int,
+    val id_home: Long,
     val home: String,
-    val id_away: Int,
+    val id_away: Long,
     val away: String,
     val startkf: Double,
     val lastkf: Double,
