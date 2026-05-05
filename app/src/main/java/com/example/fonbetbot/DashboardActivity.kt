@@ -122,8 +122,8 @@ class DashboardActivity : AppCompatActivity() {
     }
     
     private fun showDateRangePicker() {
-        val selection: android.core.util.Pair<Long, Long>? = if (dateStart != null && dateEnd != null) {
-            android.core.util.Pair(
+        val selection: androidx.core.util.Pair<Long, Long>? = if (dateStart != null && dateEnd != null) {
+            androidx.core.util.Pair(
                 dateStart!!.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(),
                 dateEnd!!.atTime(23, 59, 59).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
             )
