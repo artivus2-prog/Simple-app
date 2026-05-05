@@ -18,9 +18,12 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
-import kotlin.coroutines.suspendCoroutine
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.net.HttpURLConnection
+import java.net.URL
 
 class AnalyticsActivity : AppCompatActivity() {
     
@@ -30,19 +33,15 @@ class AnalyticsActivity : AppCompatActivity() {
     private lateinit var btnDashboard: Button
     private lateinit var btnClearData: Button
     private lateinit var btnFetchBets: Button
-    private lateinit var btnUpdateScores: Button
     private lateinit var tvTicker: TextView
     private lateinit var tvStatusLight: View
     private lateinit var database: AppDatabase
     private lateinit var excelReader: ExcelReader
     private lateinit var dataManager: DataManager
-    private val apiClient = ApiClient()
     
     private var isAutoFetching = false
-    private var isAutoUpdatingScores = false
     private val handler = Handler(Looper.getMainLooper())
     private val autoFetchInterval = 30000L
-    private val autoUpdateScoresInterval = 60000L
     
     companion object {
         private const val TAG = "AnalyticsActivity"
@@ -60,7 +59,6 @@ class AnalyticsActivity : AppCompatActivity() {
         btnDashboard = findViewById(R.id.btn_dashboard)
         btnClearData = findViewById(R.id.btn_clear_data)
         btnFetchBets = findViewById(R.id.btn_fetch_bets)
-        btnUpdateScores = findViewById(R.id.btn_update_scores)
         tvTicker = findViewById(R.id.tv_ticker)
         tvStatusLight = findViewById(R.id.tv_status_light)
         
@@ -81,7 +79,7 @@ class AnalyticsActivity : AppCompatActivity() {
             if (isAutoFetching) {
                 stopAutoFetch()
             } else {
-                fetchBetsFromServer()
+                fetchBetsAndUpdateScores()
             }
         }
         
@@ -90,23 +88,8 @@ class AnalyticsActivity : AppCompatActivity() {
             true
         }
         
-        btnUpdateScores.setOnClickListener {
-            if (isAutoUpdatingScores) {
-                stopAutoUpdateScores()
-            } else {
-                updateAllScores()
-            }
-        }
-        
-        btnUpdateScores.setOnLongClickListener {
-            toggleAutoUpdateScores()
-            true
-        }
-        
         loadInfo()
     }
-    
-    // ==================== ФАЙЛОВЫЙ ИМПОРТ ====================
     
     private fun openFilePicker(requestCode: Int) {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
@@ -134,11 +117,7 @@ class AnalyticsActivity : AppCompatActivity() {
                                 database.expDao().deleteAll()
                                 database.expDao().insertAll(expData)
                                 withContext(Dispatchers.Main) {
-                                    Toast.makeText(
-                                        this@AnalyticsActivity,
-                                        "Загружено ${expData.size} записей exp",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
+                                    Toast.makeText(this@AnalyticsActivity, "Загружено ${expData.size} записей exp", Toast.LENGTH_SHORT).show()
                                 }
                             }
                             PICK_DATA_FILE -> {
@@ -146,11 +125,7 @@ class AnalyticsActivity : AppCompatActivity() {
                                 database.dataDao().deleteAll()
                                 database.dataDao().insertAll(dataList)
                                 withContext(Dispatchers.Main) {
-                                    Toast.makeText(
-                                        this@AnalyticsActivity,
-                                        "Загружено ${dataList.size} записей data",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
+                                    Toast.makeText(this@AnalyticsActivity, "Загружено ${dataList.size} записей data", Toast.LENGTH_SHORT).show()
                                 }
                             }
                         }
@@ -159,24 +134,18 @@ class AnalyticsActivity : AppCompatActivity() {
                     loadInfo()
                     
                 } catch (e: Exception) {
-                    Toast.makeText(
-                        this@AnalyticsActivity,
-                        "Ошибка загрузки: ${e.message}",
-                        Toast.LENGTH_LONG
-                    ).show()
+                    Toast.makeText(this@AnalyticsActivity, "Ошибка загрузки: ${e.message}", Toast.LENGTH_LONG).show()
                     tvAnalytics.text = "Ошибка загрузки:\n${e.message}"
                 }
             }
         }
     }
     
-    // ==================== ИНФОРМАЦИЯ О БАЗЕ ====================
-    
     private fun loadInfo() {
         lifecycleScope.launch {
             try {
-                val expCount = withContext(Dispatchers.IO) { database.expDao().getAllExp().size }
-                val dataCount = withContext(Dispatchers.IO) { database.dataDao().getAllData().size }
+                val expCount: Int = withContext(Dispatchers.IO) { database.expDao().getAllExp().size }
+                val dataCount: Int = withContext(Dispatchers.IO) { database.dataDao().getAllData().size }
                 
                 tvAnalytics.text = buildString {
                     appendLine("Статус базы данных:")
@@ -187,17 +156,15 @@ class AnalyticsActivity : AppCompatActivity() {
                         appendLine("Данные загружены успешно.")
                         appendLine("Нажмите \"Дашборд\" для просмотра аналитики.")
                         appendLine()
-                        appendLine("Используйте кнопку \"Загрузить с сервера\"")
-                        appendLine("для получения новых данных.")
-                        appendLine("Долгое нажатие - автообновление каждые 30 сек.")
-                        appendLine()
-                        appendLine("Кнопка \"Обновить счета\" - получение")
-                        appendLine("актуальных счетов матчей.")
-                        appendLine("Долгое нажатие - автообновление каждые 60 сек.")
+                        appendLine("Кнопка \"Загрузить с сервера\":")
+                        appendLine("- Получает матчи (1-4 шт)")
+                        appendLine("- Обновляет счета")
+                        appendLine("- Собирает в экспресс")
+                        appendLine("Долгое нажатие - авто (30 сек)")
                     } else {
                         appendLine("Импортируйте файлы Excel:")
-                        appendLine("1. processed_exp10.xlsx (кнопка \"Импорт Exp\")")
-                        appendLine("2. processed_data10.xlsx (кнопка \"Импорт Data\")")
+                        appendLine("1. processed_exp10.xlsx")
+                        appendLine("2. processed_data10.xlsx")
                     }
                 }
                 
@@ -214,96 +181,66 @@ class AnalyticsActivity : AppCompatActivity() {
                     database.expDao().deleteAll()
                     database.dataDao().deleteAll()
                 }
-                
-                tvAnalytics.text = "Данные очищены. Импортируйте файлы заново."
+                tvAnalytics.text = "Данные очищены."
                 Toast.makeText(this@AnalyticsActivity, "Все данные удалены", Toast.LENGTH_SHORT).show()
-                
             } catch (e: Exception) {
-                Toast.makeText(this@AnalyticsActivity, "Ошибка очистки: ${e.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(this@AnalyticsActivity, "Ошибка: ${e.message}", Toast.LENGTH_LONG).show()
             }
         }
     }
     
     // ==================== ЗАГРУЗКА С СЕРВЕРА ====================
     
-    private fun fetchBetsFromServer() {
+    private fun fetchBetsAndUpdateScores() {
         lifecycleScope.launch {
             try {
-                updateTicker("Загрузка данных с сервера...", "#FFC107")
+                updateTicker("Загрузка с сервера...", "#FFC107")
                 btnFetchBets.isEnabled = false
                 btnFetchBets.text = "Загрузка..."
                 
-                val bets = withContext(Dispatchers.IO) {
-                    // Используем suspendCoroutine для преобразования колбэка в корутину
-                    suspendCoroutine<List<BetData>> { continuation ->
-                        val settings = ApiClient.BetSettings()
-                        
-                        apiClient.getBets(
-                            userId = 0L,
-                            settings = settings,
-                            onSuccess = { betsList ->
-                                // Конвертируем ApiClient.BetData в BetData
-                                val converted = betsList.map { apiBet ->
-                                    BetData(
-                                        sport = apiBet.sport,
-                                        id_exp = apiBet.idExp,
-                                        m_id = apiBet.mId.toLong(),
-                                        id_liga = apiBet.idLiga,
-                                        liganame = apiBet.ligaName,
-                                        home = apiBet.home,
-                                        away = apiBet.away,
-                                        comand1id = apiBet.comand1Id.toLong(),
-                                        comand2id = apiBet.comand2Id.toLong(),
-                                        curtime = apiBet.curTime.toIntOrNull() ?: 0,
-                                        sh = apiBet.sh,
-                                        sa = apiBet.sa,
-                                        startkf = apiBet.startKf,
-                                        lastkf = apiBet.lastKf,
-                                        type = apiBet.type,
-                                        sts = apiBet.sts,
-                                        url = apiBet.url,
-                                        uzh = apiBet.uzh,
-                                        tbtype = apiBet.tbType
-                                    )
-                                }
-                                continuation.resume(converted)
-                            },
-                            onError = { error ->
-                                continuation.resumeWithException(Exception(error))
-                            }
-                        )
-                    }
+                val bets: List<BetData> = withContext(Dispatchers.IO) {
+                    fetchBetsFromApi()
                 }
                 
-                if (bets.isNotEmpty()) {
-                    val result = withContext(Dispatchers.IO) {
-                        dataManager.importBets(bets)
-                    }
-                    
-                    when {
-                        result.newExpressCount > 0 -> {
-                            updateTicker(
-                                "✅ Новых экспрессов: ${result.newExpressCount}, матчей: ${result.newMatchCount}" +
-                                        if (result.skippedCount > 0) ", пропущено: ${result.skippedCount}" else "",
-                                "#4CAF50"
-                            )
-                        }
-                        result.skippedCount > 0 -> {
-                            updateTicker(
-                                "ℹ️ Все матчи уже в базе (получено: ${result.totalReceived})",
-                                "#2196F3"
-                            )
-                        }
-                        else -> {
-                            updateTicker("Нет новых данных", "#9E9E9E")
-                        }
-                    }
-                    
-                    loadInfo()
-                } else {
+                if (bets.isEmpty()) {
                     updateTicker("Сервер вернул пустой список", "#9E9E9E")
+                    btnFetchBets.isEnabled = true
+                    btnFetchBets.text = if (isAutoFetching) "Стоп авто" else "Загрузить с сервера"
+                    return@launch
                 }
                 
+                updateTicker("Получено ${bets.size} матчей. Обновляем счета...", "#FFC107")
+                
+                // Обновляем счета
+                val updatedBets: List<BetData> = withContext(Dispatchers.IO) {
+                    bets.map { bet: BetData ->
+                        val score: Pair<Int, Int>? = fetchMatchScore(bet.m_id.toInt())
+                        if (score != null) {
+                            bet.copy(sh = score.first, sa = score.second)
+                        } else {
+                            bet
+                        }
+                    }
+                }
+                
+                // Импортируем
+                val result: DataManager.ImportResult = withContext(Dispatchers.IO) {
+                    dataManager.importBets(updatedBets)
+                }
+                
+                when {
+                    result.newExpressCount > 0 -> {
+                        updateTicker("✅ Новых экспрессов: ${result.newExpressCount}, матчей: ${result.newMatchCount}", "#4CAF50")
+                    }
+                    result.skippedCount > 0 -> {
+                        updateTicker("ℹ️ Все матчи уже в базе", "#2196F3")
+                    }
+                    else -> {
+                        updateTicker("Нет новых данных", "#9E9E9E")
+                    }
+                }
+                
+                loadInfo()
                 btnFetchBets.isEnabled = true
                 btnFetchBets.text = if (isAutoFetching) "Стоп авто" else "Загрузить с сервера"
                 
@@ -311,15 +248,124 @@ class AnalyticsActivity : AppCompatActivity() {
                 updateTicker("Ошибка: ${e.message}", "#F44336")
                 btnFetchBets.isEnabled = true
                 btnFetchBets.text = if (isAutoFetching) "Стоп авто" else "Загрузить с сервера"
-                Toast.makeText(this@AnalyticsActivity, "Ошибка соединения: ${e.message}", Toast.LENGTH_LONG).show()
             }
+        }
+    }
+    
+    private fun fetchBetsFromApi(): List<BetData> {
+        return try {
+            val url = URL("http://95.183.11.203:5000/api/getBets")
+            val connection = url.openConnection() as HttpURLConnection
+            connection.requestMethod = "POST"
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Accept", "application/json")
+            connection.doOutput = true
+            
+            val jsonBody = JSONObject().apply {
+                put("user_id", 0)
+                put("settings", JSONObject())
+            }
+            
+            connection.outputStream.use { os ->
+                os.write(jsonBody.toString().toByteArray())
+            }
+            
+            val responseCode = connection.responseCode
+            if (responseCode == 200) {
+                val reader = BufferedReader(InputStreamReader(connection.inputStream))
+                val response = reader.readText()
+                reader.close()
+                
+                val json = JSONObject(response)
+                val dataArray: JSONArray = if (json.has("data")) {
+                    json.getJSONArray("data")
+                } else {
+                    JSONArray()
+                }
+                
+                val bets = mutableListOf<BetData>()
+                for (i in 0 until dataArray.length()) {
+                    val obj = dataArray.getJSONObject(i)
+                    bets.add(BetData(
+                        sport = obj.optString("sport", ""),
+                        id_exp = obj.optInt("id_exp", 0),
+                        m_id = obj.optLong("m_id", 0),
+                        id_liga = obj.optInt("id_liga", 0),
+                        liganame = obj.optString("liganame", ""),
+                        home = obj.optString("home", ""),
+                        away = obj.optString("away", ""),
+                        comand1id = obj.optLong("comand1id", 0),
+                        comand2id = obj.optLong("comand2id", 0),
+                        curtime = obj.optInt("curtime", 0),
+                        sh = obj.optInt("sh", 0),
+                        sa = obj.optInt("sa", 0),
+                        startkf = obj.optDouble("startkf", 0.0),
+                        lastkf = obj.optDouble("lastkf", 0.0),
+                        type = obj.optInt("type", 924),
+                        sts = obj.optInt("sts", 1),
+                        url = obj.optString("url", ""),
+                        uzh = obj.optDouble("uzh", 0.0),
+                        tbtype = obj.optInt("tbtype", 0)
+                    ))
+                }
+                bets
+            } else {
+                emptyList()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка запроса: ${e.message}")
+            emptyList()
+        }
+    }
+    
+    private fun fetchMatchScore(matchId: Int): Pair<Int, Int>? {
+        return try {
+            val url = URL("https://lne-lb61-w.bk6bba-resources.com/ma/events/event?lang=ru&version=75079419261&eventId=$matchId&scopeMarket=1600")
+            val connection = url.openConnection() as HttpURLConnection
+            connection.requestMethod = "GET"
+            connection.setRequestProperty("Accept", "application/json")
+            
+            val responseCode = connection.responseCode
+            if (responseCode == 200) {
+                val reader = BufferedReader(InputStreamReader(connection.inputStream))
+                val response = reader.readText()
+                reader.close()
+                
+                val json = JSONObject(response)
+                var sh = 0
+                var sa = 0
+                
+                if (json.has("liveEventInfos")) {
+                    val liveEventInfos = json.getJSONArray("liveEventInfos")
+                    if (liveEventInfos.length() > 0) {
+                        val liveEventInfo = liveEventInfos.getJSONObject(0)
+                        if (liveEventInfo.has("scores")) {
+                            val scores = liveEventInfo.getJSONArray("scores")
+                            if (scores.length() > 0) {
+                                val mainScore = scores.getJSONArray(0)
+                                if (mainScore.length() > 0) {
+                                    val scoreObj = mainScore.getJSONObject(0)
+                                    sh = scoreObj.optInt("c1", 0)
+                                    sa = scoreObj.optInt("c2", 0)
+                                }
+                            }
+                        }
+                    }
+                }
+                Pair(sh, sa)
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка получения счета: ${e.message}")
+            null
         }
     }
     
     private val fetchRunnable = object : Runnable {
         override fun run() {
             if (isAutoFetching) {
-                fetchBetsFromServer()
+                fetchBetsAndUpdateScores()
                 handler.postDelayed(this, autoFetchInterval)
             }
         }
@@ -331,7 +377,7 @@ class AnalyticsActivity : AppCompatActivity() {
             btnFetchBets.text = "Стоп авто"
             btnFetchBets.setBackgroundColor(Color.parseColor("#F44336"))
             handler.post(fetchRunnable)
-            updateTicker("Автообновление запущено (каждые 30 сек)", "#4CAF50")
+            updateTicker("Автообновление (30 сек)", "#4CAF50")
             Toast.makeText(this, "Автообновление запущено", Toast.LENGTH_SHORT).show()
         } else {
             stopAutoFetch()
@@ -346,145 +392,14 @@ class AnalyticsActivity : AppCompatActivity() {
         updateTicker("Автообновление остановлено", "#9E9E9E")
     }
     
-    // ==================== ОБНОВЛЕНИЕ СЧЕТОВ ====================
-    
-    private fun updateAllScores() {
-        lifecycleScope.launch {
-            try {
-                updateTicker("Обновление счетов...", "#FFC107")
-                btnUpdateScores.isEnabled = false
-                btnUpdateScores.text = "Обновление..."
-                
-                val allData = withContext(Dispatchers.IO) {
-                    database.dataDao().getAllData()
-                }
-                
-                // Получаем уникальные m_id
-                val uniqueMIds = allData.map { it.m_id }.distinct()
-                
-                var updatedCount = 0
-                var errorCount = 0
-                var totalCount = uniqueMIds.size
-                var processedCount = 0
-                
-                for (mId in uniqueMIds) {
-                    try {
-                        val result = withContext(Dispatchers.IO) {
-                            updateMatchScoreByMId(mId)
-                        }
-                        if (result) updatedCount++ else errorCount++
-                    } catch (e: Exception) {
-                        errorCount++
-                        Log.e(TAG, "Ошибка обновления счета для mId=$mId: ${e.message}")
-                    }
-                    
-                    processedCount++
-                    if (processedCount % 10 == 0) {
-                        updateTicker("Обновление: $processedCount/$totalCount...", "#FFC107")
-                    }
-                }
-                
-                updateTicker("✅ Обновлено: $updatedCount, ошибок: $errorCount из $totalCount", "#4CAF50")
-                btnUpdateScores.isEnabled = true
-                btnUpdateScores.text = if (isAutoUpdatingScores) "Стоп счета" else "Обновить счета"
-                
-                // Обновляем информацию
-                loadInfo()
-                
-            } catch (e: Exception) {
-                updateTicker("Ошибка обновления счетов: ${e.message}", "#F44336")
-                btnUpdateScores.isEnabled = true
-                btnUpdateScores.text = if (isAutoUpdatingScores) "Стоп счета" else "Обновить счета"
-            }
-        }
-    }
-    
-    private suspend fun updateMatchScoreByMId(mId: Long): Boolean {
-        return suspendCoroutine { continuation ->
-            apiClient.getMatchScore(
-                matchId = mId.toInt(),
-                onSuccess = { matchFactors ->
-                    if (matchFactors != null) {
-                        lifecycleScope.launch {
-                            try {
-                                withContext(Dispatchers.IO) {
-                                    val allData = database.dataDao().getAllData()
-                                    val matchesToUpdate = allData.filter { it.m_id == mId }
-                                    
-                                    if (matchesToUpdate.isNotEmpty()) {
-                                        val updatedMatches = matchesToUpdate.map { match ->
-                                            match.copy(
-                                                sh = matchFactors.score1,
-                                                sa = matchFactors.score2
-                                            )
-                                        }
-                                        database.dataDao().insertAll(updatedMatches)
-                                        
-                                        Log.d(TAG, "Обновлен счет для mId=$mId: ${matchFactors.score1}:${matchFactors.score2} (${matchesToUpdate.size} записей)")
-                                    }
-                                }
-                                continuation.resume(true)
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Ошибка сохранения счета для mId=$mId: ${e.message}")
-                                continuation.resume(false)
-                            }
-                        }
-                    } else {
-                        Log.w(TAG, "Нет данных счета для mId=$mId")
-                        continuation.resume(false)
-                    }
-                },
-                onError = { error ->
-                    Log.e(TAG, "Ошибка получения счета для mId=$mId: $error")
-                    continuation.resume(false)
-                }
-            )
-        }
-    }
-    
-    private val updateScoresRunnable = object : Runnable {
-        override fun run() {
-            if (isAutoUpdatingScores) {
-                updateAllScores()
-                handler.postDelayed(this, autoUpdateScoresInterval)
-            }
-        }
-    }
-    
-    private fun toggleAutoUpdateScores() {
-        isAutoUpdatingScores = !isAutoUpdatingScores
-        if (isAutoUpdatingScores) {
-            btnUpdateScores.text = "Стоп счета"
-            btnUpdateScores.setBackgroundColor(Color.parseColor("#F44336"))
-            handler.post(updateScoresRunnable)
-            updateTicker("Автообновление счетов запущено (каждые 60 сек)", "#4CAF50")
-            Toast.makeText(this, "Автообновление счетов запущено", Toast.LENGTH_SHORT).show()
-        } else {
-            stopAutoUpdateScores()
-        }
-    }
-    
-    private fun stopAutoUpdateScores() {
-        isAutoUpdatingScores = false
-        btnUpdateScores.text = "Обновить счета"
-        btnUpdateScores.setBackgroundColor(Color.parseColor("#FF9800"))
-        handler.removeCallbacks(updateScoresRunnable)
-        updateTicker("Автообновление счетов остановлено", "#9E9E9E")
-    }
-    
-    // ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ====================
-    
     private fun updateTicker(message: String, colorHex: String) {
         tvTicker.text = message
         tvStatusLight.setBackgroundColor(Color.parseColor(colorHex))
-        Log.d(TAG, message)
     }
     
     override fun onDestroy() {
         super.onDestroy()
         handler.removeCallbacks(fetchRunnable)
-        handler.removeCallbacks(updateScoresRunnable)
         isAutoFetching = false
-        isAutoUpdatingScores = false
     }
 }

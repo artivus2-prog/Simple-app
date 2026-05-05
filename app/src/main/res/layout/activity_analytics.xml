@@ -118,7 +118,6 @@
             android:text="Ожидание данных..."
             android:textSize="13sp"
             android:textColor="#333333" />
-
     </LinearLayout>
 
     <!-- Кнопка загрузки с сервера -->
@@ -160,7 +159,6 @@
             android:background="#F8F9FA"
             android:textColor="#333333"
             android:fontFamily="monospace" />
-
     </ScrollView>
 
 </androidx.constraintlayout.widget.ConstraintLayout>
