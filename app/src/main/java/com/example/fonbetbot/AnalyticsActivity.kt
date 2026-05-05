@@ -8,15 +8,19 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
+import android.view.View
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
-import android.view.View
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlin.coroutines.suspendCoroutine
 
 class AnalyticsActivity : AppCompatActivity() {
     
@@ -26,17 +30,22 @@ class AnalyticsActivity : AppCompatActivity() {
     private lateinit var btnDashboard: Button
     private lateinit var btnClearData: Button
     private lateinit var btnFetchBets: Button
+    private lateinit var btnUpdateScores: Button
     private lateinit var tvTicker: TextView
     private lateinit var tvStatusLight: View
     private lateinit var database: AppDatabase
     private lateinit var excelReader: ExcelReader
     private lateinit var dataManager: DataManager
+    private val apiClient = ApiClient()
     
     private var isAutoFetching = false
+    private var isAutoUpdatingScores = false
     private val handler = Handler(Looper.getMainLooper())
     private val autoFetchInterval = 30000L
+    private val autoUpdateScoresInterval = 60000L
     
     companion object {
+        private const val TAG = "AnalyticsActivity"
         private const val PICK_EXP_FILE = 1
         private const val PICK_DATA_FILE = 2
     }
@@ -51,6 +60,7 @@ class AnalyticsActivity : AppCompatActivity() {
         btnDashboard = findViewById(R.id.btn_dashboard)
         btnClearData = findViewById(R.id.btn_clear_data)
         btnFetchBets = findViewById(R.id.btn_fetch_bets)
+        btnUpdateScores = findViewById(R.id.btn_update_scores)
         tvTicker = findViewById(R.id.tv_ticker)
         tvStatusLight = findViewById(R.id.tv_status_light)
         
@@ -80,8 +90,23 @@ class AnalyticsActivity : AppCompatActivity() {
             true
         }
         
+        btnUpdateScores.setOnClickListener {
+            if (isAutoUpdatingScores) {
+                stopAutoUpdateScores()
+            } else {
+                updateAllScores()
+            }
+        }
+        
+        btnUpdateScores.setOnLongClickListener {
+            toggleAutoUpdateScores()
+            true
+        }
+        
         loadInfo()
     }
+    
+    // ==================== ФАЙЛОВЫЙ ИМПОРТ ====================
     
     private fun openFilePicker(requestCode: Int) {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
@@ -109,7 +134,11 @@ class AnalyticsActivity : AppCompatActivity() {
                                 database.expDao().deleteAll()
                                 database.expDao().insertAll(expData)
                                 withContext(Dispatchers.Main) {
-                                    Toast.makeText(this@AnalyticsActivity, "Загружено ${expData.size} записей exp", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(
+                                        this@AnalyticsActivity,
+                                        "Загружено ${expData.size} записей exp",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
                                 }
                             }
                             PICK_DATA_FILE -> {
@@ -117,7 +146,11 @@ class AnalyticsActivity : AppCompatActivity() {
                                 database.dataDao().deleteAll()
                                 database.dataDao().insertAll(dataList)
                                 withContext(Dispatchers.Main) {
-                                    Toast.makeText(this@AnalyticsActivity, "Загружено ${dataList.size} записей data", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(
+                                        this@AnalyticsActivity,
+                                        "Загружено ${dataList.size} записей data",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
                                 }
                             }
                         }
@@ -126,12 +159,18 @@ class AnalyticsActivity : AppCompatActivity() {
                     loadInfo()
                     
                 } catch (e: Exception) {
-                    Toast.makeText(this@AnalyticsActivity, "Ошибка загрузки: ${e.message}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(
+                        this@AnalyticsActivity,
+                        "Ошибка загрузки: ${e.message}",
+                        Toast.LENGTH_LONG
+                    ).show()
                     tvAnalytics.text = "Ошибка загрузки:\n${e.message}"
                 }
             }
         }
     }
+    
+    // ==================== ИНФОРМАЦИЯ О БАЗЕ ====================
     
     private fun loadInfo() {
         lifecycleScope.launch {
@@ -151,6 +190,10 @@ class AnalyticsActivity : AppCompatActivity() {
                         appendLine("Используйте кнопку \"Загрузить с сервера\"")
                         appendLine("для получения новых данных.")
                         appendLine("Долгое нажатие - автообновление каждые 30 сек.")
+                        appendLine()
+                        appendLine("Кнопка \"Обновить счета\" - получение")
+                        appendLine("актуальных счетов матчей.")
+                        appendLine("Долгое нажатие - автообновление каждые 60 сек.")
                     } else {
                         appendLine("Импортируйте файлы Excel:")
                         appendLine("1. processed_exp10.xlsx (кнопка \"Импорт Exp\")")
@@ -181,7 +224,7 @@ class AnalyticsActivity : AppCompatActivity() {
         }
     }
     
-    // ============ МЕТОДЫ ДЛЯ РАБОТЫ С API ============
+    // ==================== ЗАГРУЗКА С СЕРВЕРА ====================
     
     private fun fetchBetsFromServer() {
         lifecycleScope.launch {
@@ -191,7 +234,45 @@ class AnalyticsActivity : AppCompatActivity() {
                 btnFetchBets.text = "Загрузка..."
                 
                 val bets = withContext(Dispatchers.IO) {
-                    NetworkModule.apiService.getBets()
+                    // Используем suspendCoroutine для преобразования колбэка в корутину
+                    suspendCoroutine<List<BetData>> { continuation ->
+                        val settings = ApiClient.BetSettings()
+                        
+                        apiClient.getBets(
+                            userId = 0L,
+                            settings = settings,
+                            onSuccess = { betsList ->
+                                // Конвертируем ApiClient.BetData в BetData
+                                val converted = betsList.map { apiBet ->
+                                    BetData(
+                                        sport = apiBet.sport,
+                                        id_exp = apiBet.idExp,
+                                        m_id = apiBet.mId.toLong(),
+                                        id_liga = apiBet.idLiga,
+                                        liganame = apiBet.ligaName,
+                                        home = apiBet.home,
+                                        away = apiBet.away,
+                                        comand1id = apiBet.comand1Id.toLong(),
+                                        comand2id = apiBet.comand2Id.toLong(),
+                                        curtime = apiBet.curTime.toIntOrNull() ?: 0,
+                                        sh = apiBet.sh,
+                                        sa = apiBet.sa,
+                                        startkf = apiBet.startKf,
+                                        lastkf = apiBet.lastKf,
+                                        type = apiBet.type,
+                                        sts = apiBet.sts,
+                                        url = apiBet.url,
+                                        uzh = apiBet.uzh,
+                                        tbtype = apiBet.tbType
+                                    )
+                                }
+                                continuation.resume(converted)
+                            },
+                            onError = { error ->
+                                continuation.resumeWithException(Exception(error))
+                            }
+                        )
+                    }
                 }
                 
                 if (bets.isNotEmpty()) {
@@ -199,13 +280,19 @@ class AnalyticsActivity : AppCompatActivity() {
                         dataManager.importBets(bets)
                     }
                     
-                    val message = when {
+                    when {
                         result.newExpressCount > 0 -> {
-                            updateTicker("✅ Новых экспрессов: ${result.newExpressCount}, матчей: ${result.newMatchCount}" +
-                                    if (result.skippedCount > 0) ", пропущено: ${result.skippedCount}" else "", "#4CAF50")
+                            updateTicker(
+                                "✅ Новых экспрессов: ${result.newExpressCount}, матчей: ${result.newMatchCount}" +
+                                        if (result.skippedCount > 0) ", пропущено: ${result.skippedCount}" else "",
+                                "#4CAF50"
+                            )
                         }
                         result.skippedCount > 0 -> {
-                            updateTicker("ℹ️ Все матчи уже в базе (получено: ${result.totalReceived})", "#2196F3")
+                            updateTicker(
+                                "ℹ️ Все матчи уже в базе (получено: ${result.totalReceived})",
+                                "#2196F3"
+                            )
                         }
                         else -> {
                             updateTicker("Нет новых данных", "#9E9E9E")
@@ -259,14 +346,145 @@ class AnalyticsActivity : AppCompatActivity() {
         updateTicker("Автообновление остановлено", "#9E9E9E")
     }
     
+    // ==================== ОБНОВЛЕНИЕ СЧЕТОВ ====================
+    
+    private fun updateAllScores() {
+        lifecycleScope.launch {
+            try {
+                updateTicker("Обновление счетов...", "#FFC107")
+                btnUpdateScores.isEnabled = false
+                btnUpdateScores.text = "Обновление..."
+                
+                val allData = withContext(Dispatchers.IO) {
+                    database.dataDao().getAllData()
+                }
+                
+                // Получаем уникальные m_id
+                val uniqueMIds = allData.map { it.m_id }.distinct()
+                
+                var updatedCount = 0
+                var errorCount = 0
+                var totalCount = uniqueMIds.size
+                var processedCount = 0
+                
+                for (mId in uniqueMIds) {
+                    try {
+                        val result = withContext(Dispatchers.IO) {
+                            updateMatchScoreByMId(mId)
+                        }
+                        if (result) updatedCount++ else errorCount++
+                    } catch (e: Exception) {
+                        errorCount++
+                        Log.e(TAG, "Ошибка обновления счета для mId=$mId: ${e.message}")
+                    }
+                    
+                    processedCount++
+                    if (processedCount % 10 == 0) {
+                        updateTicker("Обновление: $processedCount/$totalCount...", "#FFC107")
+                    }
+                }
+                
+                updateTicker("✅ Обновлено: $updatedCount, ошибок: $errorCount из $totalCount", "#4CAF50")
+                btnUpdateScores.isEnabled = true
+                btnUpdateScores.text = if (isAutoUpdatingScores) "Стоп счета" else "Обновить счета"
+                
+                // Обновляем информацию
+                loadInfo()
+                
+            } catch (e: Exception) {
+                updateTicker("Ошибка обновления счетов: ${e.message}", "#F44336")
+                btnUpdateScores.isEnabled = true
+                btnUpdateScores.text = if (isAutoUpdatingScores) "Стоп счета" else "Обновить счета"
+            }
+        }
+    }
+    
+    private suspend fun updateMatchScoreByMId(mId: Long): Boolean {
+        return suspendCoroutine { continuation ->
+            apiClient.getMatchScore(
+                matchId = mId.toInt(),
+                onSuccess = { matchFactors ->
+                    if (matchFactors != null) {
+                        lifecycleScope.launch {
+                            try {
+                                withContext(Dispatchers.IO) {
+                                    val allData = database.dataDao().getAllData()
+                                    val matchesToUpdate = allData.filter { it.m_id == mId }
+                                    
+                                    if (matchesToUpdate.isNotEmpty()) {
+                                        val updatedMatches = matchesToUpdate.map { match ->
+                                            match.copy(
+                                                sh = matchFactors.score1,
+                                                sa = matchFactors.score2
+                                            )
+                                        }
+                                        database.dataDao().insertAll(updatedMatches)
+                                        
+                                        Log.d(TAG, "Обновлен счет для mId=$mId: ${matchFactors.score1}:${matchFactors.score2} (${matchesToUpdate.size} записей)")
+                                    }
+                                }
+                                continuation.resume(true)
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Ошибка сохранения счета для mId=$mId: ${e.message}")
+                                continuation.resume(false)
+                            }
+                        }
+                    } else {
+                        Log.w(TAG, "Нет данных счета для mId=$mId")
+                        continuation.resume(false)
+                    }
+                },
+                onError = { error ->
+                    Log.e(TAG, "Ошибка получения счета для mId=$mId: $error")
+                    continuation.resume(false)
+                }
+            )
+        }
+    }
+    
+    private val updateScoresRunnable = object : Runnable {
+        override fun run() {
+            if (isAutoUpdatingScores) {
+                updateAllScores()
+                handler.postDelayed(this, autoUpdateScoresInterval)
+            }
+        }
+    }
+    
+    private fun toggleAutoUpdateScores() {
+        isAutoUpdatingScores = !isAutoUpdatingScores
+        if (isAutoUpdatingScores) {
+            btnUpdateScores.text = "Стоп счета"
+            btnUpdateScores.setBackgroundColor(Color.parseColor("#F44336"))
+            handler.post(updateScoresRunnable)
+            updateTicker("Автообновление счетов запущено (каждые 60 сек)", "#4CAF50")
+            Toast.makeText(this, "Автообновление счетов запущено", Toast.LENGTH_SHORT).show()
+        } else {
+            stopAutoUpdateScores()
+        }
+    }
+    
+    private fun stopAutoUpdateScores() {
+        isAutoUpdatingScores = false
+        btnUpdateScores.text = "Обновить счета"
+        btnUpdateScores.setBackgroundColor(Color.parseColor("#FF9800"))
+        handler.removeCallbacks(updateScoresRunnable)
+        updateTicker("Автообновление счетов остановлено", "#9E9E9E")
+    }
+    
+    // ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ====================
+    
     private fun updateTicker(message: String, colorHex: String) {
         tvTicker.text = message
         tvStatusLight.setBackgroundColor(Color.parseColor(colorHex))
+        Log.d(TAG, message)
     }
     
     override fun onDestroy() {
         super.onDestroy()
         handler.removeCallbacks(fetchRunnable)
+        handler.removeCallbacks(updateScoresRunnable)
         isAutoFetching = false
+        isAutoUpdatingScores = false
     }
 }

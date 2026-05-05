@@ -26,11 +26,9 @@ class DataManager(private val database: AppDatabase) {
             var newMatchCount = 0
             var skippedCount = 0
             
-            // Получаем существующие m_id из базы
             val existingData = database.dataDao().getAllData()
             val existingMIds = existingData.map { it.m_id }.toSet()
             
-            // Получаем максимальные id
             val maxDataId = existingData.maxOfOrNull { it.id } ?: 0
             val existingExp = database.expDao().getAllExp()
             val maxExpTableId = existingExp.maxOfOrNull { it.id } ?: 0
@@ -38,35 +36,32 @@ class DataManager(private val database: AppDatabase) {
             
             val newDataEntities = mutableListOf<DataEntity>()
             val newExpEntities = mutableListOf<ExpEntity>()
+            val processedMIds = mutableSetOf<Long>()
+            processedMIds.addAll(existingMIds)
+            
             var currentDataId = maxDataId + 1
             var currentExpTableId = maxExpTableId + 1
             var nextExpId = maxExpId + 1
             
-            // Группируем ставки по id_exp из API
             val betsByApiExpId = bets.groupBy { it.id_exp }
             
             for ((apiExpId, expBets) in betsByApiExpId) {
-                // Проверяем каждый матч в экспрессе на дубликаты по m_id
                 val newBets = expBets.filter { bet ->
-                    bet.m_id !in existingMIds
+                    bet.m_id !in processedMIds
                 }
                 
-                // Если все матчи уже есть в базе - пропускаем
                 if (newBets.isEmpty()) {
                     skippedCount += expBets.size
                     continue
                 }
                 
-                // Если есть хотя бы один новый матч, но не все матчи новые
-                if (newBets.size < expBets.size && newBets.size < 2) {
+                if (newBets.size < 2) {
                     skippedCount += expBets.size
                     continue
                 }
                 
-                // Используем новый id_exp
                 val currentExpId = nextExpId++
                 
-                // Создаем записи для data
                 for (bet in newBets) {
                     newDataEntities.add(
                         DataEntity(
@@ -91,25 +86,19 @@ class DataManager(private val database: AppDatabase) {
                             tbtype = bet.tbtype
                         )
                     )
-                    
-                    // Добавляем m_id в список существующих для проверки дубликатов внутри пакета
-                    // (не добавляем в existingMIds, так как это set из базы)
+                    processedMIds.add(bet.m_id)
                 }
                 
-                // Вычисляем kfall как произведение lastkf всех матчей
                 val kfall = if (newBets.isNotEmpty()) {
                     newBets.map { it.lastkf }.reduce { acc, kf -> acc * kf }
-                } else {
-                    0.0
-                }
+                } else 0.0
                 
-                // Создаем запись для exp
                 newExpEntities.add(
                     ExpEntity(
                         id = currentExpTableId++,
                         id_exp = currentExpId,
                         kfall = kfall,
-                        sts_all = 1,  // Статус: активный
+                        sts_all = 1,
                         ct = LocalDateTime.now().format(
                             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
                         ),
@@ -125,7 +114,6 @@ class DataManager(private val database: AppDatabase) {
                 newMatchCount += newBets.size
             }
             
-            // Сохраняем в базу
             if (newDataEntities.isNotEmpty()) {
                 database.dataDao().insertAll(newDataEntities)
                 Log.d(TAG, "Inserted ${newDataEntities.size} data records")
@@ -135,7 +123,7 @@ class DataManager(private val database: AppDatabase) {
                 Log.d(TAG, "Inserted ${newExpEntities.size} exp records")
             }
             
-            Log.d(TAG, "Import completed: $newExpressCount new express, $newMatchCount new matches, $skippedCount skipped, next exp_id will be $nextExpId")
+            Log.d(TAG, "Import: $newExpressCount express, $newMatchCount matches, $skippedCount skipped, nextExpId=$nextExpId")
             
             ImportResult(
                 newExpressCount = newExpressCount,
@@ -146,9 +134,6 @@ class DataManager(private val database: AppDatabase) {
         }
     }
     
-    /**
-     * Получает следующий доступный id_exp
-     */
     suspend fun getNextExpId(): Int {
         return withContext(Dispatchers.IO) {
             val existingExp = database.expDao().getAllExp()
@@ -156,9 +141,6 @@ class DataManager(private val database: AppDatabase) {
         }
     }
     
-    /**
-     * Проверяет, существует ли m_id в базе
-     */
     suspend fun isMatchExists(mId: Long): Boolean {
         return withContext(Dispatchers.IO) {
             val existingData = database.dataDao().getAllData()
