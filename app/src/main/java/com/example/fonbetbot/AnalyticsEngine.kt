@@ -153,6 +153,9 @@ class AnalyticsEngine(private val database: AppDatabase) {
     private fun calculateStatistics(expressResults: List<ExpressResult>): Map<String, Any> {
         val result = mutableMapOf<String, Any>()
         
+        // ============ СОХРАНЯЕМ ВСЕ ЭКСПРЕССЫ ДЛЯ ДАШБОРДА ============
+        result["allExpresses"] = expressResults
+        
         // ============ ОБЩАЯ СТАТИСТИКА ============
         val totalExpress = expressResults.size
         val winExpress = expressResults.count { it.isWin }
