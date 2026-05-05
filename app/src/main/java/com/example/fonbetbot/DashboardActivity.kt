@@ -61,7 +61,7 @@ class DashboardActivity : AppCompatActivity() {
     private fun loadAnalytics() {
         lifecycleScope.launch {
             try {
-                tvStats.text = "Загрузка..."
+                tvStats.text = "Загрузка аналитики..."
                 btnRefresh.isEnabled = false
                 btnRefresh.text = "Загрузка..."
                 
@@ -71,10 +71,8 @@ class DashboardActivity : AppCompatActivity() {
                 
                 val total = analytics["total"] as? AnalyticsSummary
                 
-                if (total != null) {
-                    setupPieChart(total)
-                    
-                    val fullText = buildString {
+                val fullText = buildString {
+                    if (total != null) {
                         append(total.details)
                         
                         // По дням недели
@@ -88,9 +86,9 @@ class DashboardActivity : AppCompatActivity() {
                                 DayOfWeek.SUNDAY to "Вс"
                             )
                             for ((day, stats) in dayStats) {
-                                val (wins, total) = stats
-                                val rate = if (total > 0) (wins.toDouble() / total) * 100 else 0.0
-                                appendLine("${dayNames[day]}: $wins/$total (${String.format("%.1f", rate)}%)")
+                                val (wins, totalDay) = stats
+                                val rate = if (totalDay > 0) (wins.toDouble() / totalDay) * 100 else 0.0
+                                appendLine("${dayNames[day]}: $wins/$totalDay (${String.format("%.1f", rate)}%)")
                             }
                             appendLine()
                             setupDayBarChart(dayStats)
@@ -101,10 +99,10 @@ class DashboardActivity : AppCompatActivity() {
                         if (hourStats != null) {
                             appendLine("=== ПО ЧАСАМ ===")
                             for ((hour, stats) in hourStats) {
-                                val (wins, total) = stats
-                                if (total > 0) {
-                                    val rate = (wins.toDouble() / total) * 100
-                                    appendLine("${String.format("%02d", hour)}:00: $wins/$total (${String.format("%.1f", rate)}%)")
+                                val (wins, totalHour) = stats
+                                if (totalHour > 0) {
+                                    val rate = (wins.toDouble() / totalHour) * 100
+                                    appendLine("${String.format("%02d", hour)}:00: $wins/$totalHour (${String.format("%.1f", rate)}%)")
                                 }
                             }
                             appendLine()
@@ -116,9 +114,9 @@ class DashboardActivity : AppCompatActivity() {
                         if (monthStats != null) {
                             appendLine("=== ПО МЕСЯЦАМ ===")
                             for ((month, stats) in monthStats) {
-                                val (wins, total) = stats
-                                val rate = if (total > 0) (wins.toDouble() / total) * 100 else 0.0
-                                appendLine("$month: $wins/$total (${String.format("%.1f", rate)}%)")
+                                val (wins, totalMonth) = stats
+                                val rate = if (totalMonth > 0) (wins.toDouble() / totalMonth) * 100 else 0.0
+                                appendLine("$month: $wins/$totalMonth (${String.format("%.1f", rate)}%)")
                             }
                             appendLine()
                         }
@@ -126,11 +124,15 @@ class DashboardActivity : AppCompatActivity() {
                         // По типам
                         val typeStats = analytics["byType"] as? Map<Int, Triple<Int, Int, Double>>
                         if (typeStats != null) {
-                            appendLine("=== ПО ТИПАМ ===")
-                            val typeNames = mapOf(924 to "Тотал", 927 to "Фора1+1.5", 928 to "Фора2+1.5")
+                            appendLine("=== ПО ТИПАМ СТАВОК ===")
+                            val typeNames = mapOf(
+                                924 to "Победа/Тотал (sh>=sa)",
+                                927 to "Фора 1 +1.5 (sh+1>sa)",
+                                928 to "Фора 2 +1.5 (sa+1>=sh)"
+                            )
                             for ((type, stats) in typeStats) {
-                                val (wins, total, rate) = stats
-                                appendLine("${typeNames[type]}: $wins/$total (${String.format("%.1f", rate)}%)")
+                                val (wins, totalType, rate) = stats
+                                appendLine("${typeNames[type]}: $wins/$totalType (${String.format("%.1f", rate)}%)")
                             }
                             appendLine()
                         }
@@ -138,29 +140,39 @@ class DashboardActivity : AppCompatActivity() {
                         // Смешанные типы
                         val mixedStats = analytics["mixedTypes"] as? List<MixedTypeStats>
                         if (mixedStats != null) {
-                            appendLine("=== СМЕШАННЫЕ ТИПЫ ===")
+                            appendLine("=== СМЕШАННЫЕ ТИПЫ ЭКСПРЕССОВ ===")
                             for (mix in mixedStats) {
                                 appendLine("${mix.typeCombination}: ${mix.wins}/${mix.total} (${String.format("%.1f", mix.rate)}%)")
                             }
                             appendLine()
                         }
                     }
-                    
-                    tvStats.text = fullText.toString()
+                }
+                
+                tvStats.text = fullText.toString()
+                
+                if (total != null) {
+                    setupPieChart(total)
                 }
                 
                 btnRefresh.isEnabled = true
-                btnRefresh.text = "Обновить"
+                btnRefresh.text = "Обновить аналитику"
                 
             } catch (e: Exception) {
-                tvStats.text = "Ошибка: ${e.message}"
+                tvStats.text = "Ошибка при расчете аналитики: ${e.message}"
                 btnRefresh.isEnabled = true
-                btnRefresh.text = "Обновить"
+                btnRefresh.text = "Обновить аналитику"
             }
         }
     }
     
     private fun setupPieChart(total: AnalyticsSummary) {
+        if (total.winExpress == 0 && total.loseExpress == 0) {
+            pieChart.clear()
+            pieChart.centerText = "Нет данных"
+            return
+        }
+        
         val entries = mutableListOf<PieEntry>()
         if (total.winExpress > 0) entries.add(PieEntry(total.winExpress.toFloat(), "Выигрыши"))
         if (total.loseExpress > 0) entries.add(PieEntry(total.loseExpress.toFloat(), "Проигрыши"))
@@ -170,10 +182,11 @@ class DashboardActivity : AppCompatActivity() {
         val dataSet = PieDataSet(entries, "")
         dataSet.colors = listOf(Color.parseColor("#4CAF50"), Color.parseColor("#F44336"))
         dataSet.valueTextSize = 14f
+        dataSet.sliceSpace = 3f
         
         pieChart.data = PieData(dataSet).apply { setValueFormatter(PercentFormatter(pieChart)) }
         pieChart.description.isEnabled = false
-        pieChart.centerText = "${String.format("%.1f", total.winRate)}%"
+        pieChart.centerText = "Проходимость\n${String.format("%.1f", total.winRate)}%"
         pieChart.setCenterTextSize(16f)
         pieChart.setUsePercentValues(true)
         pieChart.isDrawHoleEnabled = true
@@ -192,7 +205,13 @@ class DashboardActivity : AppCompatActivity() {
             val (wins, total) = dayStats[day] ?: Pair(0, 0)
             val rate = if (total > 0) (wins.toFloat() / total) * 100 else 0f
             entries.add(BarEntry(index.toFloat(), rate))
-            colors.add(if (rate >= 50) Color.parseColor("#4CAF50") else Color.parseColor("#F44336"))
+            colors.add(
+                when {
+                    total == 0 -> Color.GRAY
+                    rate >= 50 -> Color.parseColor("#4CAF50")
+                    else -> Color.parseColor("#F44336")
+                }
+            )
         }
         
         val dataSet = BarDataSet(entries, "").apply { this.colors = colors; valueTextSize = 12f }
@@ -220,7 +239,13 @@ class DashboardActivity : AppCompatActivity() {
             val rate = if (total > 0) (wins.toFloat() / total) * 100 else 0f
             entries.add(BarEntry(hour.toFloat(), rate))
             labels.add(String.format("%02d", hour))
-            colors.add(if (rate >= 50) Color.parseColor("#2196F3") else Color.parseColor("#FF9800"))
+            colors.add(
+                when {
+                    total == 0 -> Color.GRAY
+                    rate >= 50 -> Color.parseColor("#2196F3")
+                    else -> Color.parseColor("#FF9800")
+                }
+            )
         }
         
         val dataSet = BarDataSet(entries, "").apply { this.colors = colors; valueTextSize = 10f }
