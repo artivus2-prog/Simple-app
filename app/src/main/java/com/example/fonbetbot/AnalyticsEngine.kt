@@ -6,6 +6,7 @@ import kotlinx.coroutines.withContext
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.time.DayOfWeek
+import java.time.temporal.WeekFields
 import java.util.*
 
 data class MatchResult(
@@ -15,7 +16,8 @@ data class MatchResult(
     val sh: Int,
     val sa: Int,
     val type: Int,
-    val isWin: Boolean
+    val isWin: Boolean,
+    val liganame: String = ""
 )
 
 data class ExpressResult(
@@ -23,7 +25,9 @@ data class ExpressResult(
     val matches: List<MatchResult>,
     val isWin: Boolean,
     val dateTime: LocalDateTime,
-    val isReplaced: Boolean
+    val isReplaced: Boolean,
+    val weekNumber: Int = 0,
+    val yearWeek: String = ""
 )
 
 data class AnalyticsSummary(
@@ -34,6 +38,29 @@ data class AnalyticsSummary(
     val details: String
 )
 
+data class WeekStats(
+    val yearWeek: String,
+    val startDate: String,
+    val endDate: String,
+    val total: Int,
+    val wins: Int,
+    val rate: Double
+)
+
+data class LeagueStats(
+    val liganame: String,
+    val total: Int,
+    val wins: Int,
+    val rate: Double
+)
+
+data class MixedTypeStats(
+    val typeCombination: String,
+    val total: Int,
+    val wins: Int,
+    val rate: Double
+)
+
 class AnalyticsEngine(private val database: AppDatabase) {
     
     suspend fun calculateAnalytics(): Map<String, Any> {
@@ -41,26 +68,25 @@ class AnalyticsEngine(private val database: AppDatabase) {
             val allData = database.dataDao().getAllData()
             val allExp = database.expDao().getAllExp()
             
-            // Группируем данные по id_exp
             val dataByExpId = allData.groupBy { it.id_exp }
             val expMap = allExp.associateBy { it.id_exp }
             
-            // Анализируем каждый экспресс
             val expressResults = mutableListOf<ExpressResult>()
             val replacedExpIds = allExp.filter { it.id_exp_replace > 0 }
                 .map { it.id_exp }
                 .toSet()
             
             for ((expId, matches) in dataByExpId) {
-                if (matches.size < 2) continue // Пропускаем неполные экспрессы
+                if (matches.size < 2) continue
                 
                 val exp = expMap[expId] ?: continue
                 
                 val matchResults = matches.map { match ->
                     val isWin = when (match.type) {
-                        924 -> match.sh >= match.sa  // Победа/тотал
-                        927 -> match.sh + 1 > match.sa  // Фора 1 (+1.5)
-                        else -> match.sh >= match.sa  // По умолчанию
+                        924 -> match.sh >= match.sa
+                        927 -> match.sh + 1 > match.sa
+                        928 -> match.sa + 1 >= match.sh
+                        else -> match.sh >= match.sa
                     }
                     
                     MatchResult(
@@ -70,7 +96,8 @@ class AnalyticsEngine(private val database: AppDatabase) {
                         sh = match.sh,
                         sa = match.sa,
                         type = match.type,
-                        isWin = isWin
+                        isWin = isWin,
+                        liganame = match.liganame
                     )
                 }
                 
@@ -78,18 +105,23 @@ class AnalyticsEngine(private val database: AppDatabase) {
                 val dateTime = parseDateTime(exp.ct)
                 val isReplaced = expId in replacedExpIds
                 
+                val weekField = WeekFields.of(Locale.getDefault())
+                val weekNumber = dateTime.get(weekField.weekOfWeekBasedYear())
+                val yearWeek = "${dateTime.year}-W${String.format("%02d", weekNumber)}"
+                
                 expressResults.add(
                     ExpressResult(
                         expId = expId,
                         matches = matchResults,
                         isWin = allWins,
                         dateTime = dateTime,
-                        isReplaced = isReplaced
+                        isReplaced = isReplaced,
+                        weekNumber = weekNumber,
+                        yearWeek = yearWeek
                     )
                 )
             }
             
-            // Рассчитываем статистику
             calculateStatistics(expressResults)
         }
     }
@@ -100,7 +132,6 @@ class AnalyticsEngine(private val database: AppDatabase) {
             LocalDateTime.parse(ct, formatter)
         } catch (e: Exception) {
             try {
-                // Пробуем с миллисекундами
                 val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
                 LocalDateTime.parse(ct, formatter)
             } catch (e2: Exception) {
@@ -108,7 +139,12 @@ class AnalyticsEngine(private val database: AppDatabase) {
                     val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
                     LocalDateTime.parse(ct, formatter)
                 } catch (e3: Exception) {
-                    LocalDateTime.now()
+                    try {
+                        val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH.mm.ss")
+                        LocalDateTime.parse(ct, formatter)
+                    } catch (e4: Exception) {
+                        LocalDateTime.now()
+                    }
                 }
             }
         }
@@ -117,7 +153,7 @@ class AnalyticsEngine(private val database: AppDatabase) {
     private fun calculateStatistics(expressResults: List<ExpressResult>): Map<String, Any> {
         val result = mutableMapOf<String, Any>()
         
-        // Общая статистика
+        // ============ ОБЩАЯ СТАТИСТИКА ============
         val totalExpress = expressResults.size
         val winExpress = expressResults.count { it.isWin }
         val loseExpress = totalExpress - winExpress
@@ -138,70 +174,25 @@ class AnalyticsEngine(private val database: AppDatabase) {
             }
         )
         
-        // По дням недели
+        // ============ ПО ДНЯМ НЕДЕЛИ ============
         val byDayOfWeek = expressResults.groupBy { it.dateTime.dayOfWeek }
-        val dayStats = mutableMapOf<DayOfWeek, Pair<Int, Int>>()
-        val dayNames = mapOf(
-            DayOfWeek.MONDAY to "Понедельник",
-            DayOfWeek.TUESDAY to "Вторник",
-            DayOfWeek.WEDNESDAY to "Среда",
-            DayOfWeek.THURSDAY to "Четверг",
-            DayOfWeek.FRIDAY to "Пятница",
-            DayOfWeek.SATURDAY to "Суббота",
-            DayOfWeek.SUNDAY to "Воскресенье"
-        )
-        
-        for ((day, expresses) in byDayOfWeek) {
-            val wins = expresses.count { it.isWin }
-            val total = expresses.size
-            dayStats[day] = Pair(wins, total)
+        val dayStats = LinkedHashMap<DayOfWeek, Pair<Int, Int>>()
+        for (day in DayOfWeek.entries) {
+            val expresses = byDayOfWeek[day] ?: emptyList()
+            dayStats[day] = Pair(expresses.count { it.isWin }, expresses.size)
         }
-        
-        val dayDetails = buildString {
-            appendLine("=== ПО ДНЯМ НЕДЕЛИ ===")
-            DayOfWeek.entries.forEach { day ->
-                val stats = dayStats[day]
-                if (stats != null) {
-                    val (wins, total) = stats
-                    val rate = if (total > 0) (wins.toDouble() / total) * 100 else 0.0
-                    appendLine("${dayNames[day] ?: day.name}: $wins/$total (${String.format(Locale.US, "%.1f", rate)}%)")
-                }
-            }
-            appendLine()
-        }
-        
         result["byDayOfWeek"] = dayStats
-        result["dayDetails"] = dayDetails
         
-        // По часам
+        // ============ ПО ЧАСАМ ============
         val byHour = expressResults.groupBy { it.dateTime.hour }
         val hourStats = TreeMap<Int, Pair<Int, Int>>()
-        
-        for ((hour, expresses) in byHour) {
-            val wins = expresses.count { it.isWin }
-            val total = expresses.size
-            hourStats[hour] = Pair(wins, total)
+        for (hour in 0..23) {
+            val expresses = byHour[hour] ?: emptyList()
+            hourStats[hour] = Pair(expresses.count { it.isWin }, expresses.size)
         }
-        
-        val hourDetails = buildString {
-            appendLine("=== ПО ЧАСАМ ===")
-            for (hour in 0..23) {
-                val stats = hourStats[hour]
-                if (stats != null) {
-                    val (wins, total) = stats
-                    val rate = if (total > 0) (wins.toDouble() / total) * 100 else 0.0
-                    appendLine("${String.format("%02d", hour)}:00-${
-                        String.format("%02d", (hour + 1) % 24)
-                    }:00: $wins/$total (${String.format(Locale.US, "%.1f", rate)}%)")
-                }
-            }
-            appendLine()
-        }
-        
         result["byHour"] = hourStats
-        result["hourDetails"] = hourDetails
         
-        // По месяцам
+        // ============ ПО МЕСЯЦАМ ============
         val byMonth = expressResults.groupBy { it.dateTime.month }
         val monthStats = LinkedHashMap<String, Pair<Int, Int>>()
         val monthNames = mapOf(
@@ -209,75 +200,142 @@ class AnalyticsEngine(private val database: AppDatabase) {
             5 to "Май", 6 to "Июнь", 7 to "Июль", 8 to "Август",
             9 to "Сентябрь", 10 to "Октябрь", 11 to "Ноябрь", 12 to "Декабрь"
         )
+        val sortedMonths = byMonth.entries.sortedBy { it.key.value }
+        for ((month, expresses) in sortedMonths) {
+            monthStats[monthNames[month.value] ?: month.name] = Pair(
+                expresses.count { it.isWin }, expresses.size
+            )
+        }
+        result["byMonth"] = monthStats
         
-        for ((month, expresses) in byMonth) {
+        // ============ ПО НЕДЕЛЯМ ============
+        val byWeek = expressResults.groupBy { it.yearWeek }
+        val weekStatsList = mutableListOf<WeekStats>()
+        
+        for ((yearWeek, expresses) in byWeek) {
+            if (expresses.isEmpty()) continue
+            val sorted = expresses.sortedBy { it.dateTime }
+            val startDate = sorted.first().dateTime.format(DateTimeFormatter.ofPattern("dd.MM"))
+            val endDate = sorted.last().dateTime.format(DateTimeFormatter.ofPattern("dd.MM"))
             val wins = expresses.count { it.isWin }
             val total = expresses.size
-            monthStats["${monthNames[month.value] ?: month.name} ${month.value}"] = Pair(wins, total)
+            val rate = if (total > 0) (wins.toDouble() / total) * 100 else 0.0
+            
+            weekStatsList.add(WeekStats(yearWeek, startDate, endDate, total, wins, rate))
         }
         
-        val monthDetails = buildString {
-            appendLine("=== ПО МЕСЯЦАМ ===")
-            monthStats.forEach { (month, stats) ->
-                val (wins, total) = stats
-                val rate = if (total > 0) (wins.toDouble() / total) * 100 else 0.0
-                appendLine("$month: $wins/$total (${String.format(Locale.US, "%.1f", rate)}%)")
-            }
-            appendLine()
+        // Сортируем по году и неделе
+        weekStatsList.sortBy { it.yearWeek }
+        result["byWeek"] = weekStatsList
+        
+        // ============ ПО ЛИГАМ ============
+        val allMatches = expressResults.flatMap { express -> express.matches }
+        val byLeague = allMatches.groupBy { it.liganame }
+        val leagueStatsList = mutableListOf<LeagueStats>()
+        
+        for ((league, matches) in byLeague) {
+            val wins = matches.count { it.isWin }
+            val total = matches.size
+            val rate = if (total > 0) (wins.toDouble() / total) * 100 else 0.0
+            leagueStatsList.add(LeagueStats(league, total, wins, rate))
         }
         
-        result["byMonth"] = monthStats
-        result["monthDetails"] = monthDetails
+        // Сортируем по количеству матчей (по убыванию)
+        leagueStatsList.sortByDescending { it.total }
+        result["byLeague"] = leagueStatsList
         
-        // По типам ставок
-        val byType = expressResults.flatMap { exp -> exp.matches.map { it.type } }
-            .groupBy { it }
-        val typeStats = mutableMapOf<Int, Int>()
-        byType.forEach { (type, list) -> typeStats[type] = list.size }
+        // Топ-20 лиг
+        result["topLeagues"] = leagueStatsList.take(20)
         
-        val typeDetails = buildString {
-            appendLine("=== ПО ТИПАМ СТАВОК ===")
-            typeStats.forEach { (type, count) ->
-                val typeName = when (type) {
-                    924 -> "Победа/Тотал"
-                    927 -> "Фора 1 (+1.5)"
-                    else -> "Тип $type"
-                }
-                appendLine("$typeName: $count ставок")
-            }
-            appendLine()
+        // ============ ПО ТИПАМ СТАВОК ============
+        val typeStats = mutableMapOf<Int, Triple<Int, Int, Double>>()
+        for (type in listOf(924, 927, 928)) {
+            val typeMatches = allMatches.filter { it.type == type }
+            val wins = typeMatches.count { it.isWin }
+            val total = typeMatches.size
+            val rate = if (total > 0) (wins.toDouble() / total) * 100 else 0.0
+            typeStats[type] = Triple(wins, total, rate)
         }
-        
         result["byType"] = typeStats
-        result["typeDetails"] = typeDetails
         
-        // Детальная информация
-        val detailedInfo = buildString {
-            appendLine("=== ДЕТАЛЬНАЯ ИНФОРМАЦИЯ ===")
-            // Показываем только последние 50 для производительности
-            expressResults.takeLast(50).forEach { express ->
-                val status = if (express.isWin) "✓ ВЫИГРЫШ" else "✗ ПРОИГРЫШ"
-                appendLine("Экспресс #${express.expId} - $status")
-                appendLine("  Дата: ${express.dateTime.format(
-                    DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm")
-                )}")
-                if (express.isReplaced) {
-                    appendLine("  (Замененный)")
-                }
-                express.matches.forEach { match ->
-                    val matchStatus = if (match.isWin) "✓" else "✗"
-                    val typeName = when (match.type) {
-                        924 -> "Тотал"
-                        927 -> "Фора1"
-                        else -> "Тип${match.type}"
-                    }
-                    appendLine("  $matchStatus ${match.home} vs ${match.away} (${match.sh}:${match.sa}) [$typeName]")
-                }
-                appendLine()
-            }
+        // ============ СМЕШАННЫЕ ТИПЫ ЭКСПРЕССОВ ============
+        val mixedStatsList = mutableListOf<MixedTypeStats>()
+        
+        // 924 + 927
+        val mixed924927 = expressResults.filter { express ->
+            val types = express.matches.map { it.type }.distinct()
+            types.contains(924) && types.contains(927) && !types.contains(928)
         }
+        mixedStatsList.add(MixedTypeStats(
+            "924 + 927", mixed924927.size,
+            mixed924927.count { it.isWin },
+            if (mixed924927.isNotEmpty()) (mixed924927.count { it.isWin }.toDouble() / mixed924927.size) * 100 else 0.0
+        ))
         
-        result["detailedInfo"] = detailedInfo
+        // 924 + 928
+        val mixed924928 = expressResults.filter { express ->
+            val types = express.matches.map { it.type }.distinct()
+            types.contains(924) && types.contains(928) && !types.contains(927)
+        }
+        mixedStatsList.add(MixedTypeStats(
+            "924 + 928", mixed924928.size,
+            mixed924928.count { it.isWin },
+            if (mixed924928.isNotEmpty()) (mixed924928.count { it.isWin }.toDouble() / mixed924928.size) * 100 else 0.0
+        ))
+        
+        // 927 + 928
+        val mixed927928 = expressResults.filter { express ->
+            val types = express.matches.map { it.type }.distinct()
+            types.contains(927) && types.contains(928) && !types.contains(924)
+        }
+        mixedStatsList.add(MixedTypeStats(
+            "927 + 928", mixed927928.size,
+            mixed927928.count { it.isWin },
+            if (mixed927928.isNotEmpty()) (mixed927928.count { it.isWin }.toDouble() / mixed927928.size) * 100 else 0.0
+        ))
+        
+        // Все три типа
+        val mixedAll = expressResults.filter { express ->
+            val types = express.matches.map { it.type }.distinct()
+            types.containsAll(listOf(924, 927, 928))
+        }
+        mixedStatsList.add(MixedTypeStats(
+            "924 + 927 + 928", mixedAll.size,
+            mixedAll.count { it.isWin },
+            if (mixedAll.isNotEmpty()) (mixedAll.count { it.isWin }.toDouble() / mixedAll.size) * 100 else 0.0
+        ))
+        
+        // Только 924
+        val only924 = expressResults.filter { express ->
+            express.matches.all { it.type == 924 }
+        }
+        mixedStatsList.add(MixedTypeStats(
+            "Только 924", only924.size,
+            only924.count { it.isWin },
+            if (only924.isNotEmpty()) (only924.count { it.isWin }.toDouble() / only924.size) * 100 else 0.0
+        ))
+        
+        // Только 927
+        val only927 = expressResults.filter { express ->
+            express.matches.all { it.type == 927 }
+        }
+        mixedStatsList.add(MixedTypeStats(
+            "Только 927", only927.size,
+            only927.count { it.isWin },
+            if (only927.isNotEmpty()) (only927.count { it.isWin }.toDouble() / only927.size) * 100 else 0.0
+        ))
+        
+        // Только 928
+        val only928 = expressResults.filter { express ->
+            express.matches.all { it.type == 928 }
+        }
+        mixedStatsList.add(MixedTypeStats(
+            "Только 928", only928.size,
+            only928.count { it.isWin },
+            if (only928.isNotEmpty()) (only928.count { it.isWin }.toDouble() / only928.size) * 100 else 0.0
+        ))
+        
+        result["mixedTypes"] = mixedStatsList
         
         return result
     }
