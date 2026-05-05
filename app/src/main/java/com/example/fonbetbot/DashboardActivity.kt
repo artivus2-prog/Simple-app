@@ -8,6 +8,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.util.Pair
 import androidx.lifecycle.lifecycleScope
 import com.github.mikephil.charting.charts.BarChart
 import com.github.mikephil.charting.charts.HorizontalBarChart
@@ -22,7 +23,6 @@ import com.google.android.material.datepicker.MaterialDatePicker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
 import java.time.*
 import java.time.format.DateTimeFormatter
 import java.util.*
@@ -56,10 +56,9 @@ class DashboardActivity : AppCompatActivity() {
     private var allExpressResults = listOf<ExpressResult>()
     private var filteredExpressResults = listOf<ExpressResult>()
     private var selectedLeague: String? = null
-    
-    // Период
     private var dateStart: LocalDate? = null
     private var dateEnd: LocalDate? = null
+    private var isWeekFiltered = false
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -91,13 +90,15 @@ class DashboardActivity : AppCompatActivity() {
         btnBack.setOnClickListener { finish() }
         btnPrevWeek.setOnClickListener { navigateWeek(-1) }
         btnNextWeek.setOnClickListener { navigateWeek(1) }
-        
         btnDateRange.setOnClickListener { showDateRangePicker() }
         
+        // При выборе лиги: сбрасываем только фильтр недели, сохраняем период календаря
         spinnerLeague.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 selectedLeague = if (position > 0) allLeagueStats[position - 1].liganame else null
-                applyFilters()
+                isWeekFiltered = false  // Сбрасываем только неделю
+                applyFilters()  // Применяем: даты (если есть) + лига
+                refreshAllCharts()
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
@@ -106,10 +107,7 @@ class DashboardActivity : AppCompatActivity() {
             override fun onValueSelected(e: Entry?, h: Highlight?) {
                 e?.let { entry ->
                     val dayIndex = entry.x.toInt()
-                    if (dayIndex in 0..6) {
-                        val day = DayOfWeek.entries[dayIndex]
-                        showExpressesForDay(day)
-                    }
+                    if (dayIndex in 0..6) showExpressesForDay(DayOfWeek.entries[dayIndex])
                 }
             }
             override fun onNothingSelected() {}
@@ -117,10 +115,7 @@ class DashboardActivity : AppCompatActivity() {
         
         barChartHour.setOnChartValueSelectedListener(object : OnChartValueSelectedListener {
             override fun onValueSelected(e: Entry?, h: Highlight?) {
-                e?.let { entry ->
-                    val hour = entry.x.toInt()
-                    showExpressesForHour(hour)
-                }
+                e?.let { entry -> showExpressesForHour(entry.x.toInt()) }
             }
             override fun onNothingSelected() {}
         })
@@ -130,57 +125,53 @@ class DashboardActivity : AppCompatActivity() {
     }
     
     private fun showDateRangePicker() {
-        val dateRangePicker = MaterialDatePicker.Builder.dateRangePicker()
+        val selection = if (dateStart != null && dateEnd != null) {
+            Pair(dateStart!!.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+                dateEnd!!.atTime(23,59,59).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli())
+        } else null
+        
+        MaterialDatePicker.Builder.dateRangePicker()
             .setTitleText("Выберите период")
-            .setSelection(
-                androidx.core.util.Pair(
-                    dateStart?.atStartOfDay(ZoneId.systemDefault())?.toInstant()?.toEpochMilli(),
-                    dateEnd?.atTime(23, 59, 59)?.atZone(ZoneId.systemDefault())?.toInstant()?.toEpochMilli()
-                )
-            )
+            .setSelection(selection)
             .build()
-        
-        dateRangePicker.addOnPositiveButtonClickListener { selection ->
-            dateStart = Instant.ofEpochMilli(selection.first)
-                .atZone(ZoneId.systemDefault())
-                .toLocalDate()
-            dateEnd = Instant.ofEpochMilli(selection.second)
-                .atZone(ZoneId.systemDefault())
-                .toLocalDate()
-            
-            updateDateRangeInfo()
-            applyFilters()
-            refreshCharts()
-        }
-        
-        dateRangePicker.show(supportFragmentManager, "date_range_picker")
+            .apply {
+                addOnPositiveButtonClickListener { sel ->
+                    dateStart = Instant.ofEpochMilli(sel.first).atZone(ZoneId.systemDefault()).toLocalDate()
+                    dateEnd = Instant.ofEpochMilli(sel.second).atZone(ZoneId.systemDefault()).toLocalDate()
+                    isWeekFiltered = false  // Сбрасываем фильтр недели
+                    updateDateRangeInfo()
+                    applyFilters()  // Применяем: новый период + лига (если выбрана)
+                    refreshAllCharts()
+                }
+                show(supportFragmentManager, "date_range_picker")
+            }
     }
     
     private fun updateDateRangeInfo() {
         if (dateStart != null && dateEnd != null) {
             tvDateRangeInfo.text = "${dateStart!!.format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))} - ${dateEnd!!.format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))}"
-            btnDateRange.text = "📅 ${dateStart!!.format(DateTimeFormatter.ofPattern("dd.MM"))} - ${dateEnd!!.format(DateTimeFormatter.ofPattern("dd.MM"))}"
+            btnDateRange.text = "📅 ${dateStart!!.format(DateTimeFormatter.ofPattern("dd.MM"))}-${dateEnd!!.format(DateTimeFormatter.ofPattern("dd.MM"))}"
         } else {
             tvDateRangeInfo.text = "Весь период"
             btnDateRange.text = "📅 Весь период"
         }
     }
     
+    // applyFilters: сначала фильтр по датам, потом по лиге
     private fun applyFilters() {
-        // Применяем фильтр по датам
         var filtered = allExpressResults
         
+        // Фильтр по датам (если выбран период)
         if (dateStart != null && dateEnd != null) {
-            val startDateTime = dateStart!!.atStartOfDay()
-            val endDateTime = dateEnd!!.atTime(23, 59, 59)
-            
+            val start = dateStart!!.atStartOfDay()
+            val end = dateEnd!!.atTime(23, 59, 59)
             filtered = filtered.filter { express ->
-                val expressDate = express.dateTime.toLocalDate().atStartOfDay()
-                !expressDate.isBefore(startDateTime) && !expressDate.isAfter(endDateTime)
+                val d = express.dateTime
+                !d.isBefore(start) && !d.isAfter(end)
             }
         }
         
-        // Применяем фильтр по лиге
+        // Фильтр по лиге (если выбрана)
         if (selectedLeague != null) {
             filtered = filtered.filter { express ->
                 express.matches.any { match -> match.liganame == selectedLeague }
@@ -190,97 +181,96 @@ class DashboardActivity : AppCompatActivity() {
         filteredExpressResults = filtered
     }
     
-    private fun refreshCharts() {
-        val filtered = filteredExpressResults
-        
-        // Пересчитываем статистику для отфильтрованных данных
-        val totalExpress = filtered.size
-        val winExpress = filtered.count { it.isWin }
-        val loseExpress = totalExpress - winExpress
-        val winRate = if (totalExpress > 0) (winExpress.toDouble() / totalExpress) * 100 else 0.0
-        
-        // Обновляем круговую диаграмму
-        setupPieChart(AnalyticsSummary(totalExpress, winExpress, loseExpress, winRate, ""))
-        
-        // Обновляем гистограмму по дням
-        val byDay = filtered.groupBy { it.dateTime.dayOfWeek }
-        val dayStats = LinkedHashMap<DayOfWeek, Pair<Int, Int>>()
-        for (day in DayOfWeek.entries) {
-            val expresses = byDay[day] ?: emptyList()
-            dayStats[day] = Pair(expresses.count { it.isWin }, expresses.size)
+    private fun refreshAllCharts() {
+        val data = if (isWeekFiltered && currentWeekIndex in allWeekStats.indices) {
+            filteredExpressResults.filter { it.yearWeek == allWeekStats[currentWeekIndex].yearWeek }
+        } else {
+            filteredExpressResults
         }
-        setupDayBarChart(dayStats)
+        refreshChartsForFiltered(data)
+    }
+    
+    private fun refreshChartsForFiltered(filtered: List<ExpressResult>) {
+        val t = filtered.size
+        val w = filtered.count { it.isWin }
+        val l = t - w
+        val r = if (t > 0) (w.toDouble() / t) * 100 else 0.0
+        setupPieChart(AnalyticsSummary(t, w, l, r, ""))
         
-        // Обновляем гистограмму по часам
-        val byHour = filtered.groupBy { it.dateTime.hour }
-        val hourStats = TreeMap<Int, Pair<Int, Int>>()
-        for (hour in 0..23) {
-            val expresses = byHour[hour] ?: emptyList()
-            if (expresses.isNotEmpty()) {
-                hourStats[hour] = Pair(expresses.count { it.isWin }, expresses.size)
-            }
+        val bd = LinkedHashMap<DayOfWeek, Pair<Int, Int>>()
+        for (d in DayOfWeek.entries) {
+            val ex = filtered.filter { it.dateTime.dayOfWeek == d }
+            bd[d] = Pair(ex.count { it.isWin }, ex.size)
         }
-        setupHourBarChart(hourStats)
+        setupDayBarChart(bd)
         
-        // Обновляем текстовую сводку
-        updateSummaryText(filtered, winRate)
+        val bh = TreeMap<Int, Pair<Int, Int>>()
+        for (h in 0..23) {
+            val ex = filtered.filter { it.dateTime.hour == h }
+            if (ex.isNotEmpty()) bh[h] = Pair(ex.count { it.isWin }, ex.size)
+        }
+        setupHourBarChart(bh)
+        
+        updateSummaryText(filtered, r)
     }
     
     private fun updateSummaryText(filtered: List<ExpressResult>, winRate: Double) {
-        val total = filtered.size
-        val wins = filtered.count { it.isWin }
-        val loses = total - wins
+        val t = filtered.size
+        val w = filtered.count { it.isWin }
+        val l = t - w
         
         tvStats.text = buildString {
-            appendLine("=== ПЕРИОД: ${tvDateRangeInfo.text} ===")
-            appendLine("Всего: $total | Выигрыши: $wins | Проигрыши: $loses | Проход: ${String.format("%.1f", winRate)}%")
+            val pt = when {
+                isWeekFiltered && currentWeekIndex in allWeekStats.indices -> {
+                    val wk = allWeekStats[currentWeekIndex]
+                    "${wk.yearWeek} (${wk.startDate}-${wk.endDate})"
+                }
+                dateStart != null && dateEnd != null -> {
+                    "${dateStart!!.format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))} - ${dateEnd!!.format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))}"
+                }
+                else -> "Весь период"
+            }
+            
+            val leagueInfo = if (selectedLeague != null) " | Лига: $selectedLeague" else ""
+            appendLine("=== $pt$leagueInfo ===")
+            appendLine("Всего: $t | ✓ $w | ✗ $l | ${String.format("%.1f", winRate)}%")
             appendLine()
             
-            if (total > 0) {
-                val byDay = filtered.groupBy { it.dateTime.dayOfWeek }
-                val dayNames = mapOf(
+            if (t > 0) {
+                val dn = mapOf(
                     DayOfWeek.MONDAY to "Пн", DayOfWeek.TUESDAY to "Вт",
                     DayOfWeek.WEDNESDAY to "Ср", DayOfWeek.THURSDAY to "Чт",
                     DayOfWeek.FRIDAY to "Пт", DayOfWeek.SATURDAY to "Сб",
                     DayOfWeek.SUNDAY to "Вс"
                 )
                 appendLine("--- ПО ДНЯМ ---")
-                for (day in DayOfWeek.entries) {
-                    val expresses = byDay[day] ?: emptyList()
-                    val w = expresses.count { it.isWin }
-                    val t = expresses.size
-                    if (t > 0) {
-                        val r = (w.toDouble() / t) * 100
-                        appendLine("${dayNames[day]}: $w/$t (${String.format("%.1f", r)}%)")
-                    }
+                for (d in DayOfWeek.entries) {
+                    val ex = filtered.filter { it.dateTime.dayOfWeek == d }
+                    val wd = ex.count { it.isWin }
+                    val td = ex.size
+                    if (td > 0) appendLine("${dn[d]}: $wd/$td (${String.format("%.1f", (wd.toDouble() / td) * 100)}%)")
                 }
                 appendLine()
                 
-                val byHour = filtered.groupBy { it.dateTime.hour }
                 appendLine("--- ПО ЧАСАМ ---")
-                for (hour in 0..23) {
-                    val expresses = byHour[hour] ?: emptyList()
-                    val w = expresses.count { it.isWin }
-                    val t = expresses.size
-                    if (t > 0) {
-                        val r = (w.toDouble() / t) * 100
-                        appendLine("${String.format("%02d", hour)}:00: $w/$t (${String.format("%.1f", r)}%)")
-                    }
+                for (h in 0..23) {
+                    val ex = filtered.filter { it.dateTime.hour == h }
+                    val wh = ex.count { it.isWin }
+                    val th = ex.size
+                    if (th > 0) appendLine("${String.format("%02d", h)}:00: $wh/$th (${String.format("%.1f", (wh.toDouble() / th) * 100)}%)")
                 }
                 appendLine()
                 
-                val byMonth = filtered.groupBy { it.dateTime.month }
-                val monthNames = mapOf(
-                    1 to "Январь", 2 to "Февраль", 3 to "Март", 4 to "Апрель",
-                    5 to "Май", 6 to "Июнь", 7 to "Июль", 8 to "Август",
-                    9 to "Сентябрь", 10 to "Октябрь", 11 to "Ноябрь", 12 to "Декабрь"
+                val mn = mapOf(
+                    1 to "Янв", 2 to "Фев", 3 to "Мар", 4 to "Апр",
+                    5 to "Май", 6 to "Июн", 7 to "Июл", 8 to "Авг",
+                    9 to "Сен", 10 to "Окт", 11 to "Ноя", 12 to "Дек"
                 )
                 appendLine("--- ПО МЕСЯЦАМ ---")
-                for ((month, expresses) in byMonth.toSortedMap(compareBy { it.value })) {
-                    val w = expresses.count { it.isWin }
-                    val t = expresses.size
-                    val r = if (t > 0) (w.toDouble() / t) * 100 else 0.0
-                    appendLine("${monthNames[month.value]}: $w/$t (${String.format("%.1f", r)}%)")
+                for ((m, ex) in filtered.groupBy { it.dateTime.month }.toSortedMap(compareBy { it.value })) {
+                    val wm = ex.count { it.isWin }
+                    val tm = ex.size
+                    appendLine("${mn[m.value]}: $wm/$tm (${String.format("%.1f", if (tm > 0) (wm.toDouble() / tm) * 100 else 0.0)}%)")
                 }
             }
         }
@@ -289,243 +279,189 @@ class DashboardActivity : AppCompatActivity() {
     private fun navigateWeek(direction: Int) {
         if (allWeekStats.isEmpty()) return
         currentWeekIndex = (currentWeekIndex + direction).coerceIn(0, allWeekStats.size - 1)
+        isWeekFiltered = true
         updateWeekDisplay()
+        refreshAllCharts()
         showExpressesForWeek(allWeekStats[currentWeekIndex].yearWeek)
     }
     
     private fun updateWeekDisplay() {
         if (currentWeekIndex in allWeekStats.indices) {
-            val week = allWeekStats[currentWeekIndex]
-            tvWeekInfo.text = "${week.yearWeek} (${week.startDate} - ${week.endDate}): ${week.wins}/${week.total} (${String.format("%.1f", week.rate)}%)"
+            val w = allWeekStats[currentWeekIndex]
+            tvWeekInfo.text = "${w.yearWeek} (${w.startDate} - ${w.endDate}): ${w.wins}/${w.total} (${String.format("%.1f", w.rate)}%)"
             btnPrevWeek.isEnabled = currentWeekIndex > 0
             btnNextWeek.isEnabled = currentWeekIndex < allWeekStats.size - 1
         }
     }
     
     private fun showExpressesForDay(day: DayOfWeek) {
-        val dayNames = mapOf(
-            DayOfWeek.MONDAY to "Понедельник", DayOfWeek.TUESDAY to "Вторник",
-            DayOfWeek.WEDNESDAY to "Среда", DayOfWeek.THURSDAY to "Четверг",
-            DayOfWeek.FRIDAY to "Пятница", DayOfWeek.SATURDAY to "Суббота",
-            DayOfWeek.SUNDAY to "Воскресенье"
+        val dn = mapOf(
+            DayOfWeek.MONDAY to "Пн", DayOfWeek.TUESDAY to "Вт",
+            DayOfWeek.WEDNESDAY to "Ср", DayOfWeek.THURSDAY to "Чт",
+            DayOfWeek.FRIDAY to "Пт", DayOfWeek.SATURDAY to "Сб",
+            DayOfWeek.SUNDAY to "Вс"
         )
-        val filtered = filteredExpressResults.filter { it.dateTime.dayOfWeek == day }
-        updateDetailTable(filtered, "День: ${dayNames[day]}")
+        val data = if (isWeekFiltered && currentWeekIndex in allWeekStats.indices)
+            filteredExpressResults.filter { it.yearWeek == allWeekStats[currentWeekIndex].yearWeek && it.dateTime.dayOfWeek == day }
+        else filteredExpressResults.filter { it.dateTime.dayOfWeek == day }
+        updateDetailTable(data, "День: ${dn[day]}")
     }
     
     private fun showExpressesForHour(hour: Int) {
-        val filtered = filteredExpressResults.filter { it.dateTime.hour == hour }
-        updateDetailTable(filtered, "Час: ${String.format("%02d", hour)}:00 - ${String.format("%02d", hour)}:59")
+        val data = if (isWeekFiltered && currentWeekIndex in allWeekStats.indices)
+            filteredExpressResults.filter { it.yearWeek == allWeekStats[currentWeekIndex].yearWeek && it.dateTime.hour == hour }
+        else filteredExpressResults.filter { it.dateTime.hour == hour }
+        updateDetailTable(data, "Час: ${String.format("%02d", hour)}:00")
     }
     
     private fun showExpressesForWeek(yearWeek: String) {
-        val filtered = filteredExpressResults.filter { it.yearWeek == yearWeek }
-        updateDetailTable(filtered, "Неделя: $yearWeek")
+        updateDetailTable(filteredExpressResults.filter { it.yearWeek == yearWeek }, "Неделя: $yearWeek")
     }
     
     private fun updateDetailTable(expresses: List<ExpressResult>, title: String) {
         layoutDetailTable.visibility = View.VISIBLE
-        tvDetailTitle.text = "$title (${expresses.size} экспрессов)"
+        tvDetailTitle.text = "$title (${expresses.size})"
         layoutDetailContent.removeAllViews()
-        
         if (expresses.isEmpty()) {
-            layoutDetailContent.addView(TextView(this).apply {
-                text = "Нет данных за выбранный период"
-                textSize = 14f
-                setPadding(16, 32, 16, 32)
-                gravity = Gravity.CENTER
-            })
+            layoutDetailContent.addView(tv("Нет данных", 14f, Gravity.CENTER, pad = 16))
             return
         }
         
-        val tableLayout = TableLayout(this).apply {
+        val table = TableLayout(this).apply {
             layoutParams = TableLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             isStretchAllColumns = true
         }
         
-        val headerRow = TableRow(this)
-        listOf("ID", "Ст.", "Дата", "Матчи", "Счет", "Тип").forEach { header ->
-            headerRow.addView(TextView(this).apply {
-                text = header
-                textSize = 11f
-                setTypeface(null, android.graphics.Typeface.BOLD)
-                setPadding(2, 6, 2, 6)
-                gravity = Gravity.CENTER
-                setBackgroundColor(Color.parseColor("#E0E0E0"))
-            })
+        val hr = TableRow(this)
+        listOf("ID", "Ст.", "Дата", "М", "Счет", "Тип").forEach { h ->
+            hr.addView(tv(h, 11f, Gravity.CENTER, bold = true, bg = "#E0E0E0"))
         }
-        tableLayout.addView(headerRow)
+        table.addView(hr)
         
-        expresses.take(30).forEach { express ->
-            val expRow = TableRow(this)
-            val statusColor = if (express.isWin) "#4CAF50" else "#F44336"
-            val statusText = if (express.isWin) "✓" else "✗"
+        expresses.take(30).forEach { ex ->
+            val r = TableRow(this)
+            r.addView(tv("#${ex.expId}", 11f, Gravity.CENTER))
+            r.addView(tv(if (ex.isWin) "✓" else "✗", 11f, Gravity.CENTER, color = if (ex.isWin) "#4CAF50" else "#F44336"))
+            r.addView(tv(ex.dateTime.format(DateTimeFormatter.ofPattern("dd.MM HH:mm")), 10f, Gravity.CENTER))
+            r.addView(tv("${ex.matches.size}м", 10f, Gravity.CENTER))
+            r.addView(tv(ex.matches.joinToString(" ") { "${it.sh}-${it.sa}" }, 10f))
+            r.addView(tv(ex.matches.map { it.type }.distinct().joinToString(","), 10f, Gravity.CENTER))
+            table.addView(r)
             
-            expRow.addView(TextView(this).apply {
-                text = "#${express.expId}"
-                textSize = 11f; setPadding(2, 4, 2, 4); gravity = Gravity.CENTER
-            })
-            expRow.addView(TextView(this).apply {
-                text = statusText; textSize = 11f; setPadding(2, 4, 2, 4)
-                gravity = Gravity.CENTER; setTextColor(Color.parseColor(statusColor))
-            })
-            expRow.addView(TextView(this).apply {
-                text = express.dateTime.format(DateTimeFormatter.ofPattern("dd.MM HH:mm"))
-                textSize = 10f; setPadding(2, 4, 2, 4); gravity = Gravity.CENTER
-            })
-            expRow.addView(TextView(this).apply {
-                text = "${express.matches.size}м"; textSize = 10f
-                setPadding(2, 4, 2, 4); gravity = Gravity.CENTER
-            })
-            expRow.addView(TextView(this).apply {
-                text = express.matches.joinToString(" ") { "${it.sh}-${it.sa}" }
-                textSize = 10f; setPadding(2, 4, 2, 4)
-            })
-            expRow.addView(TextView(this).apply {
-                text = express.matches.map { it.type }.distinct().joinToString(",")
-                textSize = 10f; setPadding(2, 4, 2, 4); gravity = Gravity.CENTER
-            })
-            tableLayout.addView(expRow)
-            
-            express.matches.forEach { match ->
-                val matchRow = TableRow(this)
-                val matchColor = if (match.isWin) "#81C784" else "#EF9A9A"
-                val matchText = if (match.isWin) "✓" else "✗"
-                
-                matchRow.addView(TextView(this).apply {
-                    text = " └"; textSize = 10f; setPadding(8, 1, 2, 1)
-                })
-                matchRow.addView(TextView(this).apply {
-                    text = matchText; textSize = 10f; setPadding(2, 1, 2, 1)
-                    setTextColor(Color.parseColor(matchColor))
-                })
-                matchRow.addView(TextView(this).apply {
-                    text = "${match.home.take(15)} v ${match.away.take(15)}"
-                    textSize = 10f; setPadding(2, 1, 2, 1)
-                })
-                matchRow.addView(TextView(this).apply {
-                    text = "${match.sh}:${match.sa}"; textSize = 10f
-                    setPadding(2, 1, 2, 1); gravity = Gravity.CENTER
-                })
-                matchRow.addView(TextView(this).apply {
-                    val tn = when(match.type) { 924->"Т" 927->"Ф1" 928->"Ф2" else->"${match.type}" }
-                    text = tn; textSize = 10f; setPadding(2, 1, 2, 1); gravity = Gravity.CENTER
-                })
-                matchRow.addView(TextView(this).apply {
-                    text = match.liganame.take(20); textSize = 9f; setPadding(2, 1, 2, 1)
-                })
-                tableLayout.addView(matchRow)
+            ex.matches.forEach { m ->
+                val mr = TableRow(this)
+                mr.addView(tv(" └", 10f, pad = 8))
+                mr.addView(tv(if (m.isWin) "✓" else "✗", 10f, color = if (m.isWin) "#81C784" else "#EF9A9A"))
+                mr.addView(tv("${m.home.take(15)} v ${m.away.take(15)}", 10f))
+                mr.addView(tv("${m.sh}:${m.sa}", 10f, Gravity.CENTER))
+                mr.addView(tv(when (m.type) { 924 -> "Т"; 927 -> "Ф1"; 928 -> "Ф2"; else -> "${m.type}" }, 10f, Gravity.CENTER))
+                mr.addView(tv(m.liganame.take(20), 9f))
+                table.addView(mr)
             }
         }
-        
-        layoutDetailContent.addView(tableLayout)
+        layoutDetailContent.addView(table)
+    }
+    
+    private fun tv(text: String, size: Float, gravity: Int = Gravity.START, color: String? = null, bold: Boolean = false, bg: String? = null, pad: Int = 2): TextView {
+        return TextView(this).apply {
+            this.text = text; textSize = size; setPadding(pad, 2, 2, 2); this.gravity = gravity
+            if (color != null) setTextColor(Color.parseColor(color))
+            if (bold) setTypeface(null, android.graphics.Typeface.BOLD)
+            if (bg != null) setBackgroundColor(Color.parseColor(bg))
+        }
     }
     
     private fun loadAnalytics() {
         lifecycleScope.launch {
             try {
-                tvStats.text = "Загрузка..."
-                btnRefresh.isEnabled = false
-                btnRefresh.text = "Загрузка..."
+                tvStats.text = "Загрузка..."; btnRefresh.isEnabled = false; btnRefresh.text = "Загрузка..."
                 
                 val analytics = withContext(Dispatchers.IO) { analyticsEngine.calculateAnalytics() }
                 
-                val total = analytics["total"] as? AnalyticsSummary
                 allExpressResults = (analytics["allExpresses"] as? List<ExpressResult>) ?: emptyList()
-                filteredExpressResults = allExpressResults
+                isWeekFiltered = false
+                applyFilters()
                 
                 allWeekStats = (analytics["byWeek"] as? List<WeekStats>) ?: emptyList()
                 if (allWeekStats.isNotEmpty()) {
                     currentWeekIndex = allWeekStats.size - 1
                     updateWeekDisplay()
                     layoutWeekNav.visibility = View.VISIBLE
-                } else {
-                    layoutWeekNav.visibility = View.GONE
-                }
+                } else layoutWeekNav.visibility = View.GONE
                 
                 allLeagueStats = (analytics["byLeague"] as? List<LeagueStats>) ?: emptyList()
-                val leagueNames = listOf("Все лиги") + allLeagueStats.map { "${it.liganame} (${it.total})" }
-                spinnerLeague.adapter = ArrayAdapter(this@DashboardActivity, android.R.layout.simple_spinner_item, leagueNames).also {
-                    it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-                }
+                spinnerLeague.adapter = ArrayAdapter(
+                    this@DashboardActivity, android.R.layout.simple_spinner_item,
+                    listOf("Все лиги") + allLeagueStats.map { "${it.liganame} (${it.total})" }
+                ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
                 
-                if (total != null) setupPieChart(total)
-                
-                val dayStats = analytics["byDayOfWeek"] as? Map<DayOfWeek, Pair<Int, Int>>
-                if (dayStats != null) setupDayBarChart(dayStats)
-                
-                val hourStats = analytics["byHour"] as? TreeMap<Int, Pair<Int, Int>>
-                if (hourStats != null) setupHourBarChart(hourStats)
-                
+                refreshAllCharts()
                 if (allLeagueStats.isNotEmpty()) setupLeagueBarChart(allLeagueStats.take(15))
                 
-                updateSummaryText(allExpressResults, total?.winRate ?: 0.0)
-                
-                btnRefresh.isEnabled = true
-                btnRefresh.text = "Обновить аналитику"
-                
+                btnRefresh.isEnabled = true; btnRefresh.text = "Обновить аналитику"
             } catch (e: Exception) {
                 tvStats.text = "Ошибка: ${e.message}"
-                btnRefresh.isEnabled = true
-                btnRefresh.text = "Обновить аналитику"
+                btnRefresh.isEnabled = true; btnRefresh.text = "Обновить аналитику"
             }
         }
     }
     
     // ==================== ГРАФИКИ ====================
     
-    private fun setupPieChart(total: AnalyticsSummary) {
-        if (total.winExpress == 0 && total.loseExpress == 0) { pieChart.clear(); pieChart.centerText = "Нет данных"; return }
-        val entries = mutableListOf<PieEntry>()
-        if (total.winExpress > 0) entries.add(PieEntry(total.winExpress.toFloat(), "Выигрыши"))
-        if (total.loseExpress > 0) entries.add(PieEntry(total.loseExpress.toFloat(), "Проигрыши"))
-        if (entries.isEmpty()) return
-        val ds = PieDataSet(entries, "").apply { colors = listOf(Color.parseColor("#4CAF50"), Color.parseColor("#F44336")); valueTextSize = 14f; sliceSpace = 3f }
-        pieChart.data = PieData(ds).apply { setValueFormatter(PercentFormatter(pieChart)) }
+    private fun setupPieChart(t: AnalyticsSummary) {
+        if (t.winExpress == 0 && t.loseExpress == 0) { pieChart.clear(); pieChart.centerText = "Нет данных"; return }
+        val e = mutableListOf<PieEntry>()
+        if (t.winExpress > 0) e.add(PieEntry(t.winExpress.toFloat(), "Выигрыши"))
+        if (t.loseExpress > 0) e.add(PieEntry(t.loseExpress.toFloat(), "Проигрыши"))
+        if (e.isEmpty()) return
+        pieChart.data = PieData(PieDataSet(e, "").apply {
+            colors = listOf(Color.parseColor("#4CAF50"), Color.parseColor("#F44336"))
+            valueTextSize = 14f; sliceSpace = 3f
+        }).apply { setValueFormatter(PercentFormatter(pieChart)) }
         pieChart.description.isEnabled = false
-        pieChart.centerText = "${String.format("%.1f", total.winRate)}%"
+        pieChart.centerText = "${String.format("%.1f", t.winRate)}%"
         pieChart.setCenterTextSize(16f); pieChart.setUsePercentValues(true)
         pieChart.isDrawHoleEnabled = true; pieChart.holeRadius = 55f
         pieChart.legend.isEnabled = true; pieChart.animateY(1000); pieChart.invalidate()
     }
     
-    private fun setupDayBarChart(dayStats: Map<DayOfWeek, Pair<Int, Int>>) {
-        val dn = listOf("Пн","Вт","Ср","Чт","Пт","Сб","Вс")
-        val entries = mutableListOf<BarEntry>(); val colors = mutableListOf<Int>()
-        DayOfWeek.entries.forEachIndexed { i, d ->
-            val (w, t) = dayStats[d] ?: Pair(0,0)
-            val r = if (t>0) (w.toFloat()/t)*100 else 0f
-            entries.add(BarEntry(i.toFloat(), r))
-            colors.add(if (t==0) Color.GRAY else if (r>=50) Color.parseColor("#4CAF50") else Color.parseColor("#F44336"))
+    private fun setupDayBarChart(d: Map<DayOfWeek, Pair<Int, Int>>) {
+        val dn = listOf("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс")
+        val e = mutableListOf<BarEntry>(); val c = mutableListOf<Int>()
+        DayOfWeek.entries.forEachIndexed { i, day ->
+            val (w, t) = d[day] ?: Pair(0, 0)
+            val r = if (t > 0) (w.toFloat() / t) * 100 else 0f
+            e.add(BarEntry(i.toFloat(), r))
+            c.add(if (t == 0) Color.GRAY else if (r >= 50) Color.parseColor("#4CAF50") else Color.parseColor("#F44336"))
         }
-        barChartDay.data = BarData(BarDataSet(entries,"").apply { this.colors=colors; valueTextSize=12f }).apply { barWidth=0.6f }
+        barChartDay.data = BarData(BarDataSet(e, "").apply { colors = c; valueTextSize = 12f }).apply { barWidth = 0.6f }
         barChartDay.description.isEnabled = false
-        barChartDay.xAxis.apply { valueFormatter=IndexAxisValueFormatter(dn); position=XAxis.XAxisPosition.BOTTOM; granularity=1f }
-        barChartDay.axisLeft.axisMinimum=0f; barChartDay.axisLeft.axisMaximum=100f; barChartDay.axisRight.isEnabled = false
+        barChartDay.xAxis.apply { valueFormatter = IndexAxisValueFormatter(dn); position = XAxis.XAxisPosition.BOTTOM; granularity = 1f }
+        barChartDay.axisLeft.axisMinimum = 0f; barChartDay.axisLeft.axisMaximum = 100f; barChartDay.axisRight.isEnabled = false
         barChartDay.animateY(1000); barChartDay.invalidate()
     }
     
-    private fun setupHourBarChart(hourStats: TreeMap<Int, Pair<Int, Int>>) {
-        val entries = mutableListOf<BarEntry>(); val labels = mutableListOf<String>(); val colors = mutableListOf<Int>()
-        for ((h, s) in hourStats) {
-            val (w, t) = s; val r = if (t>0) (w.toFloat()/t)*100 else 0f
-            entries.add(BarEntry(h.toFloat(), r)); labels.add(String.format("%02d",h))
-            colors.add(if (t==0) Color.GRAY else if (r>=50) Color.parseColor("#2196F3") else Color.parseColor("#FF9800"))
+    private fun setupHourBarChart(h: TreeMap<Int, Pair<Int, Int>>) {
+        val e = mutableListOf<BarEntry>(); val l = mutableListOf<String>(); val c = mutableListOf<Int>()
+        for ((hour, s) in h) {
+            val (w, t) = s; val r = if (t > 0) (w.toFloat() / t) * 100 else 0f
+            e.add(BarEntry(hour.toFloat(), r)); l.add(String.format("%02d", hour))
+            c.add(if (t == 0) Color.GRAY else if (r >= 50) Color.parseColor("#2196F3") else Color.parseColor("#FF9800"))
         }
-        barChartHour.data = BarData(BarDataSet(entries,"").apply { this.colors=colors; valueTextSize=10f }).apply { barWidth=0.7f }
+        barChartHour.data = BarData(BarDataSet(e, "").apply { colors = c; valueTextSize = 10f }).apply { barWidth = 0.7f }
         barChartHour.description.isEnabled = false
-        barChartHour.xAxis.apply { valueFormatter=IndexAxisValueFormatter(labels); position=XAxis.XAxisPosition.BOTTOM; granularity=1f; labelRotationAngle=-45f }
-        barChartHour.axisLeft.axisMinimum=0f; barChartHour.axisLeft.axisMaximum=100f; barChartHour.axisRight.isEnabled = false
+        barChartHour.xAxis.apply { valueFormatter = IndexAxisValueFormatter(l); position = XAxis.XAxisPosition.BOTTOM; granularity = 1f; labelRotationAngle = -45f }
+        barChartHour.axisLeft.axisMinimum = 0f; barChartHour.axisLeft.axisMaximum = 100f; barChartHour.axisRight.isEnabled = false
         barChartHour.animateY(1000); barChartHour.invalidate()
     }
     
-    private fun setupLeagueBarChart(leagueStats: List<LeagueStats>) {
-        val entries = mutableListOf<BarEntry>(); val labels = mutableListOf<String>()
-        leagueStats.forEachIndexed { i, l -> entries.add(BarEntry(i.toFloat(), l.rate.toFloat())); labels.add(l.liganame.take(25)) }
-        barChartLeague.data = BarData(BarDataSet(entries,"").apply { colors = listOf(Color.parseColor("#3F51B5")); valueTextSize=12f }).apply { barWidth=0.7f }
+    private fun setupLeagueBarChart(ls: List<LeagueStats>) {
+        val e = mutableListOf<BarEntry>(); val l = mutableListOf<String>()
+        ls.forEachIndexed { i, lg -> e.add(BarEntry(i.toFloat(), lg.rate.toFloat())); l.add(lg.liganame.take(25)) }
+        barChartLeague.data = BarData(BarDataSet(e, "").apply { colors = listOf(Color.parseColor("#3F51B5")); valueTextSize = 12f }).apply { barWidth = 0.7f }
         barChartLeague.description.isEnabled = false
-        barChartLeague.xAxis.apply { valueFormatter=IndexAxisValueFormatter(labels); position=XAxis.XAxisPosition.BOTTOM; granularity=1f; labelRotationAngle=-30f }
-        barChartLeague.axisLeft.axisMinimum=0f; barChartLeague.axisLeft.axisMaximum=100f; barChartLeague.axisRight.isEnabled = false
+        barChartLeague.xAxis.apply { valueFormatter = IndexAxisValueFormatter(l); position = XAxis.XAxisPosition.BOTTOM; granularity = 1f; labelRotationAngle = -30f }
+        barChartLeague.axisLeft.axisMinimum = 0f; barChartLeague.axisLeft.axisMaximum = 100f; barChartLeague.axisRight.isEnabled = false
         barChartLeague.animateY(1000); barChartLeague.invalidate()
     }
 }
