@@ -8,7 +8,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.util.Pair
 import androidx.lifecycle.lifecycleScope
 import com.github.mikephil.charting.charts.BarChart
 import com.github.mikephil.charting.charts.HorizontalBarChart
@@ -123,9 +122,11 @@ class DashboardActivity : AppCompatActivity() {
     }
     
     private fun showDateRangePicker() {
-        val selection = if (dateStart != null && dateEnd != null) {
-            Pair(dateStart!!.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(),
-                dateEnd!!.atTime(23, 59, 59).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli())
+        val selection: android.core.util.Pair<Long, Long>? = if (dateStart != null && dateEnd != null) {
+            android.core.util.Pair(
+                dateStart!!.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+                dateEnd!!.atTime(23, 59, 59).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+            )
         } else null
         
         MaterialDatePicker.Builder.dateRangePicker()
@@ -182,17 +183,17 @@ class DashboardActivity : AppCompatActivity() {
         val rate = if (total > 0) (wins.toDouble() / total) * 100 else 0.0
         setupPieChart(AnalyticsSummary(total, wins, losses, rate, ""))
         
-        val byDay = LinkedHashMap<DayOfWeek, Pair<Int, Int>>()
+        val byDay = LinkedHashMap<DayOfWeek, kotlin.Pair<Int, Int>>()
         for (d in DayOfWeek.entries) {
             val ex = filtered.filter { it.dateTime.dayOfWeek == d }
-            byDay[d] = Pair(ex.count { it.isWin }, ex.size)
+            byDay[d] = kotlin.Pair(ex.count { it.isWin }, ex.size)
         }
         setupDayBarChart(byDay)
         
-        val byHour = TreeMap<Int, Pair<Int, Int>>()
+        val byHour = TreeMap<Int, kotlin.Pair<Int, Int>>()
         for (h in 0..23) {
             val ex = filtered.filter { it.dateTime.hour == h }
-            if (ex.isNotEmpty()) byHour[h] = Pair(ex.count { it.isWin }, ex.size)
+            if (ex.isNotEmpty()) byHour[h] = kotlin.Pair(ex.count { it.isWin }, ex.size)
         }
         setupHourBarChart(byHour)
         updateSummaryText(filtered, rate)
@@ -311,7 +312,6 @@ class DashboardActivity : AppCompatActivity() {
         }
         
         expresses.take(30).forEach { express ->
-            // Строка заголовка экспресса
             val expHeaderRow = TableRow(this)
             val expBg = if (express.isWin) "#E8F5E9" else "#FFEBEE"
             val expColor = if (express.isWin) "#2E7D32" else "#C62828"
@@ -323,7 +323,6 @@ class DashboardActivity : AppCompatActivity() {
                 12f, Gravity.START, bold = true, color = expColor, bg = expBg, pad = 8))
             table.addView(expHeaderRow)
             
-            // Строка с дополнительной информацией
             val infoRow = TableRow(this)
             val dayOfWeek = when (express.dateTime.dayOfWeek) {
                 DayOfWeek.MONDAY -> "Понедельник"
@@ -338,7 +337,6 @@ class DashboardActivity : AppCompatActivity() {
                 10f, Gravity.START, color = "#666666", bg = "#FAFAFA", pad = 8))
             table.addView(infoRow)
             
-            // Заголовок таблицы матчей
             val mhRow = TableRow(this)
             mhRow.addView(tv("m_id", 10f, Gravity.CENTER, bold = true, bg = "#E0E0E0", pad = 4))
             mhRow.addView(tv("Лига", 10f, Gravity.START, bold = true, bg = "#E0E0E0", pad = 4))
@@ -349,7 +347,6 @@ class DashboardActivity : AppCompatActivity() {
             mhRow.addView(tv("Итог", 10f, Gravity.CENTER, bold = true, bg = "#E0E0E0", pad = 4))
             table.addView(mhRow)
             
-            // Матчи
             express.matches.forEach { match ->
                 val mr = TableRow(this)
                 val mc = if (match.isWin) "#81C784" else "#EF9A9A"
@@ -370,7 +367,6 @@ class DashboardActivity : AppCompatActivity() {
                 table.addView(mr)
             }
             
-            // Разделитель
             val sep = TableRow(this)
             val sepView = View(this).apply {
                 layoutParams = TableRow.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 2)
@@ -440,11 +436,13 @@ class DashboardActivity : AppCompatActivity() {
         pieChart.holeRadius = 55f; pieChart.legend.isEnabled = true; pieChart.animateY(1000); pieChart.invalidate()
     }
     
-    private fun setupDayBarChart(d: Map<DayOfWeek, Pair<Int, Int>>) {
+    private fun setupDayBarChart(d: Map<DayOfWeek, kotlin.Pair<Int, Int>>) {
         val dn = listOf("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс")
         val e = mutableListOf<BarEntry>(); val c = mutableListOf<Int>()
         DayOfWeek.entries.forEachIndexed { i, day ->
-            val (w, t) = d[day] ?: Pair(0, 0)
+            val stats = d[day]
+            val w = stats?.first ?: 0
+            val t = stats?.second ?: 0
             val r = if (t > 0) (w.toFloat() / t) * 100 else 0f
             e.add(BarEntry(i.toFloat(), r))
             c.add(if (t == 0) Color.GRAY else if (r >= 50) Color.parseColor("#4CAF50") else Color.parseColor("#F44336"))
@@ -456,10 +454,11 @@ class DashboardActivity : AppCompatActivity() {
         barChartDay.animateY(1000); barChartDay.invalidate()
     }
     
-    private fun setupHourBarChart(h: TreeMap<Int, Pair<Int, Int>>) {
+    private fun setupHourBarChart(h: TreeMap<Int, kotlin.Pair<Int, Int>>) {
         val e = mutableListOf<BarEntry>(); val l = mutableListOf<String>(); val c = mutableListOf<Int>()
-        for ((hour, s) in h) {
-            val (w, t) = s; val r = if (t > 0) (w.toFloat() / t) * 100 else 0f
+        for ((hour, stats) in h) {
+            val w = stats.first; val t = stats.second
+            val r = if (t > 0) (w.toFloat() / t) * 100 else 0f
             e.add(BarEntry(hour.toFloat(), r)); l.add(String.format("%02d", hour))
             c.add(if (t == 0) Color.GRAY else if (r >= 50) Color.parseColor("#2196F3") else Color.parseColor("#FF9800"))
         }
