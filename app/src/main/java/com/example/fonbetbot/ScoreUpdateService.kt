@@ -1,4 +1,4 @@
-﻿// ScoreUpdateService.kt - С КОРРЕКТНОЙ ЛОГИКОЙ ЗАВЕРШЕНИЯ МАТЧЕЙ
+﻿// ScoreUpdateService.kt - ИСПРАВЛЕННАЯ ВЕРСИЯ (исправлена ошибка if-else)
 package com.example.fonbetbot
 
 import android.app.Notification
@@ -30,9 +30,9 @@ class ScoreUpdateService : Service() {
     
     // Хранилище счетчиков неудачных попыток и времени первой неудачи
     private data class FailedAttemptInfo(
-        val firstFailTime: Long, // System.currentTimeMillis() первой неудачи
+        val firstFailTime: Long,
         var count: Int,
-        var lastMinute: Int // Последняя известная минута матча
+        var lastMinute: Int
     )
     private val failedAttemptsMap = mutableMapOf<Long, FailedAttemptInfo>()
 
@@ -43,17 +43,15 @@ class ScoreUpdateService : Service() {
         var isRunning = false
         var onLogUpdate: ((String) -> Unit)? = null
         
-        private const val UPDATE_INTERVAL_MS = 30_000L // 30 секунд
+        private const val UPDATE_INTERVAL_MS = 30_000L
         private const val WAKE_LOCK_TAG = "FonbetBot::ScoreUpdateWakeLock"
         private const val ACTIVE_HOURS = 2L
         
-        // Настройки для определения завершенности матча
-        private const val MATCH_FINISHED_MINUTE = 90 // Футбол
-        private const val MATCH_FINISHED_MINUTE_HOCKEY = 60 // Хоккей
-        private const val MIN_MATCH_MINUTE_FOR_RETRY = 1 // Минимальная минута для ретрая
-        private const val MAX_FAILED_ATTEMPTS = 5 // Максимум попыток
-        private const val FAILED_TIMEOUT_MS = 5 * 60 * 1000L // 5 минут на попытки
-        private const val RETRY_DELAY_MS = 60 * 1000L // Повтор через 1 минуту при отсутствии связи
+        private const val MATCH_FINISHED_MINUTE = 90
+        private const val MATCH_FINISHED_MINUTE_HOCKEY = 60
+        private const val MIN_MATCH_MINUTE_FOR_RETRY = 1
+        private const val MAX_FAILED_ATTEMPTS = 5
+        private const val FAILED_TIMEOUT_MS = 5 * 60 * 1000L
     }
 
     override fun onCreate() {
@@ -241,11 +239,11 @@ class ScoreUpdateService : Service() {
                             if (result.score1 != match.sh || result.score2 != match.sa) {
                                 saveScoreToDb(match.m_id, result.score1, result.score2)
                                 updatedCount++
-                                Log.d(TAG, "  ✅ Матч ${match.m_id}: ${match.sh}:${match.sa} → ${result.score1}:${result.score2} (${result.matchTime}')" +
-                                         if (isFinishedByTime) " ⏰ завершен по времени" else "")
+                                val timeMsg = if (isFinishedByTime) " ⏰ завершен по времени" else ""
+                                Log.d(TAG, "  ✅ Матч ${match.m_id}: ${match.sh}:${match.sa} → ${result.score1}:${result.score2} (${result.matchTime}')$timeMsg")
                             } else {
-                                Log.d(TAG, "  = Матч ${match.m_id}: без изменений (${match.sh}:${match.sa}, ${result.matchTime}')" +
-                                         if (isFinishedByTime) " ⏰ завершен по времени" else "")
+                                val timeMsg = if (isFinishedByTime) " ⏰ завершен по времени" else ""
+                                Log.d(TAG, "  = Матч ${match.m_id}: без изменений (${match.sh}:${match.sa}, ${result.matchTime}')$timeMsg")
                             }
                         }
                         
@@ -258,7 +256,6 @@ class ScoreUpdateService : Service() {
                                 currentMinute <= MIN_MATCH_MINUTE_FOR_RETRY -> {
                                     noScoreCount++
                                     Log.d(TAG, "  ⏸ Матч ${match.m_id}: еще не начался (минута=$currentMinute), ждем")
-                                    // Сбрасываем попытки, матч еще не начался
                                     failedAttemptsMap.remove(match.m_id)
                                 }
                                 
@@ -272,8 +269,7 @@ class ScoreUpdateService : Service() {
                                     info.count++
                                     info.lastMinute = currentMinute
                                     
-                                    Log.d(TAG, "  🔄 Матч ${match.m_id}: нет связи (минута=$currentMinute, попытка ${info.count}), " +
-                                             "повтор через ${RETRY_DELAY_MS/1000}с")
+                                    Log.d(TAG, "  🔄 Матч ${match.m_id}: нет связи (минута=$currentMinute, попытка ${info.count})")
                                 }
                                 
                                 // Матч >= 90 минут и нет данных
@@ -299,9 +295,14 @@ class ScoreUpdateService : Service() {
                                         retryLaterCount++
                                         Log.d(TAG, "  ⏰ Матч ${match.m_id}: минута=$currentMinute >= $MATCH_FINISHED_MINUTE, " +
                                                  "попытка ${info.count}/$MAX_FAILED_ATTEMPTS, " +
-                                                 "прошло ${elapsedSinceFirstFail/1000}с/${FAILED_TIMEOUT_MS/1000}с, " +
-                                                 "продолжаем попытки")
+                                                 "прошло ${elapsedSinceFirstFail/1000}с/${FAILED_TIMEOUT_MS/1000}с")
                                     }
+                                }
+                                
+                                // Если минута неизвестна
+                                else -> {
+                                    noScoreCount++
+                                    Log.d(TAG, "  ⏸ Матч ${match.m_id}: минута неизвестна, ждем")
                                 }
                             }
                         }
@@ -315,7 +316,7 @@ class ScoreUpdateService : Service() {
                 }
             }
             
-            // Очищаем устаревшие записи из failedAttemptsMap
+            // Очищаем устаревшие записи
             cleanupFailedAttempts()
             
             // Проверяем завершенные экспрессы
@@ -346,42 +347,40 @@ class ScoreUpdateService : Service() {
         }
     }
 
-    // Определяем лимит минут в зависимости от вида спорта
     private fun getMinuteLimit(match: DataEntity): Int {
-        return when {
-            match.liganame.contains("НХЛ", ignoreCase = true) ||
+        return if (match.liganame.contains("НХЛ", ignoreCase = true) ||
             match.liganame.contains("КХЛ", ignoreCase = true) ||
             match.liganame.contains("ВХЛ", ignoreCase = true) ||
-            match.liganame.contains("AHL", ignoreCase = true) -> MATCH_FINISHED_MINUTE_HOCKEY
-            else -> MATCH_FINISHED_MINUTE
+            match.liganame.contains("AHL", ignoreCase = true)) {
+            MATCH_FINISHED_MINUTE_HOCKEY
+        } else {
+            MATCH_FINISHED_MINUTE
         }
     }
 
-    // Проверяем, завершен ли матч по минуте
     private fun isMatchFinishedByTime(match: DataEntity, currentMinute: Int): Boolean {
         val minuteLimit = getMinuteLimit(match)
         return currentMinute >= minuteLimit
     }
 
-    // Проверяем, завершен ли экспресс
     private fun isExpressFinished(matches: List<DataEntity>): Boolean {
         if (matches.isEmpty()) return false
         
-        // Все матчи имеют счет
         val allHaveScore = matches.all { it.sh > 0 || it.sa > 0 }
         if (allHaveScore) return true
         
-        // Есть проигрышный матч со счетом
         val hasLosingMatch = matches.any { match ->
-            if (match.sh == 0 && match.sa == 0) return@any false
-            
-            val isWin = when (match.type) {
-                924 -> match.sh >= match.sa
-                927 -> match.sh + 1 > match.sa
-                928 -> match.sa + 1 >= match.sh
-                else -> match.sh >= match.sa
+            if (match.sh == 0 && match.sa == 0) {
+                false
+            } else {
+                val isWin = when (match.type) {
+                    924 -> match.sh >= match.sa
+                    927 -> match.sh + 1 > match.sa
+                    928 -> match.sa + 1 >= match.sh
+                    else -> match.sh >= match.sa
+                }
+                !isWin
             }
-            !isWin
         }
         
         if (hasLosingMatch) return true
@@ -389,11 +388,10 @@ class ScoreUpdateService : Service() {
         return false
     }
 
-    // Очищаем устаревшие записи о неудачных попытках
     private fun cleanupFailedAttempts() {
         val now = System.currentTimeMillis()
         val toRemove = failedAttemptsMap.filter { (_, info) ->
-            now - info.firstFailTime > FAILED_TIMEOUT_MS * 2 // Удаляем записи старше 10 минут
+            now - info.firstFailTime > FAILED_TIMEOUT_MS * 2
         }.keys
         toRemove.forEach { failedAttemptsMap.remove(it) }
     }
