@@ -106,7 +106,6 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         addLog("onResume: обновление данных из базы")
-        // Всегда перезагружаем данные при возврате на экран
         refreshData()
     }
     
@@ -243,7 +242,7 @@ class MainActivity : AppCompatActivity() {
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
             addView(headerTv("ID", 70))
@@ -258,7 +257,7 @@ class MainActivity : AppCompatActivity() {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
             tag = "express_${express.expId}"
@@ -300,61 +299,87 @@ class MainActivity : AppCompatActivity() {
     
     private fun buildMatchDetailRows(express: ExpressResult): List<View> {
         val views = mutableListOf<View>()
+        val totalWidth = 70 + 130 + 100 + 60 + 80  // = 440dp
         
-        val matchHeader = LinearLayout(this).apply {
+        // Заголовок матчей
+        val matchHeaderBg = TextView(this).apply {
+            text = "Матчи экспресса #${express.expId}"
+            textSize = 10f
+            setPadding(dp(8), dp(6), dp(8), dp(6))
+            gravity = Gravity.START
+            setBackgroundColor(Color.parseColor(COLOR_MATCH_HEADER_BG))
+            setTextColor(Color.parseColor("#F0B90B"))
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(
+                dp(totalWidth),
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            tag = "match_header_${express.expId}"
+        }
+        views.add(matchHeaderBg)
+        
+        // Шапка колонок матчей
+        val subHeader = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
+                dp(totalWidth),
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
             setBackgroundColor(Color.parseColor(COLOR_MATCH_HEADER_BG))
-            tag = "match_header_${express.expId}"
+            tag = "match_subheader_${express.expId}"
         }
-        
-        matchHeader.addView(matchHeaderTv("m_id", 85))
-        matchHeader.addView(matchHeaderTv("Команда 1", 120))
-        matchHeader.addView(matchHeaderTv("Команда 2", 120))
-        matchHeader.addView(matchHeaderTv("Счет", 55))
-        matchHeader.addView(matchHeaderTv("Тип ставки", 110))
-        matchHeader.addView(matchHeaderTv("Лига", 110))
-        matchHeader.addView(matchHeaderTv("Итог", 65))
-        
-        views.add(matchHeader)
+        subHeader.addView(matchHeaderTv("Команда 1", 140))
+        subHeader.addView(matchHeaderTv("Команда 2", 140))
+        subHeader.addView(matchHeaderTv("Счет", 50))
+        subHeader.addView(matchHeaderTv("Тип", 110))
+        views.add(subHeader)
         
         for (match in express.matches) {
             val matchRow = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    dp(totalWidth),
                     ViewGroup.LayoutParams.WRAP_CONTENT
                 )
                 setBackgroundColor(Color.parseColor(COLOR_MATCH_BG))
                 tag = "match_${match.matchId}"
             }
             
-            val mc = if (match.isWin) COLOR_GREEN else COLOR_RED
-            val typeFull = when (match.type) {
-                924 -> "1Х (не проиграли)"
-                927 -> "Фора 1 (+1.5)"
-                928 -> "Фора 2 (+1.5)"
-                else -> "Тип ${match.type}"
+            val typeShort = when (match.type) {
+                924 -> "1X"
+                927 -> "Ф1(+1.5)"
+                928 -> "Ф2(+1.5)"
+                else -> "Т${match.type}"
             }
             
-            matchRow.addView(matchDataTv("${match.matchId}", 85, mc, 9f))
-            matchRow.addView(matchDataTv(match.home.take(16), 120, COLOR_TEXT_PRIMARY, 9f))
-            matchRow.addView(matchDataTv(match.away.take(16), 120, COLOR_TEXT_PRIMARY, 9f))
-            matchRow.addView(matchDataTv("${match.sh}:${match.sa}", 55, "#EAECEF", 10f, bold = true))
-            matchRow.addView(matchDataTv(typeFull, 110, "#848E9C", 9f))
-            matchRow.addView(matchDataTv(match.liganame.take(15), 110, "#848E9C", 9f))
-            matchRow.addView(matchDataTv(if (match.isWin) "✓ Зашел" else "✗ Мимо", 65, mc, 10f, bold = true))
+            matchRow.addView(matchDataTv(match.home.take(18), 140, COLOR_TEXT_PRIMARY, 10f))
+            matchRow.addView(matchDataTv(match.away.take(18), 140, COLOR_TEXT_PRIMARY, 10f))
+            matchRow.addView(matchDataTv("${match.sh}:${match.sa}", 50, "#EAECEF", 11f, bold = true))
+            matchRow.addView(matchDataTv(typeShort, 110, "#848E9C", 10f))
             
             views.add(matchRow)
+            
+            // Подсказка: лига + исход
+            val infoRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(
+                    dp(totalWidth),
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+                setBackgroundColor(Color.parseColor("#11161C"))
+                tag = "match_info_${match.matchId}"
+            }
+            val mc = if (match.isWin) COLOR_GREEN else COLOR_RED
+            val resultText = if (match.isWin) "✓ Зашел" else "✗ Мимо"
+            infoRow.addView(matchDataTv("${match.liganame.take(40)} | $resultText", totalWidth, "#11161C", mc, 9f))
+            views.add(infoRow)
         }
         
+        // Разделитель
         val separator = View(this).apply {
             layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(1)
+                dp(totalWidth),
+                dp(2)
             )
             setBackgroundColor(Color.parseColor(COLOR_GRID))
             tag = "sep_${express.expId}"
@@ -415,7 +440,9 @@ class MainActivity : AppCompatActivity() {
             val child = layoutDetailContent.getChildAt(i)
             val tag = child.tag as? String ?: continue
             if (tag.startsWith("match_header_$expId") || 
+                tag.startsWith("match_subheader_$expId") ||
                 tag.startsWith("match_") ||
+                tag.startsWith("match_info_") ||
                 tag == "sep_$expId") {
                 toRemove.add(child)
             }
@@ -497,7 +524,7 @@ class MainActivity : AppCompatActivity() {
             textSize = size
             setPadding(dp(4), dp(3), dp(4), dp(3))
             gravity = Gravity.CENTER
-            setBackgroundColor(Color.parseColor(COLOR_MATCH_BG))
+            setBackgroundColor(Color.TRANSPARENT)
             setTextColor(Color.parseColor(color))
             maxLines = 2
             ellipsize = android.text.TextUtils.TruncateAt.END
@@ -516,7 +543,6 @@ class MainActivity : AppCompatActivity() {
                 tvDetailTitle.text = "Загрузка..."
                 addLog("Начало первичной загрузки")
                 
-                // ПРОВЕРКА БАЗЫ НАПРЯМУЮ
                 val expCount = withContext(Dispatchers.IO) { 
                     val count = database.expDao().getAllExp().size
                     addLog("Прямой запрос: exp=$count")
