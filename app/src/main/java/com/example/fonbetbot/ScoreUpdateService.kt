@@ -475,7 +475,7 @@ class ScoreUpdateService : Service() {
                 if (found) {
                     database.dataDao().deleteAll()
                     database.dataDao().insertAll(updated)
-                } else {it}
+                } else {Log.d("log","log")}
             } catch (e: Exception) {
                 Log.e("ScoreUpdate", "Ошибка сохранения счёта для $matchId: ${e.message}")
             }
