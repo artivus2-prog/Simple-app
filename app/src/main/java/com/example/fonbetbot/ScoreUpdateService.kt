@@ -1,6 +1,7 @@
-﻿// ScoreUpdateService.kt — ФИНАЛЬНАЯ ВЕРСИЯ
-// Новые матчи из API — активны сразу (curtime может быть 0)
-// Импорт из Excel — активны если ct не старше 2 часов
+﻿// ScoreUpdateService.kt — ПОЛНАЯ ФИНАЛЬНАЯ ВЕРСИЯ
+// CT < 2 часов → активен, запрашиваем API
+// CT > 2 часов → завершён, не запрашиваем
+// sh=0, sa=0 → выигрыш для любого типа ставки
 package com.example.fonbetbot
 
 import android.app.Notification
@@ -29,10 +30,7 @@ class ScoreUpdateService : Service() {
         var onLogUpdate: ((String) -> Unit)? = null
         var onScoreUpdated: ((Long, Int, Int, Int) -> Unit)? = null
         
-        private const val ACTIVE_HOURS = 2L  // Для импортированных экспрессов
-        private const val STALE_DATA_TIMEOUT_MINUTES = 5L
-        private const val MATCH_FINISHED_MINUTE = 90
-        private const val MATCH_FINISHED_MINUTE_HOCKEY = 60
+        private const val ACTIVE_HOURS = 2L
     }
 
     private data class MatchTrackingInfo(
@@ -40,10 +38,7 @@ class ScoreUpdateService : Service() {
         var lastSh: Int = -1,
         var lastSa: Int = -1,
         var lastMinute: Int = -1,
-        var lastUpdateTime: LocalDateTime = LocalDateTime.now(),
-        var isFinished: Boolean = false,
-        var dataStopped: Boolean = false,
-        var dataStoppedTime: LocalDateTime? = null
+        var lastUpdateTime: LocalDateTime = LocalDateTime.now()
     )
     
     private val matchTracker = mutableMapOf<Long, MatchTrackingInfo>()
@@ -130,56 +125,22 @@ class ScoreUpdateService : Service() {
 
             val now = LocalDateTime.now()
             
+            // Сначала проверяем и обновляем статусы всех экспрессов
+            val initialFinished = checkAndUpdateAllExpresses(allExp, allData, now)
+            
+            // Собираем активные матчи (CT < 2 часов)
             val activeMatches = mutableListOf<DataEntity>()
-            val activeExpIds = mutableSetOf<Int>()
             
             for (exp in allExp) {
-                val matches = allData.filter { it.id_exp == exp.id_exp }
-                if (matches.isEmpty()) continue
-                
-                // Проверяем, есть ли проигрышный матч
-                var hasLosingMatch = false
-                for (match in matches) {
-                    if (match.sh > 0 || match.sa > 0) {
-                        if (!isMatchWin(match.sh, match.sa, match.type)) {
-                            hasLosingMatch = true
-                        }
-                    }
-                }
-                
-                // Пропускаем проигрышные экспрессы
-                if (hasLosingMatch) {
-                    if (exp.sts_all != -1) {
-                        updateExpStatus(exp, -1)
-                    }
-                    continue
-                }
-                
-                // Проверяем, все ли матчи имеют счёт (все выиграли)
-                val allHaveScore = matches.all { it.sh > 0 || it.sa > 0 }
-                if (allHaveScore) {
-                    val allWins = matches.all { isMatchWin(it.sh, it.sa, it.type) }
-                    val newStatus = if (allWins) 2 else -1
-                    if (exp.sts_all != newStatus) {
-                        updateExpStatus(exp, newStatus)
-                    }
-                    continue
-                }
-                
-                // Экспресс не завершён — проверяем, нужно ли его отслеживать
                 try {
                     val expTime = parseDateTime(exp.ct)
                     val hoursSinceCreation = ChronoUnit.HOURS.between(expTime, now)
                     
-                    // Экспресс активен если:
-                    // 1. Создан менее 2 часов назад (из Excel)
-                    // 2. Или есть матчи без счёта (новые из API или ещё идут)
-                    
+                    // ТОЛЬКО CT < 2 часов — запрашиваем API
                     if (hoursSinceCreation <= ACTIVE_HOURS) {
-                        // Экспресс свежий — отслеживаем все его матчи без счёта
-                        activeExpIds.add(exp.id_exp)
+                        val matches = allData.filter { it.id_exp == exp.id_exp }
                         for (match in matches) {
-                            if (match.sh == 0 && match.sa == 0 && match.m_id !in matchTracker.map { it.key }) {
+                            if (match !in activeMatches) {
                                 activeMatches.add(match)
                             }
                         }
@@ -189,29 +150,11 @@ class ScoreUpdateService : Service() {
                 }
             }
             
-            // Добавляем матчи из трекера, у которых данные остановлены, но таймаут не истёк
-            for ((matchId, tracking) in matchTracker) {
-                if (!tracking.isFinished && tracking.dataStopped) {
-                    val stoppedDuration = tracking.dataStoppedTime?.let {
-                        ChronoUnit.MINUTES.between(it, now)
-                    } ?: 0
-                    
-                    if (stoppedDuration < STALE_DATA_TIMEOUT_MINUTES) {
-                        val match = allData.find { it.m_id == matchId }
-                        if (match != null && match !in activeMatches) {
-                            activeMatches.add(match)
-                        }
-                    }
-                }
-            }
-            
             val uniqueMatches = activeMatches.distinctBy { it.m_id }
             
             if (uniqueMatches.isEmpty()) {
-                checkStaleMatches()
-                val finishedCount = checkAndFinishExpresses(allExp, allData)
-                if (finishedCount > 0) {
-                    onLogUpdate?.invoke("🏁 Завершено экспрессов: $finishedCount")
+                if (initialFinished > 0) {
+                    onLogUpdate?.invoke("🏁 Завершено экспрессов: $initialFinished")
                 } else {
                     onLogUpdate?.invoke("✓ Нет активных матчей")
                 }
@@ -221,7 +164,6 @@ class ScoreUpdateService : Service() {
             onLogUpdate?.invoke("📊 Активных матчей: ${uniqueMatches.size}")
 
             var updatedCount = 0
-            var errorCount = 0
 
             for ((index, match) in uniqueMatches.withIndex()) {
                 try {
@@ -229,15 +171,9 @@ class ScoreUpdateService : Service() {
                         apiClient.getMatchScore(
                             matchId = match.m_id.toInt(),
                             onSuccess = { factors ->
-                                val tracking = matchTracker.getOrPut(match.m_id) {
-                                    MatchTrackingInfo(matchId = match.m_id)
-                                }
-                                
                                 if (factors != null && factors.score1 >= 0 && factors.score2 >= 0) {
-                                    if (tracking.dataStopped) {
-                                        Log.d("ScoreUpdate", "🔄 Матч ${match.m_id}: данные возобновились")
-                                        tracking.dataStopped = false
-                                        tracking.dataStoppedTime = null
+                                    val tracking = matchTracker.getOrPut(match.m_id) {
+                                        MatchTrackingInfo(matchId = match.m_id)
                                     }
                                     
                                     if (match.sh != factors.score1 || match.sa != factors.score2) {
@@ -259,19 +195,11 @@ class ScoreUpdateService : Service() {
                                     )
                                     
                                     Log.d("ScoreUpdate", "✅ Матч ${match.m_id}: ${factors.score1}:${factors.score2} (${factors.matchTime}')")
-                                } else {
-                                    handleNoData(match, tracking)
                                 }
-                                
                                 continuation.resume(Unit) {}
                             },
                             onError = { error ->
                                 Log.d("ScoreUpdate", "❌ Матч ${match.m_id}: ошибка API — $error")
-                                val tracking = matchTracker.getOrPut(match.m_id) {
-                                    MatchTrackingInfo(matchId = match.m_id)
-                                }
-                                handleNoData(match, tracking)
-                                errorCount++
                                 continuation.resume(Unit) {}
                             }
                         )
@@ -285,11 +213,11 @@ class ScoreUpdateService : Service() {
                 }
             }
 
-            checkStaleMatches()
+            // Обновляем статусы после получения счетов
             val refreshedData = withContext(Dispatchers.IO) { database.dataDao().getAllData() }
-            val finishedCount = checkAndFinishExpresses(allExp, refreshedData)
+            val finalFinished = checkAndUpdateAllExpresses(allExp, refreshedData, now)
 
-            val msg = "📊 Матчей: ${uniqueMatches.size} | ✅$updatedCount | ❌$errorCount | 🏁$finishedCount"
+            val msg = "📊 Матчей: ${uniqueMatches.size} | ✅$updatedCount | 🏁$finalFinished"
             onLogUpdate?.invoke(msg)
 
         } catch (e: Exception) {
@@ -297,124 +225,81 @@ class ScoreUpdateService : Service() {
         }
     }
 
-    private fun updateExpStatus(exp: ExpEntity, newStatus: Int) {
-        kotlinx.coroutines.runBlocking(Dispatchers.IO) {
-            try {
-                val allExp = database.expDao().getAllExp()
-                val updated = allExp.map { if (it.id == exp.id) it.copy(sts_all = newStatus) else it }
-                database.expDao().deleteAll()
-                database.expDao().insertAll(updated)
-            } catch (e: Exception) {
-                Log.e("ScoreUpdate", "Ошибка обновления статуса экспресса: ${e.message}")
-            }
-        }
-    }
-
-    private fun handleNoData(match: DataEntity, tracking: MatchTrackingInfo) {
-        val now = LocalDateTime.now()
-        
-        if (!tracking.dataStopped) {
-            tracking.dataStopped = true
-            tracking.dataStoppedTime = now
-            Log.d("ScoreUpdate", "⚠️ Матч ${match.m_id}: данные остановились на ${tracking.lastMinute}'")
-        }
-        
-        val stoppedDuration = ChronoUnit.MINUTES.between(tracking.dataStoppedTime, now)
-        if (stoppedDuration >= STALE_DATA_TIMEOUT_MINUTES && !tracking.isFinished) {
-            tracking.isFinished = true
-            Log.d("ScoreUpdate", "🏁 Матч ${match.m_id}: завершён (нет данных ${stoppedDuration} мин)")
-        }
-    }
-
-    private fun checkStaleMatches() {
-        val now = LocalDateTime.now()
-        
-        for ((matchId, tracking) in matchTracker) {
-            if (tracking.isFinished) continue
-            if (!tracking.dataStopped) continue
-            
-            tracking.dataStoppedTime?.let { stoppedTime ->
-                val stoppedDuration = ChronoUnit.MINUTES.between(stoppedTime, now)
-                if (stoppedDuration >= STALE_DATA_TIMEOUT_MINUTES) {
-                    tracking.isFinished = true
-                    Log.d("ScoreUpdate", "🏁 Матч $matchId: завершён по таймауту (${stoppedDuration} мин)")
-                }
-            }
-        }
-        
-        // Завершаем экспрессы старше 24 часов
-        val allExp = kotlinx.coroutines.runBlocking(Dispatchers.IO) { database.expDao().getAllExp() }
-        for (exp in allExp) {
-            if (exp.sts_all != 1) continue
-            try {
-                val expTime = parseDateTime(exp.ct)
-                val hoursSinceCreation = ChronoUnit.HOURS.between(expTime, now)
-                if (hoursSinceCreation > 24) {
-                    Log.d("ScoreUpdate", "🏁 Экспресс #${exp.id_exp}: завершён по возрасту (${hoursSinceCreation}ч)")
-                    updateExpStatus(exp, -1)
-                }
-            } catch (e: Exception) { }
-        }
-    }
-
-    private fun checkAndFinishExpresses(allExp: List<ExpEntity>, allData: List<DataEntity>): Int {
-        var finishedCount = 0
+    private fun checkAndUpdateAllExpresses(allExp: List<ExpEntity>, allData: List<DataEntity>, now: LocalDateTime): Int {
+        var updatedCount = 0
         
         kotlinx.coroutines.runBlocking(Dispatchers.IO) {
             try {
                 var needUpdate = false
-                val now = LocalDateTime.now()
                 
                 val updatedExp = allExp.map { exp ->
-                    if (exp.sts_all != 1) return@map exp
-                    
                     val matches = allData.filter { it.id_exp == exp.id_exp }
                     if (matches.isEmpty()) return@map exp
                     
-                    // Проверяем проигрышные матчи
-                    var hasLosingMatch = false
-                    var allHaveScore = true
-                    
-                    for (match in matches) {
-                        if (match.sh > 0 || match.sa > 0) {
-                            if (!isMatchWin(match.sh, match.sa, match.type)) {
-                                hasLosingMatch = true
+                    try {
+                        val expTime = parseDateTime(exp.ct)
+                        val hoursSinceCreation = ChronoUnit.HOURS.between(expTime, now)
+                        
+                        var hasLosingMatch = false
+                        var allHaveScore = true
+                        
+                        for (match in matches) {
+                            if (match.sh > 0 || match.sa > 0) {
+                                // Есть счёт (не 0:0)
+                                if (!isMatchWin(match.sh, match.sa, match.type)) {
+                                    hasLosingMatch = true
+                                }
+                            } else {
+                                // sh=0, sa=0
+                                if (hoursSinceCreation > ACTIVE_HOURS) {
+                                    // CT > 2ч — данных не будет
+                                    // 0:0 — это ВЫИГРЫШ для любого типа ставки
+                                    // Не меняем hasLosingMatch, матч выиграл
+                                } else {
+                                    // CT < 2ч — ещё ждём данные из API
+                                    allHaveScore = false
+                                }
                             }
-                        } else {
-                            allHaveScore = false
                         }
+                        
+                        // Определяем новый статус
+                        val newStatus = when {
+                            hasLosingMatch -> -1
+                            allHaveScore -> {
+                                if (matches.all { isMatchWin(it.sh, it.sa, it.type) }) 2 else -1
+                            }
+                            else -> 1 // Ещё активен
+                        }
+                        
+                        if (exp.sts_all != newStatus) {
+                            needUpdate = true
+                            updatedCount++
+                            val statusText = when (newStatus) {
+                                2 -> "ВЫИГРЫШ"
+                                -1 -> "ПРОИГРЫШ"
+                                else -> "АКТИВЕН"
+                            }
+                            Log.d("ScoreUpdate", "🔄 Экспресс #${exp.id_exp}: $statusText (CT: ${hoursSinceCreation}ч)")
+                            return@map exp.copy(sts_all = newStatus)
+                        }
+                    } catch (e: Exception) {
+                        Log.w("ScoreUpdate", "Ошибка обработки #${exp.id_exp}: ${e.message}")
                     }
                     
-                    when {
-                        hasLosingMatch -> {
-                            needUpdate = true
-                            finishedCount++
-                            Log.d("ScoreUpdate", "🏁 Экспресс #${exp.id_exp}: ПРОИГРЫШ")
-                            exp.copy(sts_all = -1)
-                        }
-                        allHaveScore -> {
-                            needUpdate = true
-                            finishedCount++
-                            val allWins = matches.all { isMatchWin(it.sh, it.sa, it.type) }
-                            val newStatus = if (allWins) 2 else -1
-                            Log.d("ScoreUpdate", "🏁 Экспресс #${exp.id_exp}: ${if (allWins) "ВЫИГРЫШ" else "ПРОИГРЫШ"}")
-                            exp.copy(sts_all = newStatus)
-                        }
-                        else -> exp
-                    }
+                    exp
                 }
                 
                 if (needUpdate) {
                     database.expDao().deleteAll()
                     database.expDao().insertAll(updatedExp)
-                    Log.d("ScoreUpdate", "✅ Обновлено статусов в БД: $finishedCount")
-                } else { Log.d("ScoreUpdate","some")}
+                    Log.d("ScoreUpdate", "✅ Обновлено статусов в БД: $updatedCount")
+                }
             } catch (e: Exception) {
                 Log.e("ScoreUpdate", "Ошибка обновления статусов: ${e.message}", e)
             }
         }
         
-        return finishedCount
+        return updatedCount
     }
 
     private fun saveScoreToDb(matchId: Long, sh: Int, sa: Int) {
