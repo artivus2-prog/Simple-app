@@ -169,7 +169,7 @@ class DashboardActivity : AppCompatActivity() {
         
         chart.setCenterTextColor(Color.parseColor(COLOR_TEXT_PRIMARY))
         chart.setCenterTextSize(16f)
-        chart.setCenterTextTypeface(null, android.graphics.Typeface.BOLD)
+        //chart.setCenterTextTypeface(null, android.graphics.Typeface.BOLD)
     }
     
     private fun applyBarChartStyle(chart: BarChart) {
