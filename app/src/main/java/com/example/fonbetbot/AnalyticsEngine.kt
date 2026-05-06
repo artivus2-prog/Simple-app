@@ -27,7 +27,8 @@ data class ExpressResult(
     val dateTime: LocalDateTime,
     val isReplaced: Boolean,
     val weekNumber: Int = 0,
-    val yearWeek: String = ""
+    val yearWeek: String = "",
+    val totalStartKf: Double = 0.0
 )
 
 data class AnalyticsSummary(
@@ -109,17 +110,23 @@ class AnalyticsEngine(private val database: AppDatabase) {
                 val weekNumber = dateTime.get(weekField.weekOfWeekBasedYear())
                 val yearWeek = "${dateTime.year}-W${String.format("%02d", weekNumber)}"
                 
-                expressResults.add(
-                    ExpressResult(
-                        expId = expId,
-                        matches = matchResults,
-                        isWin = allWins,
-                        dateTime = dateTime,
-                        isReplaced = isReplaced,
-                        weekNumber = weekNumber,
-                        yearWeek = yearWeek
-                    )
-                )
+                val allStartKf = matches.map { it.startkf }
+val totalStartKf = if (allStartKf.all { it > 0 }) {
+    allStartKf.reduce { acc, kf -> acc * kf }
+} else 0.0
+
+expressResults.add(
+    ExpressResult(
+        expId = expId,
+        matches = matchResults,
+        isWin = allWins,
+        dateTime = dateTime,
+        isReplaced = isReplaced,
+        weekNumber = weekNumber,
+        yearWeek = yearWeek,
+        totalStartKf = totalStartKf
+    )
+)
             }
             
             calculateStatistics(expressResults)
