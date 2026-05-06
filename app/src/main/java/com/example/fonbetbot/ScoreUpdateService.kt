@@ -1,4 +1,4 @@
-﻿// ScoreUpdateService.kt - ПОЛНОСТЬЮ ИСПРАВЛЕННЫЙ ФАЙЛ
+﻿// ScoreUpdateService.kt - ИСПРАВЛЕНИЕ СТРОКИ 480
 package com.example.fonbetbot
 
 import android.app.Notification
@@ -275,20 +275,16 @@ class ScoreUpdateService : Service() {
             val newlyFinishedExps = checkAndFinishExpresses(allExp, allData)
             
             val duration = System.currentTimeMillis() - startTime
-            val msg = buildString {
-                append("📊 [${duration}мс] ")
-                append("Активных: ${activeExps.size} | ")
-                if (updatedCount > 0) append("✅$updatedCount ")
-                if (finishedByMinuteCount > 0) append("🏁$finishedByMinuteCount ")
-                if (retryLaterCount > 0) append("🔄$retryLaterCount ")
-                if (newlyFinishedExps > 0) append("📋$newlyFinishedExps ")
-                if (noScoreCount > 0) append("⏸$noScoreCount ")
-                if (updatedCount == 0 && finishedByMinuteCount == 0 && 
-                    retryLaterCount == 0 && newlyFinishedExps == 0 && 
-                    noScoreCount == 0) {
-                    append("без изменений")
-                }
-            }
+            val parts = mutableListOf<String>()
+            parts.add("Активных: ${activeExps.size}")
+            if (updatedCount > 0) parts.add("✅$updatedCount")
+            if (finishedByMinuteCount > 0) parts.add("🏁$finishedByMinuteCount")
+            if (retryLaterCount > 0) parts.add("🔄$retryLaterCount")
+            if (newlyFinishedExps > 0) parts.add("📋$newlyFinishedExps")
+            if (noScoreCount > 0) parts.add("⏸$noScoreCount")
+            if (parts.size == 1) parts.add("без изменений")
+            
+            val msg = "📊 [${duration}мс] " + parts.joinToString(" | ")
             
             logMessage(msg)
             Log.d(TAG, msg)
@@ -309,13 +305,10 @@ class ScoreUpdateService : Service() {
         return MATCH_FINISHED_MINUTE
     }
 
-    private fun isMatchFinishedByTime(match: DataEntity, currentMinute: Int): Boolean {
-        val minuteLimit = getMinuteLimit(match)
-        return currentMinute >= minuteLimit
-    }
-
     private fun isExpressFinished(matches: List<DataEntity>): Boolean {
-        if (matches.isEmpty()) return false
+        if (matches.isEmpty()) {
+            return false
+        }
         
         var allHaveScore = true
         for (match in matches) {
@@ -324,19 +317,26 @@ class ScoreUpdateService : Service() {
                 break
             }
         }
-        if (allHaveScore) return true
+        if (allHaveScore) {
+            return true
+        }
         
         for (match in matches) {
-            if (match.sh == 0 && match.sa == 0) continue
-            
-            val isWin = when (match.type) {
-                924 -> match.sh >= match.sa
-                927 -> match.sh + 1 > match.sa
-                928 -> match.sa + 1 >= match.sh
-                else -> match.sh >= match.sa
+            if (match.sh == 0 && match.sa == 0) {
+                continue
             }
             
-            if (!isWin) return true
+            val isWin: Boolean
+            when (match.type) {
+                924 -> isWin = match.sh >= match.sa
+                927 -> isWin = match.sh + 1 > match.sa
+                928 -> isWin = match.sa + 1 >= match.sh
+                else -> isWin = match.sh >= match.sa
+            }
+            
+            if (!isWin) {
+                return true
+            }
         }
         
         return false
@@ -344,10 +344,15 @@ class ScoreUpdateService : Service() {
 
     private fun cleanupFailedAttempts() {
         val now = System.currentTimeMillis()
-        val toRemove = failedAttemptsMap.filter { (_, info) ->
-            now - info.firstFailTime > FAILED_TIMEOUT_MS * 2
-        }.keys
-        toRemove.forEach { failedAttemptsMap.remove(it) }
+        val toRemove = mutableListOf<Long>()
+        for ((key, info) in failedAttemptsMap) {
+            if (now - info.firstFailTime > FAILED_TIMEOUT_MS * 2) {
+                toRemove.add(key)
+            }
+        }
+        for (key in toRemove) {
+            failedAttemptsMap.remove(key)
+        }
     }
 
     private suspend fun markMatchAsFinished(match: DataEntity) {
@@ -368,8 +373,12 @@ class ScoreUpdateService : Service() {
         
         for (exp in allExp) {
             val expMatches = allData.filter { it.id_exp == exp.id_exp }
-            if (expMatches.isEmpty()) continue
-            if (exp.sts_all != 1) continue
+            if (expMatches.isEmpty()) {
+                continue
+            }
+            if (exp.sts_all != 1) {
+                continue
+            }
             
             val isFinished = isExpressFinished(expMatches)
             
@@ -386,11 +395,12 @@ class ScoreUpdateService : Service() {
                 if (allHaveScore) {
                     allWins = true
                     for (match in expMatches) {
-                        val isWin = when (match.type) {
-                            924 -> match.sh >= match.sa
-                            927 -> match.sh + 1 > match.sa
-                            928 -> match.sa + 1 >= match.sh
-                            else -> match.sh >= match.sa
+                        val isWin: Boolean
+                        when (match.type) {
+                            924 -> isWin = match.sh >= match.sa
+                            927 -> isWin = match.sh + 1 > match.sa
+                            928 -> isWin = match.sa + 1 >= match.sh
+                            else -> isWin = match.sh >= match.sa
                         }
                         if (!isWin) {
                             allWins = false
@@ -399,10 +409,21 @@ class ScoreUpdateService : Service() {
                     }
                 }
                 
-                val newStatus = if (allWins) 2 else -1
+                val newStatus: Int
+                if (allWins) {
+                    newStatus = 2
+                } else {
+                    newStatus = -1
+                }
                 
-                Log.d(TAG, "🏁 Экспресс #${exp.id_exp} завершен: " +
-                         "статус=${if (allWins) "ВЫИГРЫШ" else "ПРОИГРЫШ"}")
+                val statusText: String
+                if (allWins) {
+                    statusText = "ВЫИГРЫШ"
+                } else {
+                    statusText = "ПРОИГРЫШ"
+                }
+                
+                Log.d(TAG, "🏁 Экспресс #${exp.id_exp} завершен: статус=$statusText")
                 
                 updateExpressStatus(exp.id, newStatus)
                 finishedCount++
@@ -417,7 +438,11 @@ class ScoreUpdateService : Service() {
             try {
                 val allExp = database.expDao().getAllExp()
                 val updatedExp = allExp.map { 
-                    if (it.id == expId) it.copy(sts_all = newStatus) else it 
+                    if (it.id == expId) {
+                        it.copy(sts_all = newStatus)
+                    } else {
+                        it
+                    }
                 }
                 database.expDao().deleteAll()
                 database.expDao().insertAll(updatedExp)
@@ -546,7 +571,9 @@ class ScoreUpdateService : Service() {
     private fun releaseWakeLock() {
         try {
             wakeLock?.let {
-                if (it.isHeld) it.release()
+                if (it.isHeld) {
+                    it.release()
+                }
             }
             wakeLock = null
         } catch (e: Exception) {
