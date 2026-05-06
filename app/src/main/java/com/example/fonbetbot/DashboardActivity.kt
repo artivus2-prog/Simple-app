@@ -1,4 +1,5 @@
-﻿package com.example.fonbetbot
+﻿// DashboardActivity.kt
+package com.example.fonbetbot
 
 import android.graphics.Color
 import android.os.Bundle
@@ -13,6 +14,7 @@ import com.github.mikephil.charting.charts.PieChart
 import com.github.mikephil.charting.components.Legend
 import com.github.mikephil.charting.components.XAxis
 import com.github.mikephil.charting.data.*
+import com.github.mikephil.charting.formatter.IndexAxisValueFormatter
 import com.github.mikephil.charting.formatter.PercentFormatter
 import com.google.android.material.datepicker.MaterialDatePicker
 import kotlinx.coroutines.Dispatchers
@@ -109,6 +111,8 @@ class DashboardActivity : AppCompatActivity() {
         loadAnalytics()
     }
     
+    // ========== СТИЛИ ГРАФИКОВ ==========
+    
     private fun initChartStyles() {
         for (chart in listOf(pieChart, barChartDay, barChartHour, barChartLeague)) {
             when (chart) {
@@ -177,6 +181,8 @@ class DashboardActivity : AppCompatActivity() {
         chart.setNoDataText("Нет данных")
         chart.setNoDataTextColor(Color.parseColor(COLOR_TEXT_SECONDARY))
         chart.description.isEnabled = false
+        chart.setExtraOffsets(0f, 0f, 0f, 8f)
+        
         chart.xAxis.apply {
             position = XAxis.XAxisPosition.BOTTOM
             textColor = Color.parseColor(COLOR_TEXT_SECONDARY)
@@ -188,18 +194,26 @@ class DashboardActivity : AppCompatActivity() {
             axisLineColor = Color.parseColor(COLOR_GRID)
             axisMinimum = 0f
             axisMaximum = 100f
-            labelRotationAngle = -30f
+            labelRotationAngle = 0f
         }
+        
         chart.axisLeft.apply {
-            textColor = Color.parseColor(COLOR_TEXT_PRIMARY)
-            textSize = 10f
+            textColor = Color.parseColor("#EAECEF")
+            textSize = 9f
             setDrawGridLines(false)
             setDrawAxisLine(true)
             axisLineColor = Color.parseColor(COLOR_GRID)
+            setLabelCount(15, true)
         }
+        
         chart.axisRight.isEnabled = false
         chart.legend.isEnabled = false
+        
+        chart.extraLeftOffset = 10f
+        chart.extraRightOffset = 10f
     }
+    
+    // ========== ФИЛЬТРЫ ==========
     
     private fun showDateRangePicker() {
         val selection: androidx.core.util.Pair<Long, Long>? = if (dateStart != null && dateEnd != null) {
@@ -294,6 +308,8 @@ class DashboardActivity : AppCompatActivity() {
             barChartHour.invalidate()
         }
     }
+    
+    // ========== ЗАГРУЗКА ==========
     
     private fun loadAnalytics() {
         lifecycleScope.launch {
@@ -416,9 +432,11 @@ class DashboardActivity : AppCompatActivity() {
     
     private fun setupLeagueBarChart(ls: List<LeagueStats>) {
         val entries = mutableListOf<BarEntry>()
+        val labels = mutableListOf<String>()
         
         ls.forEachIndexed { i, lg ->
             entries.add(BarEntry(i.toFloat(), lg.rate.toFloat()))
+            labels.add("${lg.liganame.take(20)} (${String.format("%.0f", lg.rate)}%)")
         }
         
         val gradientColors = mutableListOf<Int>()
@@ -432,9 +450,18 @@ class DashboardActivity : AppCompatActivity() {
         
         val dataSet = BarDataSet(entries, "").apply {
             colors = gradientColors
-            valueTextSize = 11f
-            valueTextColor = Color.parseColor(COLOR_TEXT_PRIMARY)
+            valueTextSize = 10f
+            valueTextColor = Color.parseColor("#EAECEF")
             setDrawValues(true)
+        }
+        
+        barChartLeague.xAxis.apply {
+            valueFormatter = IndexAxisValueFormatter(labels)
+            textSize = 9f
+            textColor = Color.parseColor("#EAECEF")
+            granularity = 1f
+            labelCount = labels.size
+            setDrawGridLines(false)
         }
         
         barChartLeague.data = BarData(dataSet).apply { barWidth = 0.7f }

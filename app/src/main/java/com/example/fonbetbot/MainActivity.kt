@@ -32,18 +32,15 @@ class MainActivity : AppCompatActivity() {
     
     private var allExpressResults = listOf<ExpressResult>()
     
-    // Пагинация
     private val PAGE_SIZE = 30
     private var currentPage = 0
     private var isLoading = false
     private var allPagesLoaded = false
     
-    // Раскрытые экспрессы
     private val expandedExpressIds = mutableSetOf<Int>()
     
     private val LIVE_HOURS = 2L
     
-    // Логи
     private val logLines = mutableListOf<String>()
     private val MAX_LOG_LINES = 500
     
@@ -81,11 +78,8 @@ class MainActivity : AppCompatActivity() {
             startActivity(intent)
         }
         
-        btnClearLogs.setOnClickListener {
-            clearLogs()
-        }
+        btnClearLogs.setOnClickListener { clearLogs() }
         
-        // Подгрузка при скролле
         scrollView.viewTreeObserver.addOnScrollChangedListener {
             if (!isLoading && !allPagesLoaded) {
                 val scrollViewChild = scrollView.getChildAt(0) as? ViewGroup
@@ -114,21 +108,14 @@ class MainActivity : AppCompatActivity() {
     fun addLog(message: String) {
         val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"))
         val logEntry = "$timestamp | $message"
-        
         Log.d(TAG, message)
-        
         synchronized(logLines) {
             logLines.add(logEntry)
-            if (logLines.size > MAX_LOG_LINES) {
-                logLines.removeAt(0)
-            }
+            if (logLines.size > MAX_LOG_LINES) logLines.removeAt(0)
         }
-        
         runOnUiThread {
             updateLogView()
-            scrollLogs.post {
-                scrollLogs.fullScroll(View.FOCUS_DOWN)
-            }
+            scrollLogs.post { scrollLogs.fullScroll(View.FOCUS_DOWN) }
         }
     }
     
@@ -141,29 +128,24 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun updateLogView() {
-        synchronized(logLines) {
-            tvLogs.text = logLines.joinToString("\n")
-        }
+        synchronized(logLines) { tvLogs.text = logLines.joinToString("\n") }
     }
     
     // ========== ВСПОМОГАТЕЛЬНЫЕ ==========
     
     private fun isLive(express: ExpressResult): Boolean {
         val now = LocalDateTime.now()
-        val ageHours = ChronoUnit.HOURS.between(express.dateTime, now)
-        return ageHours < LIVE_HOURS
+        return ChronoUnit.HOURS.between(express.dateTime, now) < LIVE_HOURS
     }
     
     private fun getRowBackground(express: ExpressResult): String {
-        return if (isLive(express)) COLOR_LIVE_BG else {
-            if (express.isWin) "#0A2317" else "#2B0F14"
-        }
+        return if (isLive(express)) COLOR_LIVE_BG
+        else if (express.isWin) "#0A2317" else "#2B0F14"
     }
     
     private fun getStatusColor(express: ExpressResult): String {
-        return if (isLive(express)) COLOR_GOLD else {
-            if (express.isWin) COLOR_GREEN else COLOR_RED
-        }
+        return if (isLive(express)) COLOR_GOLD
+        else if (express.isWin) COLOR_GREEN else COLOR_RED
     }
     
     // ========== ПАГИНАЦИЯ ==========
@@ -176,13 +158,9 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun loadExpressPage() {
-        if (isLoading || allPagesLoaded) {
-            addLog("loadExpressPage: пропуск (isLoading=$isLoading, allPagesLoaded=$allPagesLoaded)")
-            return
-        }
+        if (isLoading || allPagesLoaded) return
         isLoading = true
-        
-        addLog("Загрузка страницы ${currentPage + 1}, всего экспрессов: ${allExpressResults.size}")
+        addLog("Загрузка страницы ${currentPage + 1}, всего: ${allExpressResults.size}")
         
         lifecycleScope.launch {
             try {
@@ -193,19 +171,15 @@ class MainActivity : AppCompatActivity() {
                     else allExpressResults.subList(start, end).toList()
                 }
                 
-                addLog("Получено ${pageData.size} экспрессов для страницы ${currentPage + 1}")
-                
                 if (pageData.isEmpty() && currentPage == 0 && allExpressResults.isEmpty()) {
                     tvDetailTitle.text = "Нет данных. Импортируйте файлы в Аналитике."
                     layoutDetailTable.visibility = View.VISIBLE
-                    addLog("Данных нет — показываем заглушку")
                     isLoading = false
                     return@launch
                 }
                 
                 if (pageData.isEmpty()) {
                     allPagesLoaded = true
-                    addLog("Все страницы загружены")
                     isLoading = false
                     return@launch
                 }
@@ -217,13 +191,11 @@ class MainActivity : AppCompatActivity() {
                     allPagesLoaded = true
                     val liveCount = allExpressResults.count { isLive(it) }
                     tvDetailTitle.text = "Экспрессы (${allExpressResults.size}) | Активных: $liveCount"
-                    addLog("ВСЕГО загружено: ${allExpressResults.size}, активно: $liveCount")
                 } else {
-                    tvDetailTitle.text = "Экспрессы (загружено ${currentPage * PAGE_SIZE} из ${allExpressResults.size})"
+                    tvDetailTitle.text = "Экспрессы (${currentPage * PAGE_SIZE} из ${allExpressResults.size})"
                 }
-                
             } catch (e: Exception) {
-                Log.e(TAG, "Ошибка загрузки страницы", e)
+                Log.e(TAG, "Ошибка загрузки", e)
                 addLog("ОШИБКА: ${e.message}")
                 tvDetailTitle.text = "Ошибка: ${e.message}"
             } finally {
@@ -236,15 +208,12 @@ class MainActivity : AppCompatActivity() {
         if (!isLoading && !allPagesLoaded) loadExpressPage()
     }
     
-    // ========== ПОСТРОЕНИЕ ТАБЛИЦЫ ==========
+    // ========== ТАБЛИЦА ==========
     
     private fun buildHeaderRow(): LinearLayout {
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             addView(headerTv("ID", 70))
             addView(headerTv("Время", 130))
             addView(headerTv("Статус", 100))
@@ -256,10 +225,7 @@ class MainActivity : AppCompatActivity() {
     private fun buildExpressRow(express: ExpressResult): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             tag = "express_${express.expId}"
             setOnClickListener { toggleExpress(express) }
             isClickable = true
@@ -276,15 +242,10 @@ class MainActivity : AppCompatActivity() {
             else -> "ПРОИГРЫШ"
         }
         
-        val dateStr = express.dateTime.format(DateTimeFormatter.ofPattern("dd.MM"))
-        val timeStr = express.dateTime.format(DateTimeFormatter.ofPattern("HH:mm"))
-        val dateTimeStr = "$dateStr $timeStr"
-        
+        val dateTimeStr = "${express.dateTime.format(DateTimeFormatter.ofPattern("dd.MM"))} ${express.dateTime.format(DateTimeFormatter.ofPattern("HH:mm"))}"
         val kfStr = if (express.totalStartKf > 0) String.format("%.2f", express.totalStartKf) else "-"
-        
         val completedText = if (live) "Нет" else "Да"
         val completedColor = if (live) COLOR_GOLD else "#848E9C"
-        
         val expanded = express.expId in expandedExpressIds
         val idPrefix = if (expanded) "▼" else "▶"
         
@@ -302,7 +263,7 @@ class MainActivity : AppCompatActivity() {
         val totalWidth = 70 + 130 + 100 + 60 + 80  // = 440dp
         
         // Заголовок матчей
-        val matchHeaderBg = TextView(this).apply {
+        views.add(TextView(this).apply {
             text = "Матчи экспресса #${express.expId}"
             textSize = 10f
             setPadding(dp(8), dp(6), dp(8), dp(6))
@@ -310,81 +271,63 @@ class MainActivity : AppCompatActivity() {
             setBackgroundColor(Color.parseColor(COLOR_MATCH_HEADER_BG))
             setTextColor(Color.parseColor("#F0B90B"))
             setTypeface(null, android.graphics.Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(
-                dp(totalWidth),
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
+            layoutParams = LinearLayout.LayoutParams(dp(totalWidth), ViewGroup.LayoutParams.WRAP_CONTENT)
             tag = "match_header_${express.expId}"
-        }
-        views.add(matchHeaderBg)
+        })
         
-        // Шапка колонок матчей
-        val subHeader = LinearLayout(this).apply {
+        // Шапка: Команда1(100) + Команда2(100) + Счет(80) + Кэф(50) + Тип(110) = 440
+        views.add(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                dp(totalWidth),
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
+            layoutParams = LinearLayout.LayoutParams(dp(totalWidth), ViewGroup.LayoutParams.WRAP_CONTENT)
             setBackgroundColor(Color.parseColor(COLOR_MATCH_HEADER_BG))
             tag = "match_subheader_${express.expId}"
-        }
-        subHeader.addView(matchHeaderTv("Команда 1", 140))
-        subHeader.addView(matchHeaderTv("Команда 2", 140))
-        subHeader.addView(matchHeaderTv("Счет", 50))
-        subHeader.addView(matchHeaderTv("Тип", 110))
-        views.add(subHeader)
+            addView(matchHeaderTv("Команда 1", 100))
+            addView(matchHeaderTv("Команда 2", 100))
+            addView(matchHeaderTv("Счет", 80))
+            addView(matchHeaderTv("Кэф", 50))
+            addView(matchHeaderTv("Тип", 110))
+        })
         
         for (match in express.matches) {
-            val matchRow = LinearLayout(this).apply {
+            // Строка матча
+            views.add(LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
-                layoutParams = LinearLayout.LayoutParams(
-                    dp(totalWidth),
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                )
+                layoutParams = LinearLayout.LayoutParams(dp(totalWidth), ViewGroup.LayoutParams.WRAP_CONTENT)
                 setBackgroundColor(Color.parseColor(COLOR_MATCH_BG))
                 tag = "match_${match.matchId}"
-            }
+                
+                val typeShort = when (match.type) {
+                    924 -> "1X"
+                    927 -> "Ф1(+1.5)"
+                    928 -> "Ф2(+1.5)"
+                    else -> "Т${match.type}"
+                }
+                
+                addView(matchDataTv(match.home.take(14), 100, COLOR_TEXT_PRIMARY, 10f))
+                addView(matchDataTv(match.away.take(14), 100, COLOR_TEXT_PRIMARY, 10f))
+                addView(matchDataTv("${match.sh}:${match.sa}", 80, "#EAECEF", 11f, bold = true))
+                addView(matchDataTv(String.format("%.2f", match.startkf), 50, "#F0B90B", 10f))
+                addView(matchDataTv(typeShort, 110, "#848E9C", 10f))
+            })
             
-            val typeShort = when (match.type) {
-                924 -> "1X"
-                927 -> "Ф1(+1.5)"
-                928 -> "Ф2(+1.5)"
-                else -> "Т${match.type}"
-            }
-            
-            matchRow.addView(matchDataTv(match.home.take(18), 140, COLOR_TEXT_PRIMARY, 10f))
-            matchRow.addView(matchDataTv(match.away.take(18), 140, COLOR_TEXT_PRIMARY, 10f))
-            matchRow.addView(matchDataTv("${match.sh}:${match.sa}", 50, "#EAECEF", 11f, bold = true))
-            matchRow.addView(matchDataTv(typeShort, 110, "#848E9C", 10f))
-            
-            views.add(matchRow)
-            
-            // Подсказка: лига + исход
-            val infoRow = LinearLayout(this).apply {
+            // Инфо-строка: лига + исход
+            views.add(LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
-                layoutParams = LinearLayout.LayoutParams(
-                    dp(totalWidth),
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                )
+                layoutParams = LinearLayout.LayoutParams(dp(totalWidth), ViewGroup.LayoutParams.WRAP_CONTENT)
                 setBackgroundColor(Color.parseColor("#11161C"))
                 tag = "match_info_${match.matchId}"
-            }
-            val mc = if (match.isWin) COLOR_GREEN else COLOR_RED
-            val resultText = if (match.isWin) "✓ Зашел" else "✗ Мимо"
-            infoRow.addView(matchDataTv("${match.liganame.take(40)} | $resultText", totalWidth, "#11161C", mc, 9f))
-            views.add(infoRow)
+                val mc = if (match.isWin) COLOR_GREEN else COLOR_RED
+                val resultText = if (match.isWin) "✓ Зашел" else "✗ Мимо"
+                addView(matchDataTv("${match.liganame.take(40)} | $resultText", totalWidth, "#11161C", mc, 9f))
+            })
         }
         
         // Разделитель
-        val separator = View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                dp(totalWidth),
-                dp(2)
-            )
+        views.add(View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(totalWidth), dp(2))
             setBackgroundColor(Color.parseColor(COLOR_GRID))
             tag = "sep_${express.expId}"
-        }
-        views.add(separator)
+        })
         
         return views
     }
@@ -392,9 +335,7 @@ class MainActivity : AppCompatActivity() {
     // ========== РАСКРЫТИЕ/СКРЫТИЕ ==========
     
     private fun toggleExpress(express: ExpressResult) {
-        val isExpanded = express.expId in expandedExpressIds
-        
-        if (isExpanded) {
+        if (express.expId in expandedExpressIds) {
             expandedExpressIds.remove(express.expId)
             removeMatchRows(express.expId)
             updateExpressRowIndicator(express.expId, false)
@@ -406,136 +347,78 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun updateExpressRowIndicator(expId: Int, expanded: Boolean) {
-        val expressRow = layoutDetailContent.findViewWithTag<LinearLayout>("express_$expId")
-        if (expressRow != null && expressRow.childCount > 0) {
-            val firstChild = expressRow.getChildAt(0) as? TextView
-            firstChild?.let {
-                val text = it.text.toString()
-                val newText = if (expanded) text.replace("▶", "▼") else text.replace("▼", "▶")
-                it.text = newText
-            }
-        }
+        val row = layoutDetailContent.findViewWithTag<LinearLayout>("express_$expId") ?: return
+        val tv = row.getChildAt(0) as? TextView ?: return
+        tv.text = tv.text.toString().let { if (expanded) it.replace("▶", "▼") else it.replace("▼", "▶") }
     }
     
     private fun insertMatchRows(express: ExpressResult) {
-        val expressRow = layoutDetailContent.findViewWithTag<LinearLayout>("express_${express.expId}")
-        if (expressRow == null) return
-        
-        val index = layoutDetailContent.indexOfChild(expressRow)
+        val row = layoutDetailContent.findViewWithTag<LinearLayout>("express_${express.expId}") ?: return
+        val index = layoutDetailContent.indexOfChild(row)
         if (index == -1) return
-        
-        val matchViews = buildMatchDetailRows(express)
-        var insertIndex = index + 1
-        
-        for (view in matchViews) {
-            layoutDetailContent.addView(view, insertIndex)
-            insertIndex++
+        buildMatchDetailRows(express).forEachIndexed { i, v ->
+            layoutDetailContent.addView(v, index + 1 + i)
         }
     }
     
     private fun removeMatchRows(expId: Int) {
         val toRemove = mutableListOf<View>()
-        
         for (i in 0 until layoutDetailContent.childCount) {
-            val child = layoutDetailContent.getChildAt(i)
-            val tag = child.tag as? String ?: continue
-            if (tag.startsWith("match_header_$expId") || 
+            val tag = layoutDetailContent.getChildAt(i).tag as? String ?: continue
+            if (tag.startsWith("match_header_$expId") ||
                 tag.startsWith("match_subheader_$expId") ||
                 tag.startsWith("match_") ||
                 tag.startsWith("match_info_") ||
-                tag == "sep_$expId") {
-                toRemove.add(child)
-            }
+                tag == "sep_$expId") toRemove.add(layoutDetailContent.getChildAt(i))
         }
-        
-        for (view in toRemove) {
-            layoutDetailContent.removeView(view)
-        }
+        toRemove.forEach { layoutDetailContent.removeView(it) }
     }
     
     private fun appendExpressRows(expresses: List<ExpressResult>) {
         if (expresses.isEmpty()) return
-        
         layoutDetailTable.visibility = View.VISIBLE
-        
-        if (currentPage == 0) {
-            layoutDetailContent.addView(buildHeaderRow())
-            addLog("Добавлен заголовок таблицы")
-        }
-        
-        for (express in expresses) {
+        if (currentPage == 0) layoutDetailContent.addView(buildHeaderRow())
+        expresses.forEach { express ->
             layoutDetailContent.addView(buildExpressRow(express))
-            if (express.expId in expandedExpressIds) {
-                insertMatchRows(express)
-            }
+            if (express.expId in expandedExpressIds) insertMatchRows(express)
         }
-        
-        addLog("Добавлено ${expresses.size} строк в таблицу")
     }
     
     // ========== ФАБРИКИ ==========
     
-    private fun headerTv(text: String, widthDp: Int): TextView {
-        return TextView(this).apply {
-            this.text = text
-            textSize = 11f
-            setPadding(dp(4), dp(6), dp(4), dp(6))
-            gravity = Gravity.CENTER
-            setBackgroundColor(Color.parseColor("#2B3139"))
-            setTextColor(Color.parseColor("#EAECEF"))
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            maxLines = 2
-            layoutParams = LinearLayout.LayoutParams(dp(widthDp), ViewGroup.LayoutParams.WRAP_CONTENT)
-        }
+    private fun headerTv(text: String, w: Int) = TextView(this).apply {
+        this.text = text; textSize = 11f; setPadding(dp(4), dp(6), dp(4), dp(6))
+        gravity = Gravity.CENTER; setBackgroundColor(Color.parseColor("#2B3139"))
+        setTextColor(Color.parseColor("#EAECEF")); setTypeface(null, android.graphics.Typeface.BOLD)
+        maxLines = 2; layoutParams = LinearLayout.LayoutParams(dp(w), ViewGroup.LayoutParams.WRAP_CONTENT)
     }
     
-    private fun matchHeaderTv(text: String, widthDp: Int): TextView {
-        return TextView(this).apply {
-            this.text = text
-            textSize = 10f
-            setPadding(dp(4), dp(4), dp(4), dp(4))
-            gravity = Gravity.CENTER
-            setBackgroundColor(Color.parseColor(COLOR_MATCH_HEADER_BG))
-            setTextColor(Color.parseColor("#5E6673"))
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            maxLines = 1
-            layoutParams = LinearLayout.LayoutParams(dp(widthDp), ViewGroup.LayoutParams.WRAP_CONTENT)
-        }
+    private fun matchHeaderTv(text: String, w: Int) = TextView(this).apply {
+        this.text = text; textSize = 10f; setPadding(dp(4), dp(4), dp(4), dp(4))
+        gravity = Gravity.CENTER; setBackgroundColor(Color.parseColor(COLOR_MATCH_HEADER_BG))
+        setTextColor(Color.parseColor("#5E6673")); setTypeface(null, android.graphics.Typeface.BOLD)
+        maxLines = 1; layoutParams = LinearLayout.LayoutParams(dp(w), ViewGroup.LayoutParams.WRAP_CONTENT)
     }
     
-    private fun dataTv(text: String, widthDp: Int, bg: String, color: String, bold: Boolean = false): TextView {
-        return TextView(this).apply {
-            this.text = text
-            textSize = 10f
-            setPadding(dp(4), dp(4), dp(4), dp(4))
-            gravity = Gravity.CENTER
-            setBackgroundColor(Color.parseColor(bg))
-            setTextColor(Color.parseColor(color))
-            maxLines = 3
-            ellipsize = android.text.TextUtils.TruncateAt.END
-            if (bold) setTypeface(null, android.graphics.Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(dp(widthDp), ViewGroup.LayoutParams.WRAP_CONTENT)
-        }
+    private fun dataTv(text: String, w: Int, bg: String, color: String, bold: Boolean = false) = TextView(this).apply {
+        this.text = text; textSize = 10f; setPadding(dp(4), dp(4), dp(4), dp(4))
+        gravity = Gravity.CENTER; setBackgroundColor(Color.parseColor(bg)); setTextColor(Color.parseColor(color))
+        maxLines = 3; ellipsize = android.text.TextUtils.TruncateAt.END
+        if (bold) setTypeface(null, android.graphics.Typeface.BOLD)
+        layoutParams = LinearLayout.LayoutParams(dp(w), ViewGroup.LayoutParams.WRAP_CONTENT)
     }
     
-    private fun matchDataTv(text: String, widthDp: Int, color: String, size: Float, bold: Boolean = false): TextView {
-        return TextView(this).apply {
-            this.text = text
-            textSize = size
-            setPadding(dp(4), dp(3), dp(4), dp(3))
-            gravity = Gravity.CENTER
-            setBackgroundColor(Color.TRANSPARENT)
-            setTextColor(Color.parseColor(color))
-            maxLines = 2
-            ellipsize = android.text.TextUtils.TruncateAt.END
-            if (bold) setTypeface(null, android.graphics.Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(dp(widthDp), ViewGroup.LayoutParams.WRAP_CONTENT)
-        }
+    private fun matchDataTv(text: String, w: Int, color: String, size: Float, bold: Boolean = false) = TextView(this).apply {
+        this.text = text; textSize = size; setPadding(dp(4), dp(3), dp(4), dp(3))
+        gravity = Gravity.CENTER; setBackgroundColor(Color.TRANSPARENT); setTextColor(Color.parseColor(color))
+        maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END
+        if (bold) setTypeface(null, android.graphics.Typeface.BOLD)
+        layoutParams = LinearLayout.LayoutParams(dp(w), ViewGroup.LayoutParams.WRAP_CONTENT)
     }
     
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
     
-    // ========== ЗАГРУЗКА ДАННЫХ ==========
+    // ========== ЗАГРУЗКА ==========
     
     private fun loadData() {
         lifecycleScope.launch {
@@ -543,53 +426,27 @@ class MainActivity : AppCompatActivity() {
                 tvDetailTitle.text = "Загрузка..."
                 addLog("Начало первичной загрузки")
                 
-                val expCount = withContext(Dispatchers.IO) { 
-                    val count = database.expDao().getAllExp().size
-                    addLog("Прямой запрос: exp=$count")
-                    count
-                }
-                val dataCount = withContext(Dispatchers.IO) { 
-                    val count = database.dataDao().getAllData().size
-                    addLog("Прямой запрос: data=$count")
-                    count
-                }
+                val expCount = withContext(Dispatchers.IO) { database.expDao().getAllExp().size }
+                val dataCount = withContext(Dispatchers.IO) { database.dataDao().getAllData().size }
+                addLog("База: exp=$expCount, data=$dataCount")
                 
                 if (expCount == 0 || dataCount == 0) {
                     tvDetailTitle.text = "Нет данных. Импортируйте файлы в Аналитике."
                     layoutDetailTable.visibility = View.VISIBLE
-                    addLog("База пуста (exp=$expCount, data=$dataCount)")
                     return@launch
                 }
                 
-                addLog("Запуск AnalyticsEngine...")
-                val analytics = withContext(Dispatchers.IO) { 
-                    val result = analyticsEngine.calculateAnalytics()
-                    addLog("AnalyticsEngine вернул ключи: ${result.keys}")
-                    result
-                }
-                
-                val raw = analytics["allExpresses"]
-                addLog("allExpresses тип: ${raw?.javaClass?.simpleName}, размер: ${(raw as? List<*>)?.size}")
-                
-                allExpressResults = ((raw as? List<ExpressResult>) ?: emptyList())
+                addLog("Расчёт аналитики...")
+                val analytics = withContext(Dispatchers.IO) { analyticsEngine.calculateAnalytics() }
+                allExpressResults = ((analytics["allExpresses"] as? List<ExpressResult>) ?: emptyList())
                     .sortedByDescending { it.dateTime }
-                
-                addLog("ИТОГО экспрессов: ${allExpressResults.size}")
-                
-                if (allExpressResults.isEmpty()) {
-                    tvDetailTitle.text = "Экспрессы не собраны. Проверьте данные."
-                    layoutDetailTable.visibility = View.VISIBLE
-                    addLog("allExpressResults пуст!")
-                    return@launch
-                }
+                addLog("Готово: ${allExpressResults.size} экспрессов")
                 
                 resetPagination()
                 loadExpressPage()
-                
             } catch (e: Exception) {
-                Log.e(TAG, "Ошибка в loadData", e)
-                addLog("КРИТИЧЕСКАЯ ОШИБКА: ${e.message}")
-                e.printStackTrace()
+                Log.e(TAG, "Ошибка", e)
+                addLog("ОШИБКА: ${e.message}")
                 tvDetailTitle.text = "Ошибка: ${e.message}"
             }
         }
@@ -598,20 +455,12 @@ class MainActivity : AppCompatActivity() {
     private fun refreshData() {
         lifecycleScope.launch {
             try {
-                addLog("refreshData: проверка базы")
-                
                 val expCount = withContext(Dispatchers.IO) { database.expDao().getAllExp().size }
                 val dataCount = withContext(Dispatchers.IO) { database.dataDao().getAllData().size }
-                addLog("refreshData: exp=$expCount, data=$dataCount")
-                
                 if (expCount > 0 && dataCount > 0) {
                     val analytics = withContext(Dispatchers.IO) { analyticsEngine.calculateAnalytics() }
-                    
                     val newResults = ((analytics["allExpresses"] as? List<ExpressResult>) ?: emptyList())
                         .sortedByDescending { it.dateTime }
-                    
-                    addLog("refreshData: получено ${newResults.size} экспрессов")
-                    
                     if (newResults.isNotEmpty()) {
                         allExpressResults = newResults
                         resetPagination()

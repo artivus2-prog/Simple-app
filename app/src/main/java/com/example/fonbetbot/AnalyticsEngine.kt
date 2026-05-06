@@ -17,7 +17,8 @@ data class MatchResult(
     val sa: Int,
     val type: Int,
     val isWin: Boolean,
-    val liganame: String = ""
+    val liganame: String = "",
+    val startkf: Double = 0.0
 )
 
 data class ExpressResult(
@@ -98,7 +99,8 @@ class AnalyticsEngine(private val database: AppDatabase) {
                         sa = match.sa,
                         type = match.type,
                         isWin = isWin,
-                        liganame = match.liganame
+                        liganame = match.liganame,
+                        startkf = match.startkf
                     )
                 }
                 
@@ -110,23 +112,24 @@ class AnalyticsEngine(private val database: AppDatabase) {
                 val weekNumber = dateTime.get(weekField.weekOfWeekBasedYear())
                 val yearWeek = "${dateTime.year}-W${String.format("%02d", weekNumber)}"
                 
+                // Общий коэффициент — произведение startkf всех матчей
                 val allStartKf = matches.map { it.startkf }
-val totalStartKf = if (allStartKf.all { it > 0 }) {
-    allStartKf.reduce { acc, kf -> acc * kf }
-} else 0.0
-
-expressResults.add(
-    ExpressResult(
-        expId = expId,
-        matches = matchResults,
-        isWin = allWins,
-        dateTime = dateTime,
-        isReplaced = isReplaced,
-        weekNumber = weekNumber,
-        yearWeek = yearWeek,
-        totalStartKf = totalStartKf
-    )
-)
+                val totalStartKf = if (allStartKf.all { it > 0 }) {
+                    allStartKf.reduce { acc, kf -> acc * kf }
+                } else 0.0
+                
+                expressResults.add(
+                    ExpressResult(
+                        expId = expId,
+                        matches = matchResults,
+                        isWin = allWins,
+                        dateTime = dateTime,
+                        isReplaced = isReplaced,
+                        weekNumber = weekNumber,
+                        yearWeek = yearWeek,
+                        totalStartKf = totalStartKf
+                    )
+                )
             }
             
             calculateStatistics(expressResults)
@@ -160,10 +163,8 @@ expressResults.add(
     private fun calculateStatistics(expressResults: List<ExpressResult>): Map<String, Any> {
         val result = mutableMapOf<String, Any>()
         
-        // ============ СОХРАНЯЕМ ВСЕ ЭКСПРЕССЫ ДЛЯ ДАШБОРДА ============
         result["allExpresses"] = expressResults
         
-        // ============ ОБЩАЯ СТАТИСТИКА ============
         val totalExpress = expressResults.size
         val winExpress = expressResults.count { it.isWin }
         val loseExpress = totalExpress - winExpress
@@ -184,7 +185,6 @@ expressResults.add(
             }
         )
         
-        // ============ ПО ДНЯМ НЕДЕЛИ ============
         val byDayOfWeek = expressResults.groupBy { it.dateTime.dayOfWeek }
         val dayStats = LinkedHashMap<DayOfWeek, Pair<Int, Int>>()
         for (day in DayOfWeek.entries) {
@@ -193,7 +193,6 @@ expressResults.add(
         }
         result["byDayOfWeek"] = dayStats
         
-        // ============ ПО ЧАСАМ ============
         val byHour = expressResults.groupBy { it.dateTime.hour }
         val hourStats = TreeMap<Int, Pair<Int, Int>>()
         for (hour in 0..23) {
@@ -202,7 +201,6 @@ expressResults.add(
         }
         result["byHour"] = hourStats
         
-        // ============ ПО МЕСЯЦАМ ============
         val byMonth = expressResults.groupBy { it.dateTime.month }
         val monthStats = LinkedHashMap<String, Pair<Int, Int>>()
         val monthNames = mapOf(
@@ -218,7 +216,6 @@ expressResults.add(
         }
         result["byMonth"] = monthStats
         
-        // ============ ПО НЕДЕЛЯМ ============
         val byWeek = expressResults.groupBy { it.yearWeek }
         val weekStatsList = mutableListOf<WeekStats>()
         
@@ -234,11 +231,9 @@ expressResults.add(
             weekStatsList.add(WeekStats(yearWeek, startDate, endDate, total, wins, rate))
         }
         
-        // Сортируем по году и неделе
         weekStatsList.sortBy { it.yearWeek }
         result["byWeek"] = weekStatsList
         
-        // ============ ПО ЛИГАМ ============
         val allMatches = expressResults.flatMap { express -> express.matches }
         val byLeague = allMatches.groupBy { it.liganame }
         val leagueStatsList = mutableListOf<LeagueStats>()
@@ -250,14 +245,10 @@ expressResults.add(
             leagueStatsList.add(LeagueStats(league, total, wins, rate))
         }
         
-        // Сортируем по количеству матчей (по убыванию)
         leagueStatsList.sortByDescending { it.total }
         result["byLeague"] = leagueStatsList
-        
-        // Топ-20 лиг
         result["topLeagues"] = leagueStatsList.take(20)
         
-        // ============ ПО ТИПАМ СТАВОК ============
         val typeStats = mutableMapOf<Int, Triple<Int, Int, Double>>()
         for (type in listOf(924, 927, 928)) {
             val typeMatches = allMatches.filter { it.type == type }
@@ -268,10 +259,8 @@ expressResults.add(
         }
         result["byType"] = typeStats
         
-        // ============ СМЕШАННЫЕ ТИПЫ ЭКСПРЕССОВ ============
         val mixedStatsList = mutableListOf<MixedTypeStats>()
         
-        // 924 + 927
         val mixed924927 = expressResults.filter { express ->
             val types = express.matches.map { it.type }.distinct()
             types.contains(924) && types.contains(927) && !types.contains(928)
@@ -282,7 +271,6 @@ expressResults.add(
             if (mixed924927.isNotEmpty()) (mixed924927.count { it.isWin }.toDouble() / mixed924927.size) * 100 else 0.0
         ))
         
-        // 924 + 928
         val mixed924928 = expressResults.filter { express ->
             val types = express.matches.map { it.type }.distinct()
             types.contains(924) && types.contains(928) && !types.contains(927)
@@ -293,7 +281,6 @@ expressResults.add(
             if (mixed924928.isNotEmpty()) (mixed924928.count { it.isWin }.toDouble() / mixed924928.size) * 100 else 0.0
         ))
         
-        // 927 + 928
         val mixed927928 = expressResults.filter { express ->
             val types = express.matches.map { it.type }.distinct()
             types.contains(927) && types.contains(928) && !types.contains(924)
@@ -304,7 +291,6 @@ expressResults.add(
             if (mixed927928.isNotEmpty()) (mixed927928.count { it.isWin }.toDouble() / mixed927928.size) * 100 else 0.0
         ))
         
-        // Все три типа
         val mixedAll = expressResults.filter { express ->
             val types = express.matches.map { it.type }.distinct()
             types.containsAll(listOf(924, 927, 928))
@@ -315,7 +301,6 @@ expressResults.add(
             if (mixedAll.isNotEmpty()) (mixedAll.count { it.isWin }.toDouble() / mixedAll.size) * 100 else 0.0
         ))
         
-        // Только 924
         val only924 = expressResults.filter { express ->
             express.matches.all { it.type == 924 }
         }
@@ -325,7 +310,6 @@ expressResults.add(
             if (only924.isNotEmpty()) (only924.count { it.isWin }.toDouble() / only924.size) * 100 else 0.0
         ))
         
-        // Только 927
         val only927 = expressResults.filter { express ->
             express.matches.all { it.type == 927 }
         }
@@ -335,7 +319,6 @@ expressResults.add(
             if (only927.isNotEmpty()) (only927.count { it.isWin }.toDouble() / only927.size) * 100 else 0.0
         ))
         
-        // Только 928
         val only928 = expressResults.filter { express ->
             express.matches.all { it.type == 928 }
         }
