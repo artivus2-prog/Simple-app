@@ -447,7 +447,7 @@ class ScoreUpdateService : Service() {
                     database.expDao().deleteAll()
                     database.expDao().insertAll(updatedExp)
                     Log.d("ScoreUpdate", "✅ Обновлено статусов в БД: $finishedCount")
-                }
+                } else {Log.d("ScoresUpdate","some")}
             } catch (e: Exception) {
                 Log.e("ScoreUpdate", "Ошибка обновления статусов: ${e.message}", e)
             }
@@ -475,7 +475,7 @@ class ScoreUpdateService : Service() {
                 if (found) {
                     database.dataDao().deleteAll()
                     database.dataDao().insertAll(updated)
-                }
+                } else {it}
             } catch (e: Exception) {
                 Log.e("ScoreUpdate", "Ошибка сохранения счёта для $matchId: ${e.message}")
             }
