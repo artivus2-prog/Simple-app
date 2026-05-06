@@ -1,4 +1,4 @@
-﻿// ScoreUpdateService.kt - ИСПРАВЛЕНИЕ СТРОКИ 480
+﻿// ScoreUpdateService.kt - ПОЛНОЕ ИСПРАВЛЕНИЕ ВСЕХ IF/WHEN ВЫРАЖЕНИЙ
 package com.example.fonbetbot
 
 import android.app.Notification
@@ -54,7 +54,6 @@ class ScoreUpdateService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        Log.d(TAG, "onCreate: Инициализация сервиса")
         createNotificationChannel()
         database = AppDatabase.getDatabase(this)
         acquireWakeLock()
@@ -111,8 +110,9 @@ class ScoreUpdateService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, CHANNEL_ID)
+        val notification: Notification
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            notification = Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle("Fonbet Bot")
                 .setContentText("Отслеживание активных матчей")
                 .setSmallIcon(android.R.drawable.ic_popup_sync)
@@ -124,7 +124,7 @@ class ScoreUpdateService : Service() {
                 .build()
         } else {
             @Suppress("DEPRECATION")
-            Notification.Builder(this)
+            notification = Notification.Builder(this)
                 .setContentTitle("Fonbet Bot")
                 .setContentText("Отслеживание активных матчей")
                 .setSmallIcon(android.R.drawable.ic_popup_sync)
@@ -134,13 +134,12 @@ class ScoreUpdateService : Service() {
                 .addAction(android.R.drawable.ic_media_pause, "Остановить", stopPendingIntent)
                 .build()
         }
+        return notification
     }
 
     private fun startScoreUpdates() {
         updateJob?.cancel()
         updateJob = serviceScope.launch {
-            Log.d(TAG, "Запуск цикла обновления (интервал ${UPDATE_INTERVAL_MS}мс)")
-            
             updateScores()
             
             while (isActive) {
@@ -164,48 +163,49 @@ class ScoreUpdateService : Service() {
             val allData = withContext(Dispatchers.IO) { database.dataDao().getAllData() }
             
             if (allExp.isEmpty() || allData.isEmpty()) {
-                Log.d(TAG, "БД пуста, нечего обновлять")
                 return
             }
             
             val now = LocalDateTime.now()
             
-            val activeExps = allExp.filter { exp ->
+            val activeExpList = mutableListOf<ExpEntity>()
+            for (exp in allExp) {
                 try {
                     val expTime = parseDateTime(exp.ct)
                     val hoursSinceCreation = ChronoUnit.HOURS.between(expTime, now)
                     val expMatches = allData.filter { it.id_exp == exp.id_exp }
                     val isFinished = isExpressFinished(expMatches)
-                    val isActive = hoursSinceCreation <= ACTIVE_HOURS && !isFinished
-                    isActive
+                    if (hoursSinceCreation <= ACTIVE_HOURS && !isFinished) {
+                        activeExpList.add(exp)
+                    }
                 } catch (e: Exception) {
-                    false
+                    // ignore
                 }
             }
             
-            Log.d(TAG, "=== ИТОГО: всего=${allExp.size}, активных=${activeExps.size} ===")
-            
-            if (activeExps.isEmpty()) {
+            if (activeExpList.isEmpty()) {
                 logMessage("✓ Нет активных экспрессов")
                 return
             }
             
-            val activeExpIds = activeExps.map { it.id_exp }.toSet()
+            val activeExpIds = activeExpList.map { it.id_exp }.toSet()
             val activeMatches = allData.filter { it.id_exp in activeExpIds }
             
-            val matchesToCheck = activeMatches
-                .filter { it.sh == 0 && it.sa == 0 }
-                .groupBy { it.m_id }
-                .map { (_, matches) -> matches.first() }
-            
-            Log.d(TAG, "Матчей без счета для проверки: ${matchesToCheck.size}")
+            val matchesToCheckList = mutableListOf<DataEntity>()
+            val seenIds = mutableSetOf<Long>()
+            for (match in activeMatches) {
+                if (match.sh == 0 && match.sa == 0 && match.m_id !in seenIds) {
+                    matchesToCheckList.add(match)
+                    seenIds.add(match.m_id)
+                }
+            }
             
             var updatedCount = 0
             var finishedByMinuteCount = 0
             var retryLaterCount = 0
             var noScoreCount = 0
             
-            for ((index, match) in matchesToCheck.withIndex()) {
+            for ((index, match) in matchesToCheckList.withIndex()) {
                 try {
                     val result = withContext(Dispatchers.IO) {
                         getMatchScoreSync(match.m_id)
@@ -222,51 +222,41 @@ class ScoreUpdateService : Service() {
                     } else {
                         val currentMinute = matchTimeCache[match.m_id] ?: 0
                         
-                        when {
-                            currentMinute <= MIN_MATCH_MINUTE_FOR_RETRY -> {
-                                noScoreCount++
+                        if (currentMinute <= MIN_MATCH_MINUTE_FOR_RETRY) {
+                            noScoreCount++
+                            failedAttemptsMap.remove(match.m_id)
+                        } else if (currentMinute < MATCH_FINISHED_MINUTE) {
+                            retryLaterCount++
+                            val now2 = System.currentTimeMillis()
+                            val info = failedAttemptsMap.getOrPut(match.m_id) {
+                                FailedAttemptInfo(now2, 0, currentMinute)
+                            }
+                            info.count++
+                            info.lastMinute = currentMinute
+                        } else {
+                            val now2 = System.currentTimeMillis()
+                            val info = failedAttemptsMap.getOrPut(match.m_id) {
+                                FailedAttemptInfo(now2, 0, currentMinute)
+                            }
+                            info.count++
+                            info.lastMinute = currentMinute
+                            
+                            val elapsedSinceFirstFail = now2 - info.firstFailTime
+                            
+                            if (info.count >= MAX_FAILED_ATTEMPTS && elapsedSinceFirstFail >= FAILED_TIMEOUT_MS) {
+                                markMatchAsFinished(match)
+                                finishedByMinuteCount++
                                 failedAttemptsMap.remove(match.m_id)
-                            }
-                            
-                            currentMinute in (MIN_MATCH_MINUTE_FOR_RETRY + 1) until MATCH_FINISHED_MINUTE -> {
+                            } else {
                                 retryLaterCount++
-                                val now2 = System.currentTimeMillis()
-                                val info = failedAttemptsMap.getOrPut(match.m_id) {
-                                    FailedAttemptInfo(now2, 0, currentMinute)
-                                }
-                                info.count++
-                                info.lastMinute = currentMinute
-                            }
-                            
-                            currentMinute >= MATCH_FINISHED_MINUTE -> {
-                                val now2 = System.currentTimeMillis()
-                                val info = failedAttemptsMap.getOrPut(match.m_id) {
-                                    FailedAttemptInfo(now2, 0, currentMinute)
-                                }
-                                info.count++
-                                info.lastMinute = currentMinute
-                                
-                                val elapsedSinceFirstFail = now2 - info.firstFailTime
-                                
-                                if (info.count >= MAX_FAILED_ATTEMPTS && elapsedSinceFirstFail >= FAILED_TIMEOUT_MS) {
-                                    markMatchAsFinished(match)
-                                    finishedByMinuteCount++
-                                    failedAttemptsMap.remove(match.m_id)
-                                } else {
-                                    retryLaterCount++
-                                }
-                            }
-                            
-                            else -> {
-                                noScoreCount++
                             }
                         }
                     }
                 } catch (e: Exception) {
-                    Log.w(TAG, "  ❌ Ошибка матча ${match.m_id}: ${e.message}")
+                    Log.w(TAG, "Ошибка матча ${match.m_id}: ${e.message}")
                 }
                 
-                if (index < matchesToCheck.size - 1) {
+                if (index < matchesToCheckList.size - 1) {
                     delay(500)
                 }
             }
@@ -276,7 +266,7 @@ class ScoreUpdateService : Service() {
             
             val duration = System.currentTimeMillis() - startTime
             val parts = mutableListOf<String>()
-            parts.add("Активных: ${activeExps.size}")
+            parts.add("Активных: ${activeExpList.size}")
             if (updatedCount > 0) parts.add("✅$updatedCount")
             if (finishedByMinuteCount > 0) parts.add("🏁$finishedByMinuteCount")
             if (retryLaterCount > 0) parts.add("🔄$retryLaterCount")
@@ -285,24 +275,12 @@ class ScoreUpdateService : Service() {
             if (parts.size == 1) parts.add("без изменений")
             
             val msg = "📊 [${duration}мс] " + parts.joinToString(" | ")
-            
             logMessage(msg)
-            Log.d(TAG, msg)
             
         } catch (e: Exception) {
-            Log.e(TAG, "Критическая ошибка updateScores: ${e.message}", e)
+            Log.e(TAG, "Критическая ошибка: ${e.message}", e)
             logMessage("❌ Ошибка: ${e.message}")
         }
-    }
-
-    private fun getMinuteLimit(match: DataEntity): Int {
-        if (match.liganame.contains("НХЛ", ignoreCase = true) ||
-            match.liganame.contains("КХЛ", ignoreCase = true) ||
-            match.liganame.contains("ВХЛ", ignoreCase = true) ||
-            match.liganame.contains("AHL", ignoreCase = true)) {
-            return MATCH_FINISHED_MINUTE_HOCKEY
-        }
-        return MATCH_FINISHED_MINUTE
     }
 
     private fun isExpressFinished(matches: List<DataEntity>): Boolean {
@@ -326,7 +304,7 @@ class ScoreUpdateService : Service() {
                 continue
             }
             
-            val isWin: Boolean
+            var isWin = false
             when (match.type) {
                 924 -> isWin = match.sh >= match.sa
                 927 -> isWin = match.sh + 1 > match.sa
@@ -357,11 +335,7 @@ class ScoreUpdateService : Service() {
 
     private suspend fun markMatchAsFinished(match: DataEntity) {
         withContext(Dispatchers.IO) {
-            try {
-                Log.d(TAG, "  🏁 Матч ${match.m_id}: помечен как завершенный")
-            } catch (e: Exception) {
-                Log.e(TAG, "Ошибка markMatchAsFinished: ${e.message}")
-            }
+            Log.d(TAG, "Матч ${match.m_id}: помечен как завершенный")
         }
     }
 
@@ -380,54 +354,50 @@ class ScoreUpdateService : Service() {
                 continue
             }
             
-            val isFinished = isExpressFinished(expMatches)
+            if (!isExpressFinished(expMatches)) {
+                continue
+            }
             
-            if (isFinished) {
-                var allHaveScore = true
+            var allHaveScore = true
+            for (match in expMatches) {
+                if (match.sh == 0 && match.sa == 0) {
+                    allHaveScore = false
+                    break
+                }
+            }
+            
+            var allWins = false
+            if (allHaveScore) {
+                allWins = true
                 for (match in expMatches) {
-                    if (match.sh == 0 && match.sa == 0) {
-                        allHaveScore = false
+                    var isWin = false
+                    when (match.type) {
+                        924 -> isWin = match.sh >= match.sa
+                        927 -> isWin = match.sh + 1 > match.sa
+                        928 -> isWin = match.sa + 1 >= match.sh
+                        else -> isWin = match.sh >= match.sa
+                    }
+                    if (!isWin) {
+                        allWins = false
                         break
                     }
                 }
-                
-                var allWins = false
-                if (allHaveScore) {
-                    allWins = true
-                    for (match in expMatches) {
-                        val isWin: Boolean
-                        when (match.type) {
-                            924 -> isWin = match.sh >= match.sa
-                            927 -> isWin = match.sh + 1 > match.sa
-                            928 -> isWin = match.sa + 1 >= match.sh
-                            else -> isWin = match.sh >= match.sa
-                        }
-                        if (!isWin) {
-                            allWins = false
-                            break
-                        }
-                    }
-                }
-                
-                val newStatus: Int
-                if (allWins) {
-                    newStatus = 2
-                } else {
-                    newStatus = -1
-                }
-                
-                val statusText: String
-                if (allWins) {
-                    statusText = "ВЫИГРЫШ"
-                } else {
-                    statusText = "ПРОИГРЫШ"
-                }
-                
-                Log.d(TAG, "🏁 Экспресс #${exp.id_exp} завершен: статус=$statusText")
-                
-                updateExpressStatus(exp.id, newStatus)
-                finishedCount++
             }
+            
+            val newStatus: Int
+            val statusText: String
+            if (allWins) {
+                newStatus = 2
+                statusText = "ВЫИГРЫШ"
+            } else {
+                newStatus = -1
+                statusText = "ПРОИГРЫШ"
+            }
+            
+            Log.d(TAG, "Экспресс #${exp.id_exp} завершен: $statusText")
+            
+            updateExpressStatus(exp.id, newStatus)
+            finishedCount++
         }
         
         return finishedCount
@@ -437,11 +407,12 @@ class ScoreUpdateService : Service() {
         withContext(Dispatchers.IO) {
             try {
                 val allExp = database.expDao().getAllExp()
-                val updatedExp = allExp.map { 
-                    if (it.id == expId) {
-                        it.copy(sts_all = newStatus)
+                val updatedExp = mutableListOf<ExpEntity>()
+                for (exp in allExp) {
+                    if (exp.id == expId) {
+                        updatedExp.add(exp.copy(sts_all = newStatus))
                     } else {
-                        it
+                        updatedExp.add(exp)
                     }
                 }
                 database.expDao().deleteAll()
@@ -493,12 +464,13 @@ class ScoreUpdateService : Service() {
                 val allData = database.dataDao().getAllData()
                 var updated = false
                 
-                val updatedData = allData.map { 
-                    if (it.m_id == matchId && (it.sh != sh || it.sa != sa)) {
+                val updatedData = mutableListOf<DataEntity>()
+                for (data in allData) {
+                    if (data.m_id == matchId && (data.sh != sh || data.sa != sa)) {
                         updated = true
-                        it.copy(sh = sh, sa = sa)
+                        updatedData.add(data.copy(sh = sh, sa = sa))
                     } else {
-                        it
+                        updatedData.add(data)
                     }
                 }
                 
@@ -570,9 +542,10 @@ class ScoreUpdateService : Service() {
 
     private fun releaseWakeLock() {
         try {
-            wakeLock?.let {
-                if (it.isHeld) {
-                    it.release()
+            if (wakeLock != null) {
+                val wl = wakeLock!!
+                if (wl.isHeld) {
+                    wl.release()
                 }
             }
             wakeLock = null
