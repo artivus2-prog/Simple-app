@@ -47,7 +47,6 @@
             android:orientation="vertical"
             android:padding="8dp">
 
-            <!-- Таблица экспрессов -->
             <androidx.cardview.widget.CardView
                 android:id="@+id/layout_detail_table"
                 android:layout_width="match_parent"
@@ -74,7 +73,33 @@
                         android:textStyle="bold"
                         android:textColor="#F0B90B"
                         android:gravity="center"
-                        android:layout_marginBottom="10dp" />
+                        android:layout_marginBottom="6dp" />
+
+                    <!-- Переключатель Все/Активные -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center"
+                        android:layout_marginBottom="8dp">
+
+                        <TextView
+                            android:id="@+id/tv_filter_label"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Все"
+                            android:textSize="12sp"
+                            android:textStyle="bold"
+                            android:textColor="#F0B90B"
+                            android:layout_marginEnd="8dp" />
+
+                        <Switch
+                            android:id="@+id/switch_filter"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:thumbTint="#F0B90B"
+                            android:trackTint="#2B3139" />
+                    </LinearLayout>
 
                     <HorizontalScrollView
                         android:layout_width="match_parent"
@@ -95,7 +120,7 @@
         </LinearLayout>
     </ScrollView>
 
-    <!-- Окно логов — фиксированное снизу -->
+    <!-- Окно логов -->
     <androidx.cardview.widget.CardView
         android:id="@+id/layout_logs"
         android:layout_width="match_parent"
@@ -165,7 +190,6 @@
         </LinearLayout>
     </androidx.cardview.widget.CardView>
 
-    <!-- Кнопка внизу -->
     <Button
         android:id="@+id/btn_analytics"
         android:layout_width="match_parent"

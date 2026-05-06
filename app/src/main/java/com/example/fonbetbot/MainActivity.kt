@@ -1,4 +1,4 @@
-﻿// MainActivity.kt — ПОЛНАЯ ВЕРСИЯ С СОХРАНЕНИЕМ СЧЕТА В БД, ЛОГОМ ИЗМЕНЕНИЙ И ВОССТААНОВЛЕНИЕМ РАСКРЫТЫХ ЭКСПРЕССОВ
+﻿// MainActivity.kt — ПОЛНАЯ ВЕРСИЯ С ФИЛЬТРОМ ВСЕ/АКТИВНЫЕ, СОХРАНЕНИЕМ СЧЕТА В БД, ЛОГОМ ИЗМЕНЕНИЙ И ВОССТАНОВЛЕНИЕМ РАСКРЫТЫХ ЭКСПРЕССОВ
 package com.example.fonbetbot
 
 import android.content.Intent
@@ -26,10 +26,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvLogs: TextView
     private lateinit var scrollLogs: ScrollView
     private lateinit var btnClearLogs: Button
+    private lateinit var switchFilter: Switch
+    private lateinit var tvFilterLabel: TextView
     private lateinit var database: AppDatabase
     private lateinit var analyticsEngine: AnalyticsEngine
     
     private var allExpressResults = listOf<ExpressResult>()
+    private var allExpressResultsCache = listOf<ExpressResult>()
     
     private val PAGE_SIZE = 30
     private var currentPage = 0
@@ -47,6 +50,7 @@ class MainActivity : AppCompatActivity() {
     // Сохранение состояния
     private var savedExpandedIds: Set<Int>? = null
     private var savedScrollY: Int = 0
+    private var showOnlyLive: Boolean = false
     
     private val logLines = mutableListOf<String>()
     private val MAX_LOG_LINES = 500
@@ -75,6 +79,8 @@ class MainActivity : AppCompatActivity() {
         tvLogs = findViewById(R.id.tv_logs)
         scrollLogs = findViewById(R.id.scroll_logs)
         btnClearLogs = findViewById(R.id.btn_clear_logs)
+        switchFilter = findViewById(R.id.switch_filter)
+        tvFilterLabel = findViewById(R.id.tv_filter_label)
         
         database = AppDatabase.getDatabase(this)
         analyticsEngine = AnalyticsEngine(database)
@@ -85,6 +91,13 @@ class MainActivity : AppCompatActivity() {
         }
         
         btnClearLogs.setOnClickListener { clearLogs() }
+        
+        switchFilter.setOnCheckedChangeListener { _, isChecked ->
+            showOnlyLive = isChecked
+            tvFilterLabel.text = if (isChecked) "Активные" else "Все"
+            addLog(if (isChecked) "🔍 Показываем только активные экспрессы" else "🔍 Показываем все экспрессы")
+            applyFilterAndReload()
+        }
         
         scrollView.viewTreeObserver.addOnScrollChangedListener {
             if (!isLoading && !allPagesLoaded) {
@@ -108,11 +121,33 @@ class MainActivity : AppCompatActivity() {
     
     override fun onPause() {
         super.onPause()
-        // Сохраняем состояние раскрытых экспрессов
         savedExpandedIds = expandedExpressIds.toSet()
         savedScrollY = scrollView.scrollY
         addLog("💾 Сохранено ${savedExpandedIds?.size ?: 0} раскрытых экспрессов")
         stopScoreUpdates()
+    }
+    
+    // ========== ФИЛЬТР ==========
+    
+    private fun applyFilterAndReload() {
+        lifecycleScope.launch {
+            try {
+                if (allExpressResultsCache.isEmpty()) return@launch
+                
+                allExpressResults = if (showOnlyLive) {
+                    allExpressResultsCache.filter { isLive(it) }
+                } else {
+                    allExpressResultsCache
+                }
+                
+                addLog("📊 Найдено: ${allExpressResults.size} экспрессов")
+                
+                resetPagination()
+                loadExpressPage()
+            } catch (e: Exception) {
+                addLog("Ошибка фильтрации: ${e.message}")
+            }
+        }
     }
     
     // ========== СОХРАНЕНИЕ СЧЕТА В БД ==========
@@ -122,11 +157,8 @@ class MainActivity : AppCompatActivity() {
             try {
                 val allData = database.dataDao().getAllData()
                 val updatedData = allData.map { entity ->
-                    if (entity.m_id == matchId) {
-                        entity.copy(sh = sh, sa = sa)
-                    } else {
-                        entity
-                    }
+                    if (entity.m_id == matchId) entity.copy(sh = sh, sa = sa)
+                    else entity
                 }
                 database.dataDao().deleteAll()
                 database.dataDao().insertAll(updatedData)
@@ -161,7 +193,7 @@ class MainActivity : AppCompatActivity() {
     }
     
     private suspend fun updateLiveMatchScores() {
-        val liveExpresses = allExpressResults.filter { isLive(it) }
+        val liveExpresses = allExpressResultsCache.filter { isLive(it) }
         if (liveExpresses.isEmpty()) return
         
         val liveMatchIds = liveExpresses
@@ -211,10 +243,11 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun updateMatchScoreInTable(matchId: Long, sh: Int, sa: Int, matchTime: Int) {
-        // Сохраняем старый счёт для лога
         var oldSh = 0
         var oldSa = 0
-        for (express in allExpressResults) {
+        
+        // Ищем в кеше
+        for (express in allExpressResultsCache) {
             val match = express.matches.find { it.matchId == matchId }
             if (match != null) {
                 oldSh = match.sh
@@ -225,11 +258,11 @@ class MainActivity : AppCompatActivity() {
         
         val scoreChanged = (oldSh != sh || oldSa != sa)
         
-        // 1. Сохраняем в базу
+        // 1. Сохраняем в БД
         saveMatchScoreToDb(matchId, sh, sa, false)
         
-        // 2. Обновляем data-модель в памяти
-        allExpressResults = allExpressResults.map { express ->
+        // 2. Обновляем кеш
+        allExpressResultsCache = allExpressResultsCache.map { express ->
             val matchIndex = express.matches.indexOfFirst { it.matchId == matchId }
             if (matchIndex >= 0) {
                 val updatedMatches = express.matches.toMutableList()
@@ -238,13 +271,20 @@ class MainActivity : AppCompatActivity() {
             } else express
         }
         
-        // 3. Логируем изменение счёта
+        // 3. Обновляем отфильтрованный список
+        allExpressResults = if (showOnlyLive) {
+            allExpressResultsCache.filter { isLive(it) }
+        } else {
+            allExpressResultsCache
+        }
+        
+        // 4. Логируем изменение
         if (scoreChanged) {
             val matchTimeStr = if (matchTime > 0) " (${matchTime}')" else ""
             addLog("⚽ Матч #$matchId: $oldSh-$oldSa → $sh-$sa$matchTimeStr")
         }
         
-        // 4. Обновляем UI
+        // 5. Обновляем UI
         for (i in 0 until layoutDetailContent.childCount) {
             val child = layoutDetailContent.getChildAt(i)
             if (child.tag == "match_$matchId" && child is LinearLayout) {
@@ -262,7 +302,7 @@ class MainActivity : AppCompatActivity() {
     private fun markMatchAsFinished(matchId: Long) {
         var currentSh = 0
         var currentSa = 0
-        for (express in allExpressResults) {
+        for (express in allExpressResultsCache) {
             val match = express.matches.find { it.matchId == matchId }
             if (match != null) {
                 currentSh = match.sh
@@ -271,11 +311,9 @@ class MainActivity : AppCompatActivity() {
             }
         }
         
-        // 1. Сохраняем как завершённый в БД
         saveMatchScoreToDb(matchId, currentSh, currentSa, true)
         
-        // 2. Обновляем data-модель
-        allExpressResults = allExpressResults.map { express ->
+        allExpressResultsCache = allExpressResultsCache.map { express ->
             val matchIndex = express.matches.indexOfFirst { it.matchId == matchId }
             if (matchIndex >= 0) {
                 val match = express.matches[matchIndex]
@@ -292,12 +330,18 @@ class MainActivity : AppCompatActivity() {
             } else express
         }
         
-        // 3. Обновляем UI
+        allExpressResults = if (showOnlyLive) {
+            allExpressResultsCache.filter { isLive(it) }
+        } else {
+            allExpressResultsCache
+        }
+        
+        // UI
         for (i in 0 until layoutDetailContent.childCount) {
             val child = layoutDetailContent.getChildAt(i)
             if (child.tag == "match_info_$matchId" && child is LinearLayout && child.childCount > 0) {
                 val tv = child.getChildAt(0) as? TextView ?: continue
-                for (express in allExpressResults) {
+                for (express in allExpressResultsCache) {
                     val match = express.matches.find { it.matchId == matchId }
                     if (match != null) {
                         val mc = if (match.isWin) COLOR_GREEN else COLOR_RED
@@ -310,7 +354,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         
-        for (express in allExpressResults) {
+        for (express in allExpressResultsCache) {
             if (express.matches.any { it.matchId == matchId } && !isLive(express)) {
                 updateExpressRowAppearance(express.expId)
             }
@@ -319,7 +363,7 @@ class MainActivity : AppCompatActivity() {
     
     private fun updateExpressRowAppearance(expId: Int) {
         val expressRow = layoutDetailContent.findViewWithTag<LinearLayout>("express_$expId") ?: return
-        val express = allExpressResults.find { it.expId == expId } ?: return
+        val express = allExpressResultsCache.find { it.expId == expId } ?: return
         
         if (expressRow.childCount >= 5) {
             val rowBg = getRowBackground(express)
@@ -389,7 +433,6 @@ class MainActivity : AppCompatActivity() {
     private fun resetPagination() {
         currentPage = 0
         allPagesLoaded = false
-        // Не сбрасываем expandedExpressIds — они восстановятся в refreshData/loadData
         layoutDetailContent.removeAllViews()
     }
     
@@ -407,7 +450,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 
                 if (pageData.isEmpty() && currentPage == 0 && allExpressResults.isEmpty()) {
-                    tvDetailTitle.text = "Нет данных. Импортируйте файлы в Аналитике."
+                    tvDetailTitle.text = if (showOnlyLive) "Нет активных экспрессов" else "Нет данных. Импортируйте файлы в Аналитике."
                     layoutDetailTable.visibility = View.VISIBLE
                     isLoading = false
                     return@launch
@@ -422,16 +465,13 @@ class MainActivity : AppCompatActivity() {
                 appendExpressRows(pageData)
                 currentPage++
                 
-                // Восстанавливаем скролл для первой страницы
                 if (currentPage == 1 && savedScrollY > 0) {
-                    scrollView.post {
-                        scrollView.scrollTo(0, savedScrollY)
-                    }
+                    scrollView.post { scrollView.scrollTo(0, savedScrollY) }
                 }
                 
                 if (currentPage * PAGE_SIZE >= allExpressResults.size) {
                     allPagesLoaded = true
-                    val liveCount = allExpressResults.count { isLive(it) }
+                    val liveCount = allExpressResultsCache.count { isLive(it) }
                     tvDetailTitle.text = "Экспрессы (${allExpressResults.size}) | Активных: $liveCount"
                 } else {
                     tvDetailTitle.text = "Экспрессы (${currentPage * PAGE_SIZE} из ${allExpressResults.size})"
@@ -673,10 +713,15 @@ class MainActivity : AppCompatActivity() {
                 }
                 
                 val analytics = withContext(Dispatchers.IO) { analyticsEngine.calculateAnalytics() }
-                allExpressResults = ((analytics["allExpresses"] as? List<ExpressResult>) ?: emptyList())
+                allExpressResultsCache = ((analytics["allExpresses"] as? List<ExpressResult>) ?: emptyList())
                     .sortedByDescending { it.dateTime }
                 
-                // Восстанавливаем раскрытые экспрессы при первом запуске
+                allExpressResults = if (showOnlyLive) {
+                    allExpressResultsCache.filter { isLive(it) }
+                } else {
+                    allExpressResultsCache
+                }
+                
                 if (savedExpandedIds != null) {
                     expandedExpressIds.addAll(savedExpandedIds!!)
                 }
@@ -699,22 +744,24 @@ class MainActivity : AppCompatActivity() {
                 val dataCount = withContext(Dispatchers.IO) { database.dataDao().getAllData().size }
                 if (expCount > 0 && dataCount > 0) {
                     val analytics = withContext(Dispatchers.IO) { analyticsEngine.calculateAnalytics() }
-                    val newResults = ((analytics["allExpresses"] as? List<ExpressResult>) ?: emptyList())
+                    allExpressResultsCache = ((analytics["allExpresses"] as? List<ExpressResult>) ?: emptyList())
                         .sortedByDescending { it.dateTime }
-                    if (newResults.isNotEmpty()) {
-                        allExpressResults = newResults
-                        
-                        // Восстанавливаем раскрытые экспрессы
-                        val restoredIds = savedExpandedIds ?: emptySet()
-                        expandedExpressIds.clear()
-                        expandedExpressIds.addAll(restoredIds)
-                        
-                        resetPagination()
-                        loadExpressPage()
-                        
-                        if (restoredIds.isNotEmpty()) {
-                            addLog("📂 Восстановлено ${restoredIds.size} раскрытых экспрессов")
-                        }
+                    
+                    allExpressResults = if (showOnlyLive) {
+                        allExpressResultsCache.filter { isLive(it) }
+                    } else {
+                        allExpressResultsCache
+                    }
+                    
+                    val restoredIds = savedExpandedIds ?: emptySet()
+                    expandedExpressIds.clear()
+                    expandedExpressIds.addAll(restoredIds)
+                    
+                    resetPagination()
+                    loadExpressPage()
+                    
+                    if (restoredIds.isNotEmpty()) {
+                        addLog("📂 Восстановлено ${restoredIds.size} раскрытых экспрессов")
                     }
                 }
             } catch (e: Exception) {
