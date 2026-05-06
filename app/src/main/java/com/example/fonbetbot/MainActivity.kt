@@ -1,5 +1,4 @@
-﻿// MainActivity.kt — полная замена
-package com.example.fonbetbot
+﻿package com.example.fonbetbot
 
 import android.content.Intent
 import android.graphics.Color
@@ -25,6 +24,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnAnalytics: Button
     private lateinit var tvDetailTitle: TextView
     private lateinit var layoutDetailTable: View
+    private lateinit var tvLogs: TextView
+    private lateinit var scrollLogs: ScrollView
+    private lateinit var btnClearLogs: Button
     private lateinit var database: AppDatabase
     private lateinit var analyticsEngine: AnalyticsEngine
     
@@ -40,6 +42,10 @@ class MainActivity : AppCompatActivity() {
     private val expandedExpressIds = mutableSetOf<Int>()
     
     private val LIVE_HOURS = 2L
+    
+    // Логи
+    private val logLines = mutableListOf<String>()
+    private val MAX_LOG_LINES = 500
     
     companion object {
         private const val TAG = "MainActivity"
@@ -60,17 +66,23 @@ class MainActivity : AppCompatActivity() {
         scrollView = findViewById(R.id.scroll_view)
         layoutDetailTable = findViewById(R.id.layout_detail_table)
         btnAnalytics = findViewById(R.id.btn_analytics)
-        
-        // Эти элементы внутри CardView -> LinearLayout, ищем через их id
         tvDetailTitle = findViewById(R.id.tv_detail_title)
         layoutDetailContent = findViewById(R.id.layout_detail_content)
+        tvLogs = findViewById(R.id.tv_logs)
+        scrollLogs = findViewById(R.id.scroll_logs)
+        btnClearLogs = findViewById(R.id.btn_clear_logs)
         
         database = AppDatabase.getDatabase(this)
         analyticsEngine = AnalyticsEngine(database)
         
         btnAnalytics.setOnClickListener {
+            addLog("Переход в Аналитику")
             val intent = Intent(this, AnalyticsActivity::class.java)
             startActivity(intent)
+        }
+        
+        btnClearLogs.setOnClickListener {
+            clearLogs()
         }
         
         // Подгрузка при скролле
@@ -87,9 +99,55 @@ class MainActivity : AppCompatActivity() {
             }
         }
         
-        Log.d(TAG, "onCreate done, starting loadData")
+        addLog("MainActivity создана")
         loadData()
     }
+    
+    override fun onResume() {
+        super.onResume()
+        addLog("onResume: обновление данных из базы")
+        // Всегда перезагружаем данные при возврате на экран
+        refreshData()
+    }
+    
+    // ========== ЛОГИ ==========
+    
+    fun addLog(message: String) {
+        val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"))
+        val logEntry = "$timestamp | $message"
+        
+        Log.d(TAG, message)
+        
+        synchronized(logLines) {
+            logLines.add(logEntry)
+            if (logLines.size > MAX_LOG_LINES) {
+                logLines.removeAt(0)
+            }
+        }
+        
+        runOnUiThread {
+            updateLogView()
+            scrollLogs.post {
+                scrollLogs.fullScroll(View.FOCUS_DOWN)
+            }
+        }
+    }
+    
+    private fun clearLogs() {
+        synchronized(logLines) {
+            logLines.clear()
+            logLines.add("${LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"))} | Логи очищены")
+        }
+        updateLogView()
+    }
+    
+    private fun updateLogView() {
+        synchronized(logLines) {
+            tvLogs.text = logLines.joinToString("\n")
+        }
+    }
+    
+    // ========== ВСПОМОГАТЕЛЬНЫЕ ==========
     
     private fun isLive(express: ExpressResult): Boolean {
         val now = LocalDateTime.now()
@@ -120,12 +178,12 @@ class MainActivity : AppCompatActivity() {
     
     private fun loadExpressPage() {
         if (isLoading || allPagesLoaded) {
-            Log.d(TAG, "loadExpressPage skip: isLoading=$isLoading, allPagesLoaded=$allPagesLoaded")
+            addLog("loadExpressPage: пропуск (isLoading=$isLoading, allPagesLoaded=$allPagesLoaded)")
             return
         }
         isLoading = true
         
-        Log.d(TAG, "loadExpressPage: page=$currentPage, total=${allExpressResults.size}")
+        addLog("Загрузка страницы ${currentPage + 1}, всего экспрессов: ${allExpressResults.size}")
         
         lifecycleScope.launch {
             try {
@@ -136,17 +194,19 @@ class MainActivity : AppCompatActivity() {
                     else allExpressResults.subList(start, end).toList()
                 }
                 
-                Log.d(TAG, "loadExpressPage result: ${pageData.size} items")
+                addLog("Получено ${pageData.size} экспрессов для страницы ${currentPage + 1}")
                 
                 if (pageData.isEmpty() && currentPage == 0 && allExpressResults.isEmpty()) {
                     tvDetailTitle.text = "Нет данных. Импортируйте файлы в Аналитике."
                     layoutDetailTable.visibility = View.VISIBLE
+                    addLog("Данных нет — показываем заглушку")
                     isLoading = false
                     return@launch
                 }
                 
                 if (pageData.isEmpty()) {
                     allPagesLoaded = true
+                    addLog("Все страницы загружены")
                     isLoading = false
                     return@launch
                 }
@@ -158,12 +218,14 @@ class MainActivity : AppCompatActivity() {
                     allPagesLoaded = true
                     val liveCount = allExpressResults.count { isLive(it) }
                     tvDetailTitle.text = "Экспрессы (${allExpressResults.size}) | Активных: $liveCount"
+                    addLog("ВСЕГО загружено: ${allExpressResults.size}, активно: $liveCount")
                 } else {
-                    tvDetailTitle.text = "Экспрессы (загружено ${currentPage * PAGE_SIZE})"
+                    tvDetailTitle.text = "Экспрессы (загружено ${currentPage * PAGE_SIZE} из ${allExpressResults.size})"
                 }
                 
             } catch (e: Exception) {
                 Log.e(TAG, "Ошибка загрузки страницы", e)
+                addLog("ОШИБКА: ${e.message}")
                 tvDetailTitle.text = "Ошибка: ${e.message}"
             } finally {
                 isLoading = false
@@ -371,6 +433,7 @@ class MainActivity : AppCompatActivity() {
         
         if (currentPage == 0) {
             layoutDetailContent.addView(buildHeaderRow())
+            addLog("Добавлен заголовок таблицы")
         }
         
         for (express in expresses) {
@@ -379,6 +442,8 @@ class MainActivity : AppCompatActivity() {
                 insertMatchRows(express)
             }
         }
+        
+        addLog("Добавлено ${expresses.size} строк в таблицу")
     }
     
     // ========== ФАБРИКИ ==========
@@ -443,38 +508,92 @@ class MainActivity : AppCompatActivity() {
     
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
     
-    // ========== ЗАГРУЗКА ==========
+    // ========== ЗАГРУЗКА ДАННЫХ ==========
     
     private fun loadData() {
         lifecycleScope.launch {
             try {
                 tvDetailTitle.text = "Загрузка..."
-                Log.d(TAG, "loadData started")
+                addLog("Начало первичной загрузки")
                 
-                // Проверяем количество записей в базе
-                val expCount = withContext(Dispatchers.IO) { database.expDao().getAllExp().size }
-                val dataCount = withContext(Dispatchers.IO) { database.dataDao().getAllData().size }
-                Log.d(TAG, "DB: exp=$expCount, data=$dataCount")
+                // ПРОВЕРКА БАЗЫ НАПРЯМУЮ
+                val expCount = withContext(Dispatchers.IO) { 
+                    val count = database.expDao().getAllExp().size
+                    addLog("Прямой запрос: exp=$count")
+                    count
+                }
+                val dataCount = withContext(Dispatchers.IO) { 
+                    val count = database.dataDao().getAllData().size
+                    addLog("Прямой запрос: data=$count")
+                    count
+                }
                 
                 if (expCount == 0 || dataCount == 0) {
                     tvDetailTitle.text = "Нет данных. Импортируйте файлы в Аналитике."
                     layoutDetailTable.visibility = View.VISIBLE
+                    addLog("База пуста (exp=$expCount, data=$dataCount)")
                     return@launch
                 }
                 
-                val analytics = withContext(Dispatchers.IO) { analyticsEngine.calculateAnalytics() }
+                addLog("Запуск AnalyticsEngine...")
+                val analytics = withContext(Dispatchers.IO) { 
+                    val result = analyticsEngine.calculateAnalytics()
+                    addLog("AnalyticsEngine вернул ключи: ${result.keys}")
+                    result
+                }
                 
-                allExpressResults = ((analytics["allExpresses"] as? List<ExpressResult>) ?: emptyList())
+                val raw = analytics["allExpresses"]
+                addLog("allExpresses тип: ${raw?.javaClass?.simpleName}, размер: ${(raw as? List<*>)?.size}")
+                
+                allExpressResults = ((raw as? List<ExpressResult>) ?: emptyList())
                     .sortedByDescending { it.dateTime }
                 
-                Log.d(TAG, "allExpressResults count = ${allExpressResults.size}")
+                addLog("ИТОГО экспрессов: ${allExpressResults.size}")
+                
+                if (allExpressResults.isEmpty()) {
+                    tvDetailTitle.text = "Экспрессы не собраны. Проверьте данные."
+                    layoutDetailTable.visibility = View.VISIBLE
+                    addLog("allExpressResults пуст!")
+                    return@launch
+                }
                 
                 resetPagination()
                 loadExpressPage()
                 
             } catch (e: Exception) {
-                Log.e(TAG, "Ошибка загрузки", e)
+                Log.e(TAG, "Ошибка в loadData", e)
+                addLog("КРИТИЧЕСКАЯ ОШИБКА: ${e.message}")
+                e.printStackTrace()
                 tvDetailTitle.text = "Ошибка: ${e.message}"
+            }
+        }
+    }
+    
+    private fun refreshData() {
+        lifecycleScope.launch {
+            try {
+                addLog("refreshData: проверка базы")
+                
+                val expCount = withContext(Dispatchers.IO) { database.expDao().getAllExp().size }
+                val dataCount = withContext(Dispatchers.IO) { database.dataDao().getAllData().size }
+                addLog("refreshData: exp=$expCount, data=$dataCount")
+                
+                if (expCount > 0 && dataCount > 0) {
+                    val analytics = withContext(Dispatchers.IO) { analyticsEngine.calculateAnalytics() }
+                    
+                    val newResults = ((analytics["allExpresses"] as? List<ExpressResult>) ?: emptyList())
+                        .sortedByDescending { it.dateTime }
+                    
+                    addLog("refreshData: получено ${newResults.size} экспрессов")
+                    
+                    if (newResults.isNotEmpty()) {
+                        allExpressResults = newResults
+                        resetPagination()
+                        loadExpressPage()
+                    }
+                }
+            } catch (e: Exception) {
+                addLog("Ошибка refreshData: ${e.message}")
             }
         }
     }

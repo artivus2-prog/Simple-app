@@ -53,7 +53,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_margin="4dp"
-                android:layout_marginBottom="10dp"
+                android:layout_marginBottom="8dp"
                 app:cardBackgroundColor="#1E2329"
                 app:cardCornerRadius="12dp"
                 app:cardElevation="0dp"
@@ -89,6 +89,75 @@
                             android:orientation="vertical"
                             android:minWidth="440dp" />
                     </HorizontalScrollView>
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- Окно логов -->
+            <androidx.cardview.widget.CardView
+                android:id="@+id/layout_logs"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_margin="4dp"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="8dp"
+                app:cardBackgroundColor="#1E2329"
+                app:cardCornerRadius="12dp"
+                app:cardElevation="0dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="8dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="8dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Логи системы"
+                            android:textSize="13sp"
+                            android:textStyle="bold"
+                            android:textColor="#F0B90B"
+                            android:gravity="center" />
+
+                        <Button
+                            android:id="@+id/btn_clear_logs"
+                            android:layout_width="80dp"
+                            android:layout_height="32dp"
+                            android:text="Очистить"
+                            android:textSize="10sp"
+                            android:textColor="#EAECEF"
+                            android:backgroundTint="#2B3139"
+                            android:stateListAnimator="@null"
+                            android:insetTop="0dp"
+                            android:insetBottom="0dp" />
+                    </LinearLayout>
+
+                    <ScrollView
+                        android:id="@+id/scroll_logs"
+                        android:layout_width="match_parent"
+                        android:layout_height="250dp"
+                        android:background="#0B0E11"
+                        android:padding="8dp"
+                        android:scrollbars="vertical">
+
+                        <TextView
+                            android:id="@+id/tv_logs"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="Логи системы..."
+                            android:textSize="10sp"
+                            android:fontFamily="monospace"
+                            android:textColor="#848E9C"
+                            android:lineSpacingExtra="2dp" />
+                    </ScrollView>
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 
