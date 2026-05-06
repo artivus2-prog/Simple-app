@@ -89,7 +89,7 @@
         android:layout_marginTop="6dp"
         android:layout_marginBottom="8dp" />
 
-    <!-- Навигация по неделям -->
+    <!-- Навигация по неделям (скрыта) -->
     <LinearLayout
         android:id="@+id/layout_week_nav"
         android:layout_width="match_parent"
@@ -98,7 +98,7 @@
         android:layout_marginHorizontal="16dp"
         android:layout_marginBottom="12dp"
         android:gravity="center_vertical"
-        android:visibility="visible">
+        android:visibility="gone">
 
         <Button
             android:id="@+id/btn_prev_week"
@@ -111,20 +111,22 @@
             android:layout_marginEnd="10dp"
             android:stateListAnimator="@null"
             android:insetTop="0dp"
-            android:insetBottom="0dp" />
+            android:insetBottom="0dp"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/tv_week_info"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Выберите неделю"
+            android:text=""
             android:textSize="13sp"
             android:textStyle="bold"
             android:textColor="#EAECEF"
             android:gravity="center"
             android:background="#1E2329"
-            android:padding="10dp" />
+            android:padding="10dp"
+            android:visibility="gone" />
 
         <Button
             android:id="@+id/btn_next_week"
@@ -137,7 +139,8 @@
             android:layout_marginStart="10dp"
             android:stateListAnimator="@null"
             android:insetTop="0dp"
-            android:insetBottom="0dp" />
+            android:insetBottom="0dp"
+            android:visibility="gone" />
     </LinearLayout>
 
     <!-- Фильтр по лигам -->
@@ -350,13 +353,13 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:padding="16dp">
+                    android:padding="8dp">
 
                     <TextView
                         android:id="@+id/tv_detail_title"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Детализация"
+                        android:text="Экспрессы"
                         android:textSize="13sp"
                         android:textStyle="bold"
                         android:textColor="#F0B90B"
@@ -366,25 +369,20 @@
                     <HorizontalScrollView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:scrollbars="horizontal">
+                        android:scrollbars="horizontal"
+                        android:fillViewport="true">
 
-                        <ScrollView
+                        <LinearLayout
+                            android:id="@+id/layout_detail_content"
                             android:layout_width="wrap_content"
-                            android:layout_height="280dp"
-                            android:background="#0B0E11">
-
-                            <LinearLayout
-                                android:id="@+id/layout_detail_content"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:orientation="vertical"
-                                android:minWidth="580dp" />
-                        </ScrollView>
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:minWidth="700dp" />
                     </HorizontalScrollView>
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 
-            <!-- Текстовая сводка -->
+            <!-- Текстовая сводка (скрыта) -->
             <androidx.cardview.widget.CardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -392,7 +390,8 @@
                 android:layout_marginBottom="24dp"
                 app:cardBackgroundColor="#1E2329"
                 app:cardCornerRadius="12dp"
-                app:cardElevation="0dp">
+                app:cardElevation="0dp"
+                android:visibility="gone">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -420,7 +419,7 @@
                             android:id="@+id/tv_stats"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="Загрузка статистики..."
+                            android:text=""
                             android:textSize="11sp"
                             android:fontFamily="monospace"
                             android:textColor="#848E9C"
