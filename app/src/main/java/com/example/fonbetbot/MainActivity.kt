@@ -1,8 +1,9 @@
-﻿// MainActivity.kt — ПОЛНАЯ ВЕРСИЯ С ФИЛЬТРОМ ВСЕ/АКТИВНЫЕ, СОХРАНЕНИЕМ СЧЕТА В БД, ЛОГОМ ИЗМЕНЕНИЙ И ВОССТАНОВЛЕНИЕМ РАСКРЫТЫХ ЭКСПРЕССОВ
+﻿// MainActivity.kt — ПОЛНАЯ ВЕРСИЯ С ФОНОВЫМ СЕРВИСОМ ОБНОВЛЕНИЯ СЧЕТОВ, ФИЛЬТРОМ, СОХРАНЕНИЕМ В БД, ЛОГОМ, ВОССТАНОВЛЕНИЕМ РАСКРЫТЫХ ЭКСПРЕССОВ
 package com.example.fonbetbot
 
 import android.content.Intent
 import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.Gravity
@@ -43,14 +44,10 @@ class MainActivity : AppCompatActivity() {
     
     private val LIVE_HOURS = 3L
     
-    // Автообновление счетов
-    private val apiClient = ApiClient()
-    private var scoreUpdateJob: Job? = null
-    
-    // Сохранение состояния
     private var savedExpandedIds: Set<Int>? = null
     private var savedScrollY: Int = 0
     private var showOnlyLive: Boolean = false
+    private var scoreServiceIntent: Intent? = null
     
     private val logLines = mutableListOf<String>()
     private val MAX_LOG_LINES = 500
@@ -110,13 +107,14 @@ class MainActivity : AppCompatActivity() {
         
         addLog("MainActivity создана")
         loadData()
+        startScoreService()
     }
     
     override fun onResume() {
         super.onResume()
         addLog("onResume: обновление данных из БД")
         refreshData()
-        startScoreUpdates()
+        ScoreUpdateService.onLogUpdate = { msg -> addLog(msg) }
     }
     
     override fun onPause() {
@@ -124,7 +122,25 @@ class MainActivity : AppCompatActivity() {
         savedExpandedIds = expandedExpressIds.toSet()
         savedScrollY = scrollView.scrollY
         addLog("💾 Сохранено ${savedExpandedIds?.size ?: 0} раскрытых экспрессов")
-        stopScoreUpdates()
+        ScoreUpdateService.onLogUpdate = null
+    }
+    
+    override fun onDestroy() {
+        super.onDestroy()
+        scoreServiceIntent?.let { stopService(it) }
+    }
+    
+    // ========== ФОНОВЫЙ СЕРВИС ==========
+    
+    private fun startScoreService() {
+        scoreServiceIntent = Intent(this, ScoreUpdateService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(scoreServiceIntent!!)
+        } else {
+            startService(scoreServiceIntent!!)
+        }
+        ScoreUpdateService.onLogUpdate = { msg -> addLog(msg) }
+        addLog("🔄 Фоновое обновление счетов запущено")
     }
     
     // ========== ФИЛЬТР ==========
@@ -135,7 +151,7 @@ class MainActivity : AppCompatActivity() {
                 if (allExpressResultsCache.isEmpty()) return@launch
                 
                 allExpressResults = if (showOnlyLive) {
-                    allExpressResultsCache.filter { isLive(it) }
+                    allExpressResultsCache.filter { !isExpressFinished(it) }
                 } else {
                     allExpressResultsCache
                 }
@@ -150,268 +166,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
-    // ========== СОХРАНЕНИЕ СЧЕТА В БД ==========
-    
-    private fun saveMatchScoreToDb(matchId: Long, sh: Int, sa: Int, isFinished: Boolean) {
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val allData = database.dataDao().getAllData()
-                val updatedData = allData.map { entity ->
-                    if (entity.m_id == matchId) entity.copy(sh = sh, sa = sa)
-                    else entity
-                }
-                database.dataDao().deleteAll()
-                database.dataDao().insertAll(updatedData)
-                
-                withContext(Dispatchers.Main) {
-                    if (isFinished) {
-                        addLog("💾 Матч #$matchId финализирован в БД ($sh:$sa)")
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Ошибка сохранения счёта в БД: ${e.message}")
-            }
-        }
-    }
-    
-    // ========== ОНЛАЙН-ОБНОВЛЕНИЕ СЧЕТОВ ==========
-    
-    private fun startScoreUpdates() {
-        stopScoreUpdates()
-        scoreUpdateJob = lifecycleScope.launch {
-            while (isActive) {
-                delay(30_000)
-                updateLiveMatchScores()
-            }
-        }
-        addLog("🔄 Автообновление счетов запущено (интервал 30с)")
-    }
-    
-    private fun stopScoreUpdates() {
-        scoreUpdateJob?.cancel()
-        scoreUpdateJob = null
-    }
-    
-    private suspend fun updateLiveMatchScores() {
-        val liveExpresses = allExpressResultsCache.filter { isLive(it) }
-        if (liveExpresses.isEmpty()) return
-        
-        val liveMatchIds = liveExpresses
-            .flatMap { it.matches }
-            .map { it.matchId }
-            .distinct()
-        
-        if (liveMatchIds.isEmpty()) return
-        
-        var updatedCount = 0
-        var finishedCount = 0
-        
-        for (matchId in liveMatchIds) {
-            withContext(Dispatchers.IO) {
-                try {
-                    suspendCancellableCoroutine<Unit> { continuation ->
-                        apiClient.getMatchScore(
-                            matchId = matchId.toInt(),
-                            onSuccess = { factors: ApiClient.MatchFactors? ->
-                                if (factors != null && factors.score1 >= 0 && factors.score2 >= 0) {
-                                    launch(Dispatchers.Main) {
-                                        updateMatchScoreInTable(matchId, factors.score1, factors.score2, factors.matchTime)
-                                    }
-                                    updatedCount++
-                                } else {
-                                    launch(Dispatchers.Main) { markMatchAsFinished(matchId) }
-                                    finishedCount++
-                                }
-                                continuation.resume(Unit) {}
-                            },
-                            onError = { error: String ->
-                                launch(Dispatchers.Main) { markMatchAsFinished(matchId) }
-                                finishedCount++
-                                continuation.resume(Unit) {}
-                            }
-                        )
-                    }
-                    delay(200)
-                } catch (e: Exception) {
-                    Log.w(TAG, "Ошибка счета m_id=$matchId: ${e.message}")
-                }
-            }
-        }
-        
-        if (updatedCount > 0) addLog("✅ Обновлено счетов: $updatedCount")
-        if (finishedCount > 0) addLog("🏁 Завершено матчей: $finishedCount")
-    }
-    
-    private fun updateMatchScoreInTable(matchId: Long, sh: Int, sa: Int, matchTime: Int) {
-        var oldSh = 0
-        var oldSa = 0
-        
-        // Ищем в кеше
-        for (express in allExpressResultsCache) {
-            val match = express.matches.find { it.matchId == matchId }
-            if (match != null) {
-                oldSh = match.sh
-                oldSa = match.sa
-                break
-            }
-        }
-        
-        val scoreChanged = (oldSh != sh || oldSa != sa)
-        
-        // 1. Сохраняем в БД
-        saveMatchScoreToDb(matchId, sh, sa, false)
-        
-        // 2. Обновляем кеш
-        allExpressResultsCache = allExpressResultsCache.map { express ->
-            val matchIndex = express.matches.indexOfFirst { it.matchId == matchId }
-            if (matchIndex >= 0) {
-                val updatedMatches = express.matches.toMutableList()
-                updatedMatches[matchIndex] = updatedMatches[matchIndex].copy(sh = sh, sa = sa)
-                express.copy(matches = updatedMatches)
-            } else express
-        }
-        
-        // 3. Обновляем отфильтрованный список
-        allExpressResults = if (showOnlyLive) {
-            allExpressResultsCache.filter { isLive(it) }
-        } else {
-            allExpressResultsCache
-        }
-        
-        // 4. Логируем изменение
-        if (scoreChanged) {
-            val matchTimeStr = if (matchTime > 0) " (${matchTime}')" else ""
-            addLog("⚽ Матч #$matchId: $oldSh-$oldSa → $sh-$sa$matchTimeStr")
-        }
-        
-        // 5. Обновляем UI
-        for (i in 0 until layoutDetailContent.childCount) {
-            val child = layoutDetailContent.getChildAt(i)
-            if (child.tag == "match_$matchId" && child is LinearLayout) {
-                for (j in 0 until child.childCount) {
-                    val tv = child.getChildAt(j) as? TextView ?: continue
-                    if (tv.text.toString().matches(Regex("\\d+:\\d+.*"))) {
-                        tv.text = if (matchTime > 0) "$sh:$sa ($matchTime')" else "$sh:$sa"
-                        break
-                    }
-                }
-            }
-        }
-    }
-    
-    private fun markMatchAsFinished(matchId: Long) {
-        var currentSh = 0
-        var currentSa = 0
-        for (express in allExpressResultsCache) {
-            val match = express.matches.find { it.matchId == matchId }
-            if (match != null) {
-                currentSh = match.sh
-                currentSa = match.sa
-                break
-            }
-        }
-        
-        saveMatchScoreToDb(matchId, currentSh, currentSa, true)
-        
-        allExpressResultsCache = allExpressResultsCache.map { express ->
-            val matchIndex = express.matches.indexOfFirst { it.matchId == matchId }
-            if (matchIndex >= 0) {
-                val match = express.matches[matchIndex]
-                val isWin = when (match.type) {
-                    924 -> match.sh >= match.sa
-                    927 -> match.sh + 1 > match.sa
-                    928 -> match.sa + 1 >= match.sh
-                    else -> match.sh >= match.sa
-                }
-                val updatedMatches = express.matches.toMutableList()
-                updatedMatches[matchIndex] = match.copy(isWin = isWin)
-                val allWin = updatedMatches.all { it.isWin }
-                express.copy(matches = updatedMatches, isWin = allWin)
-            } else express
-        }
-        
-        allExpressResults = if (showOnlyLive) {
-            allExpressResultsCache.filter { isLive(it) }
-        } else {
-            allExpressResultsCache
-        }
-        
-        // UI
-        for (i in 0 until layoutDetailContent.childCount) {
-            val child = layoutDetailContent.getChildAt(i)
-            if (child.tag == "match_info_$matchId" && child is LinearLayout && child.childCount > 0) {
-                val tv = child.getChildAt(0) as? TextView ?: continue
-                for (express in allExpressResultsCache) {
-                    val match = express.matches.find { it.matchId == matchId }
-                    if (match != null) {
-                        val mc = if (match.isWin) COLOR_GREEN else COLOR_RED
-                        val resultText = if (match.isWin) "✓ Зашел" else "✗ Мимо"
-                        tv.text = "${match.liganame.take(40)} | $resultText"
-                        tv.setTextColor(Color.parseColor(mc))
-                        break
-                    }
-                }
-            }
-        }
-        
-        for (express in allExpressResultsCache) {
-            if (express.matches.any { it.matchId == matchId } && !isLive(express)) {
-                updateExpressRowAppearance(express.expId)
-            }
-        }
-    }
-    
-    private fun updateExpressRowAppearance(expId: Int) {
-        val expressRow = layoutDetailContent.findViewWithTag<LinearLayout>("express_$expId") ?: return
-        val express = allExpressResultsCache.find { it.expId == expId } ?: return
-        
-        if (expressRow.childCount >= 5) {
-            val rowBg = getRowBackground(express)
-            expressRow.setBackgroundColor(Color.parseColor(rowBg))
-            
-            val statusTv = expressRow.getChildAt(2) as? TextView
-            statusTv?.let {
-                it.text = if (express.isWin) "ВЫИГРЫШ" else "ПРОИГРЫШ"
-                it.setTextColor(Color.parseColor(if (express.isWin) COLOR_GREEN else COLOR_RED))
-            }
-            
-            val completedTv = expressRow.getChildAt(4) as? TextView
-            completedTv?.let {
-                it.text = "Да"
-                it.setTextColor(Color.parseColor("#848E9C"))
-            }
-        }
-    }
-    
-    // ========== ЛОГИ ==========
-    
-    fun addLog(message: String) {
-        val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"))
-        val logEntry = "$timestamp | $message"
-        Log.d(TAG, message)
-        synchronized(logLines) {
-            logLines.add(logEntry)
-            if (logLines.size > MAX_LOG_LINES) logLines.removeAt(0)
-        }
-        runOnUiThread {
-            updateLogView()
-            scrollLogs.post { scrollLogs.fullScroll(View.FOCUS_DOWN) }
-        }
-    }
-    
-    private fun clearLogs() {
-        synchronized(logLines) {
-            logLines.clear()
-            logLines.add("${LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"))} | Логи очищены")
-        }
-        updateLogView()
-    }
-    
-    private fun updateLogView() {
-        synchronized(logLines) { tvLogs.text = logLines.joinToString("\n") }
-    }
-    
     // ========== ВСПОМОГАТЕЛЬНЫЕ ==========
+    
+    private fun isExpressFinished(express: ExpressResult): Boolean {
+        if (express.matches.any { !it.isWin }) return true
+        if (express.matches.all { it.isWin }) return true
+        if (!isLive(express)) return true
+        return false
+    }
     
     private fun isLive(express: ExpressResult): Boolean {
         val now = LocalDateTime.now()
@@ -419,12 +181,14 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun getRowBackground(express: ExpressResult): String {
-        return if (isLive(express)) COLOR_LIVE_BG
+        val finished = isExpressFinished(express)
+        return if (!finished) COLOR_LIVE_BG
         else if (express.isWin) "#0A2317" else "#2B0F14"
     }
     
     private fun getStatusColor(express: ExpressResult): String {
-        return if (isLive(express)) COLOR_GOLD
+        val finished = isExpressFinished(express)
+        return if (!finished) COLOR_GOLD
         else if (express.isWin) COLOR_GREEN else COLOR_RED
     }
     
@@ -471,7 +235,7 @@ class MainActivity : AppCompatActivity() {
                 
                 if (currentPage * PAGE_SIZE >= allExpressResults.size) {
                     allPagesLoaded = true
-                    val liveCount = allExpressResultsCache.count { isLive(it) }
+                    val liveCount = allExpressResultsCache.count { !isExpressFinished(it) }
                     tvDetailTitle.text = "Экспрессы (${allExpressResults.size}) | Активных: $liveCount"
                 } else {
                     tvDetailTitle.text = "Экспрессы (${currentPage * PAGE_SIZE} из ${allExpressResults.size})"
@@ -512,26 +276,34 @@ class MainActivity : AppCompatActivity() {
             isFocusable = true
         }
         
-        val live = isLive(express)
-        val itemBg = getRowBackground(express)
-        val itemColor = getStatusColor(express)
+        val finished = isExpressFinished(express)
+        val itemBg = if (finished) {
+            if (express.isWin) "#0A2317" else "#2B0F14"
+        } else {
+            COLOR_LIVE_BG
+        }
+        val itemColor = if (finished) {
+            if (express.isWin) COLOR_GREEN else COLOR_RED
+        } else {
+            COLOR_GOLD
+        }
         
         val statusText = when {
-            live -> "⚡ АКТИВЕН"
+            !finished -> "⚡ АКТИВЕН"
             express.isWin -> "ВЫИГРЫШ"
             else -> "ПРОИГРЫШ"
         }
         
         val dateTimeStr = "${express.dateTime.format(DateTimeFormatter.ofPattern("dd.MM"))} ${express.dateTime.format(DateTimeFormatter.ofPattern("HH:mm"))}"
         val kfStr = if (express.totalStartKf > 0) String.format("%.2f", express.totalStartKf) else "-"
-        val completedText = if (live) "Нет" else "Да"
-        val completedColor = if (live) COLOR_GOLD else "#848E9C"
+        val completedText = if (finished) "Да" else "Нет"
+        val completedColor = if (finished) "#848E9C" else COLOR_GOLD
         val expanded = express.expId in expandedExpressIds
         val idPrefix = if (expanded) "▼" else "▶"
         
         row.addView(dataTv("$idPrefix #${express.expId}", 70, itemBg, itemColor))
         row.addView(dataTv(dateTimeStr, 130, itemBg, COLOR_TEXT_PRIMARY))
-        row.addView(dataTv(statusText, 100, itemBg, itemColor, bold = live))
+        row.addView(dataTv(statusText, 100, itemBg, itemColor, bold = !finished))
         row.addView(dataTv(kfStr, 60, itemBg, "#F0B90B", bold = true))
         row.addView(dataTv(completedText, 80, itemBg, completedColor))
         
@@ -541,7 +313,7 @@ class MainActivity : AppCompatActivity() {
     private fun buildMatchDetailRows(express: ExpressResult): List<View> {
         val views = mutableListOf<View>()
         val totalWidth = 440
-
+        
         views.add(TextView(this).apply {
             text = "Матчи экспресса #${express.expId}"
             textSize = 10f
@@ -553,7 +325,7 @@ class MainActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(dp(totalWidth), ViewGroup.LayoutParams.WRAP_CONTENT)
             tag = "match_header_${express.expId}"
         })
-
+        
         views.add(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(dp(totalWidth), ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -565,7 +337,7 @@ class MainActivity : AppCompatActivity() {
             addView(matchHeaderTv("Кэф", 50))
             addView(matchHeaderTv("Тип", 110))
         })
-
+        
         for (match in express.matches) {
             val typeShort: String = when (match.type) {
                 924 -> "1X"
@@ -578,20 +350,20 @@ class MainActivity : AppCompatActivity() {
             val mc: String = if (match.isWin) COLOR_GREEN else COLOR_RED
             val resultText: String = if (match.isWin) "✓ Зашел" else "✗ Мимо"
             val ligaInfoText: String = "${match.liganame.take(40)} | $resultText"
-
+            
             views.add(LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 layoutParams = LinearLayout.LayoutParams(dp(totalWidth), ViewGroup.LayoutParams.WRAP_CONTENT)
                 setBackgroundColor(Color.parseColor(COLOR_MATCH_BG))
                 tag = "match_${match.matchId}"
-
+                
                 addView(matchDataTv(match.home.take(14), 100, COLOR_TEXT_PRIMARY, 10f, false))
                 addView(matchDataTv(match.away.take(14), 100, COLOR_TEXT_PRIMARY, 10f, false))
                 addView(matchDataTv(scoreText, 80, "#EAECEF", 11f, true))
                 addView(matchDataTv(kfText, 50, "#F0B90B", 10f, false))
                 addView(matchDataTv(typeShort, 110, "#848E9C", 10f, false))
             })
-
+            
             views.add(LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 layoutParams = LinearLayout.LayoutParams(dp(totalWidth), ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -600,13 +372,13 @@ class MainActivity : AppCompatActivity() {
                 addView(matchDataTv(ligaInfoText, totalWidth, mc, 9f, false))
             })
         }
-
+        
         views.add(View(this).apply {
             layoutParams = LinearLayout.LayoutParams(dp(totalWidth), dp(2))
             setBackgroundColor(Color.parseColor(COLOR_GRID))
             tag = "sep_${express.expId}"
         })
-
+        
         return views
     }
     
@@ -619,7 +391,8 @@ class MainActivity : AppCompatActivity() {
             updateExpressRowIndicator(express.expId, false)
         } else {
             expandedExpressIds.add(express.expId)
-            insertMatchRows(express)
+            val freshExpress = allExpressResultsCache.find { it.expId == express.expId } ?: express
+            insertMatchRows(freshExpress)
             updateExpressRowIndicator(express.expId, true)
         }
     }
@@ -658,7 +431,10 @@ class MainActivity : AppCompatActivity() {
         if (currentPage == 0) layoutDetailContent.addView(buildHeaderRow())
         expresses.forEach { express ->
             layoutDetailContent.addView(buildExpressRow(express))
-            if (express.expId in expandedExpressIds) insertMatchRows(express)
+            if (express.expId in expandedExpressIds) {
+                val fresh = allExpressResultsCache.find { it.expId == express.expId } ?: express
+                insertMatchRows(fresh)
+            }
         }
     }
     
@@ -696,6 +472,34 @@ class MainActivity : AppCompatActivity() {
     
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
     
+    // ========== ЛОГИ ==========
+    
+    fun addLog(message: String) {
+        val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"))
+        val logEntry = "$timestamp | $message"
+        Log.d(TAG, message)
+        synchronized(logLines) {
+            logLines.add(logEntry)
+            if (logLines.size > MAX_LOG_LINES) logLines.removeAt(0)
+        }
+        runOnUiThread {
+            updateLogView()
+            scrollLogs.post { scrollLogs.fullScroll(View.FOCUS_DOWN) }
+        }
+    }
+    
+    private fun clearLogs() {
+        synchronized(logLines) {
+            logLines.clear()
+            logLines.add("${LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"))} | Логи очищены")
+        }
+        updateLogView()
+    }
+    
+    private fun updateLogView() {
+        synchronized(logLines) { tvLogs.text = logLines.joinToString("\n") }
+    }
+    
     // ========== ЗАГРУЗКА ==========
     
     private fun loadData() {
@@ -717,7 +521,7 @@ class MainActivity : AppCompatActivity() {
                     .sortedByDescending { it.dateTime }
                 
                 allExpressResults = if (showOnlyLive) {
-                    allExpressResultsCache.filter { isLive(it) }
+                    allExpressResultsCache.filter { !isExpressFinished(it) }
                 } else {
                     allExpressResultsCache
                 }
@@ -728,7 +532,6 @@ class MainActivity : AppCompatActivity() {
                 
                 resetPagination()
                 loadExpressPage()
-                startScoreUpdates()
                 
             } catch (e: Exception) {
                 Log.e(TAG, "Ошибка", e)
@@ -748,7 +551,7 @@ class MainActivity : AppCompatActivity() {
                         .sortedByDescending { it.dateTime }
                     
                     allExpressResults = if (showOnlyLive) {
-                        allExpressResultsCache.filter { isLive(it) }
+                        allExpressResultsCache.filter { !isExpressFinished(it) }
                     } else {
                         allExpressResultsCache
                     }
