@@ -53,5 +53,9 @@
     android:foregroundServiceType="dataSync"
     android:exported="false" />
     </application>
-
+<activity
+    android:name=".SettingsActivity"
+    android:exported="false"
+    android:theme="@style/Theme.FonbetBot"
+    android:screenOrientation="portrait" />
 </manifest>

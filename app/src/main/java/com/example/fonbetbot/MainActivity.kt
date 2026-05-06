@@ -31,7 +31,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvFilterLabel: TextView
     private lateinit var database: AppDatabase
     private lateinit var analyticsEngine: AnalyticsEngine
-    
+    private lateinit var btnSettings: Button
     private var allExpressResults = listOf<ExpressResult>()
     private var allExpressResultsCache = listOf<ExpressResult>()
     
@@ -78,7 +78,10 @@ class MainActivity : AppCompatActivity() {
         btnClearLogs = findViewById(R.id.btn_clear_logs)
         switchFilter = findViewById(R.id.switch_filter)
         tvFilterLabel = findViewById(R.id.tv_filter_label)
-        
+        btnSettings = findViewById(R.id.btn_settings)
+btnSettings.setOnClickListener {
+    startActivity(Intent(this, SettingsActivity::class.java))
+}
         database = AppDatabase.getDatabase(this)
         analyticsEngine = AnalyticsEngine(database)
         
