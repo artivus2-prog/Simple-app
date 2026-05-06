@@ -1,4 +1,4 @@
-﻿// AnalyticsEngine.kt
+﻿// AnalyticsEngine.kt — ИСПРАВЛЕННАЯ ВЕРСИЯ (правильные формулы и sts_all по счёту)
 package com.example.fonbetbot
 
 import kotlinx.coroutines.Dispatchers
@@ -78,16 +78,20 @@ class AnalyticsEngine(private val database: AppDatabase) {
                 .map { it.id_exp }
                 .toSet()
             
+            // Собираем обновлённые статусы для записи в БД
+            val updatedExpStatuses = mutableListOf<ExpEntity>()
+            
             for ((expId, matches) in dataByExpId) {
                 if (matches.size < 2) continue
                 
                 val exp = expMap[expId] ?: continue
                 
                 val matchResults = matches.map { match ->
+                    // ПРАВИЛЬНЫЕ ФОРМУЛЫ С +1.5
                     val isWin = when (match.type) {
                         924 -> match.sh >= match.sa
-                        927 -> match.sh + 1 > match.sa
-                        928 -> match.sa + 1 >= match.sh
+                        927 -> (match.sh + 1.5) > match.sa    // Ф1(+1.5)
+                        928 -> (match.sa + 1.5) >= match.sh   // Ф2(+1.5)
                         else -> match.sh >= match.sa
                     }
                     
@@ -104,7 +108,16 @@ class AnalyticsEngine(private val database: AppDatabase) {
                     )
                 }
                 
-                val allWins = matchResults.all { it.isWin }
+                // Определяем результат экспресса ТОЛЬКО ПО СЧЁТУ
+                val allHaveScore = matchResults.all { it.sh > 0 || it.sa > 0 }
+                val hasLosingMatch = matchResults.any { !it.isWin }
+                
+                val allWins = if (allHaveScore) {
+                    matchResults.all { it.isWin }
+                } else {
+                    false
+                }
+                
                 val dateTime = parseDateTime(exp.ct)
                 val isReplaced = expId in replacedExpIds
                 
@@ -112,11 +125,22 @@ class AnalyticsEngine(private val database: AppDatabase) {
                 val weekNumber = dateTime.get(weekField.weekOfWeekBasedYear())
                 val yearWeek = "${dateTime.year}-W${String.format("%02d", weekNumber)}"
                 
-                // Общий коэффициент — произведение startkf всех матчей
                 val allStartKf = matches.map { it.startkf }
                 val totalStartKf = if (allStartKf.all { it > 0 }) {
                     allStartKf.reduce { acc, kf -> acc * kf }
                 } else 0.0
+                
+                // Пересчитываем sts_all на основе счёта
+                val newStsAll = when {
+                    hasLosingMatch -> -1
+                    allHaveScore && allWins -> 2
+                    else -> 1 // Нет полных данных
+                }
+                
+                // Обновляем статус в БД если он изменился
+                if (exp.sts_all != newStsAll) {
+                    updatedExpStatuses.add(exp.copy(sts_all = newStsAll))
+                }
                 
                 expressResults.add(
                     ExpressResult(
@@ -132,31 +156,41 @@ class AnalyticsEngine(private val database: AppDatabase) {
                 )
             }
             
+            // Сохраняем обновлённые статусы в БД
+            if (updatedExpStatuses.isNotEmpty()) {
+                val allExpList = allExp.toMutableList()
+                for (updated in updatedExpStatuses) {
+                    val index = allExpList.indexOfFirst { it.id == updated.id }
+                    if (index >= 0) {
+                        allExpList[index] = updated
+                    }
+                }
+                database.expDao().deleteAll()
+                database.expDao().insertAll(allExpList)
+            }
+            
             calculateStatistics(expressResults)
         }
     }
     
     private fun parseDateTime(ct: String): LocalDateTime {
         return try {
-            val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-            LocalDateTime.parse(ct, formatter)
-        } catch (e: Exception) {
-            try {
-                val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
-                LocalDateTime.parse(ct, formatter)
-            } catch (e2: Exception) {
+            val trimmed = ct.trim()
+            val formatters = listOf(
+                DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"),
+                DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"),
+                DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"),
+                DateTimeFormatter.ofPattern("yyyy-MM-dd HH.mm.ss"),
+                DateTimeFormatter.ISO_LOCAL_DATE_TIME
+            )
+            for (formatter in formatters) {
                 try {
-                    val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
-                    LocalDateTime.parse(ct, formatter)
-                } catch (e3: Exception) {
-                    try {
-                        val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH.mm.ss")
-                        LocalDateTime.parse(ct, formatter)
-                    } catch (e4: Exception) {
-                        LocalDateTime.now()
-                    }
-                }
+                    return LocalDateTime.parse(trimmed, formatter)
+                } catch (_: Exception) { }
             }
+            LocalDateTime.now()
+        } catch (e: Exception) {
+            LocalDateTime.now()
         }
     }
     
