@@ -1,4 +1,4 @@
-﻿// MainActivity.kt — ПОЛНАЯ ВЕРСИЯ С ФОНОВЫМ СЕРВИСОМ ОБНОВЛЕНИЯ СЧЕТОВ, ФИЛЬТРОМ, СОХРАНЕНИЕМ В БД, ЛОГОМ, ВОССТАНОВЛЕНИЕМ РАСКРЫТЫХ ЭКСПРЕССОВ
+﻿// MainActivity.kt — ПОЛНАЯ ВЕРСИЯ С ФОНОВЫМ СЕРВИСОМ ОБНОВЛЕНИЯ СЧЕТОВ, ФИЛЬТРОМ, СОХРАНЕНИЕМ В БД, ЛОГОМ, ВОССТАНОВЛЕНИЕМ РАСКРЫТЫХ ЭКСПРЕССОВ И ОБНОВЛЕНИЕМ СЧЁТА В РЕАЛЬНОМ ВРЕМЕНИ
 package com.example.fonbetbot
 
 import android.content.Intent
@@ -52,6 +52,9 @@ class MainActivity : AppCompatActivity() {
     private val logLines = mutableListOf<String>()
     private val MAX_LOG_LINES = 500
     
+    // Карта для хранения текущих минут матчей
+    private val matchMinutesMap = mutableMapOf<Long, Int>()
+    
     companion object {
         private const val TAG = "MainActivity"
         private const val COLOR_GREEN = "#03A66D"
@@ -79,9 +82,11 @@ class MainActivity : AppCompatActivity() {
         switchFilter = findViewById(R.id.switch_filter)
         tvFilterLabel = findViewById(R.id.tv_filter_label)
         btnSettings = findViewById(R.id.btn_settings)
-btnSettings.setOnClickListener {
-    startActivity(Intent(this, SettingsActivity::class.java))
-}
+        
+        btnSettings.setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
+        
         database = AppDatabase.getDatabase(this)
         analyticsEngine = AnalyticsEngine(database)
         
@@ -118,6 +123,11 @@ btnSettings.setOnClickListener {
         addLog("onResume: обновление данных из БД")
         refreshData()
         ScoreUpdateService.onLogUpdate = { msg -> addLog(msg) }
+        ScoreUpdateService.onScoreUpdated = { mId, sh, sa, minute ->
+            runOnUiThread {
+                updateMatchDisplay(mId, sh, sa, minute)
+            }
+        }
     }
     
     override fun onPause() {
@@ -126,6 +136,7 @@ btnSettings.setOnClickListener {
         savedScrollY = scrollView.scrollY
         addLog("💾 Сохранено ${savedExpandedIds?.size ?: 0} раскрытых экспрессов")
         ScoreUpdateService.onLogUpdate = null
+        ScoreUpdateService.onScoreUpdated = null
     }
     
     override fun onDestroy() {
@@ -134,24 +145,23 @@ btnSettings.setOnClickListener {
     }
     
     // ========== ФОНОВЫЙ СЕРВИС ==========
-    // В MainActivity.kt добавьте метод
-private fun requestBackgroundPermissions() {
-    // Запрос на отключение оптимизации батареи
-    if (!BatteryOptimizationHelper.isIgnoringBatteryOptimizations(this)) {
-        BatteryOptimizationHelper.requestIgnoreBatteryOptimizations(this)
-    }
     
-    // Для Android 13+ запросить разрешение на уведомления
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) 
-            != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(
-                arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
-                1001
-            )
+    private fun requestBackgroundPermissions() {
+        if (!BatteryOptimizationHelper.isIgnoringBatteryOptimizations(this)) {
+            BatteryOptimizationHelper.requestIgnoreBatteryOptimizations(this)
+        }
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) 
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(
+                    arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
+                    1001
+                )
+            }
         }
     }
-}
+    
     private fun startScoreService() {
         scoreServiceIntent = Intent(this, ScoreUpdateService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -161,6 +171,57 @@ private fun requestBackgroundPermissions() {
         }
         ScoreUpdateService.onLogUpdate = { msg -> addLog(msg) }
         addLog("🔄 Фоновое обновление счетов запущено")
+    }
+    
+    // ========== ОБНОВЛЕНИЕ СЧЁТА В РЕАЛЬНОМ ВРЕМЕНИ ==========
+    
+    private fun updateMatchDisplay(matchId: Long, sh: Int, sa: Int, minute: Int) {
+        // Сохраняем минуту
+        matchMinutesMap[matchId] = minute
+        
+        // Обновляем строку счёта
+        val scoreView = layoutDetailContent.findViewWithTag<TextView>("match_score_$matchId")
+        if (scoreView != null) {
+            val scoreText = if (minute > 0) {
+                "$sh:$sa ($minute')"
+            } else {
+                "$sh:$sa"
+            }
+            scoreView.text = scoreText
+            
+            // Обновляем цвет счёта (жёлтый если матч идёт, белый если завершён)
+            val minuteLimit = 90 // Для футбола
+            if (minute in 1..minuteLimit) {
+                scoreView.setTextColor(Color.parseColor("#F0B90B")) // Жёлтый — матч идёт
+            } else if (minute > minuteLimit) {
+                scoreView.setTextColor(Color.parseColor("#EAECEF")) // Белый — добавленное время
+            }
+        }
+        
+        // Обновляем данные в кэше для правильного отображения при скролле
+        allExpressResultsCache = allExpressResultsCache.map { express ->
+            express.copy(
+                matches = express.matches.map { match ->
+                    if (match.matchId == matchId) {
+                        match.copy(sh = sh, sa = sa)
+                    } else {
+                        match
+                    }
+                }
+            )
+        }
+        
+        allExpressResults = allExpressResults.map { express ->
+            express.copy(
+                matches = express.matches.map { match ->
+                    if (match.matchId == matchId) {
+                        match.copy(sh = sh, sa = sa)
+                    } else {
+                        match
+                    }
+                }
+            )
+        }
     }
     
     // ========== ФИЛЬТР ==========
@@ -189,21 +250,42 @@ private fun requestBackgroundPermissions() {
     // ========== ВСПОМОГАТЕЛЬНЫЕ ==========
     
     private fun isExpressFinished(express: ExpressResult): Boolean {
-        if (express.matches.any { !it.isWin }) return true
-        if (express.matches.all { it.isWin }) return true
-        if (!isLive(express)) return true
+        // Проверяем, есть ли проигрышный матч
+        if (express.matches.any { match ->
+            val isWin = when (match.type) {
+                924 -> match.sh >= match.sa
+                927 -> (match.sh + 1.5) > match.sa  // ИСПРАВЛЕНО: +1.5 вместо +1
+                928 -> (match.sa + 1.5) >= match.sh // ИСПРАВЛЕНО: +1.5 вместо +1
+                else -> match.sh >= match.sa
+            }
+            !isWin && (match.sh > 0 || match.sa > 0) // Есть счёт и матч проигран
+        }) return true
+        
+        // Проверяем, все ли матчи выиграли
+        if (express.matches.all { match ->
+            val isWin = when (match.type) {
+                924 -> match.sh >= match.sa
+                927 -> (match.sh + 1.5) > match.sa  // ИСПРАВЛЕНО
+                928 -> (match.sa + 1.5) >= match.sh // ИСПРАВЛЕНО
+                else -> match.sh >= match.sa
+            }
+            isWin && (match.sh > 0 || match.sa > 0) // Есть счёт и матч выигран
+        }) return true
+        
+        // Проверяем время жизни (если создан более 2 часов назад и нет активных матчей)
+        if (!isLive(express)) {
+            val hasActiveMatches = express.matches.any { match ->
+                match.sh == 0 && match.sa == 0 // Нет счёта — матч может быть активным
+            }
+            if (!hasActiveMatches) return true
+        }
+        
         return false
     }
     
     private fun isLive(express: ExpressResult): Boolean {
         val now = LocalDateTime.now()
         return ChronoUnit.HOURS.between(express.dateTime, now) < LIVE_HOURS
-    }
-    
-    private fun getRowBackground(express: ExpressResult): String {
-        val finished = isExpressFinished(express)
-        return if (!finished) COLOR_LIVE_BG
-        else if (express.isWin) "#0A2317" else "#2B0F14"
     }
     
     private fun getStatusColor(express: ExpressResult): String {
@@ -353,7 +435,7 @@ private fun requestBackgroundPermissions() {
             tag = "match_subheader_${express.expId}"
             addView(matchHeaderTv("Команда 1", 100))
             addView(matchHeaderTv("Команда 2", 100))
-            addView(matchHeaderTv("Счет", 80))
+            addView(matchHeaderTv("Счёт", 80))
             addView(matchHeaderTv("Кэф", 50))
             addView(matchHeaderTv("Тип", 110))
         })
@@ -365,10 +447,43 @@ private fun requestBackgroundPermissions() {
                 928 -> "Ф2(+1.5)"
                 else -> "Т${match.type}"
             }
-            val scoreText: String = "${match.sh}:${match.sa}"
+            
+            // Получаем текущую минуту из карты
+            val currentMinute = matchMinutesMap[match.matchId] ?: 0
+            
+            val scoreText: String = if (match.sh > 0 || match.sa > 0) {
+                if (currentMinute > 0) {
+                    "${match.sh}:${match.sa} (${currentMinute}')"
+                } else {
+                    "${match.sh}:${match.sa}"
+                }
+            } else {
+                "—"
+            }
+            
             val kfText: String = String.format("%.2f", match.startkf)
-            val mc: String = if (match.isWin) COLOR_GREEN else COLOR_RED
-            val resultText: String = if (match.isWin) "✓ Зашел" else "✗ Мимо"
+            
+            // ИСПРАВЛЕНО: правильная проверка выигрыша с +1.5
+            val isWinCorrect = when (match.type) {
+                924 -> match.sh >= match.sa
+                927 -> (match.sh + 1.5) > match.sa
+                928 -> (match.sa + 1.5) >= match.sh
+                else -> match.sh >= match.sa
+            }
+            
+            val hasScore = match.sh > 0 || match.sa > 0
+            val mc: String = if (hasScore) {
+                if (isWinCorrect) COLOR_GREEN else COLOR_RED
+            } else {
+                "#848E9C" // Серый — нет счёта
+            }
+            
+            val resultText: String = if (hasScore) {
+                if (isWinCorrect) "✓ Зашел" else "✗ Мимо"
+            } else {
+                "Ожидание"
+            }
+            
             val ligaInfoText: String = "${match.liganame.take(40)} | $resultText"
             
             views.add(LinearLayout(this).apply {
@@ -379,7 +494,11 @@ private fun requestBackgroundPermissions() {
                 
                 addView(matchDataTv(match.home.take(14), 100, COLOR_TEXT_PRIMARY, 10f, false))
                 addView(matchDataTv(match.away.take(14), 100, COLOR_TEXT_PRIMARY, 10f, false))
-                addView(matchDataTv(scoreText, 80, "#EAECEF", 11f, true))
+                addView(matchDataTv(scoreText, 80, 
+                    if (currentMinute in 1..90) "#F0B90B" else "#EAECEF", 
+                    11f, true).apply {
+                    tag = "match_score_${match.matchId}" // Тег для обновления
+                })
                 addView(matchDataTv(kfText, 50, "#F0B90B", 10f, false))
                 addView(matchDataTv(typeShort, 110, "#848E9C", 10f, false))
             })
