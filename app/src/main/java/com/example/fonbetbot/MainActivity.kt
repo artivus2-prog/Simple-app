@@ -1,4 +1,5 @@
-﻿package com.example.fonbetbot
+﻿// MainActivity.kt — полная замена
+package com.example.fonbetbot
 
 import android.content.Intent
 import android.graphics.Color
@@ -42,7 +43,6 @@ class MainActivity : AppCompatActivity() {
     
     companion object {
         private const val TAG = "MainActivity"
-        private const val COLOR_BG = "#0B0E11"
         private const val COLOR_GREEN = "#03A66D"
         private const val COLOR_RED = "#CF304A"
         private const val COLOR_GOLD = "#F0B90B"
@@ -59,9 +59,11 @@ class MainActivity : AppCompatActivity() {
         
         scrollView = findViewById(R.id.scroll_view)
         layoutDetailTable = findViewById(R.id.layout_detail_table)
+        btnAnalytics = findViewById(R.id.btn_analytics)
+        
+        // Эти элементы внутри CardView -> LinearLayout, ищем через их id
         tvDetailTitle = findViewById(R.id.tv_detail_title)
         layoutDetailContent = findViewById(R.id.layout_detail_content)
-        btnAnalytics = findViewById(R.id.btn_analytics)
         
         database = AppDatabase.getDatabase(this)
         analyticsEngine = AnalyticsEngine(database)
@@ -85,6 +87,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         
+        Log.d(TAG, "onCreate done, starting loadData")
         loadData()
     }
     
@@ -116,16 +119,30 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun loadExpressPage() {
-        if (isLoading || allPagesLoaded) return
+        if (isLoading || allPagesLoaded) {
+            Log.d(TAG, "loadExpressPage skip: isLoading=$isLoading, allPagesLoaded=$allPagesLoaded")
+            return
+        }
         isLoading = true
+        
+        Log.d(TAG, "loadExpressPage: page=$currentPage, total=${allExpressResults.size}")
         
         lifecycleScope.launch {
             try {
                 val pageData = withContext(Dispatchers.IO) {
                     val start = currentPage * PAGE_SIZE
                     val end = minOf(start + PAGE_SIZE, allExpressResults.size)
-                    if (start >= allExpressResults.size) return@withContext emptyList<ExpressResult>()
-                    allExpressResults.subList(start, end).toList()
+                    if (start >= allExpressResults.size) emptyList()
+                    else allExpressResults.subList(start, end).toList()
+                }
+                
+                Log.d(TAG, "loadExpressPage result: ${pageData.size} items")
+                
+                if (pageData.isEmpty() && currentPage == 0 && allExpressResults.isEmpty()) {
+                    tvDetailTitle.text = "Нет данных. Импортируйте файлы в Аналитике."
+                    layoutDetailTable.visibility = View.VISIBLE
+                    isLoading = false
+                    return@launch
                 }
                 
                 if (pageData.isEmpty()) {
@@ -141,9 +158,13 @@ class MainActivity : AppCompatActivity() {
                     allPagesLoaded = true
                     val liveCount = allExpressResults.count { isLive(it) }
                     tvDetailTitle.text = "Экспрессы (${allExpressResults.size}) | Активных: $liveCount"
+                } else {
+                    tvDetailTitle.text = "Экспрессы (загружено ${currentPage * PAGE_SIZE})"
                 }
+                
             } catch (e: Exception) {
                 Log.e(TAG, "Ошибка загрузки страницы", e)
+                tvDetailTitle.text = "Ошибка: ${e.message}"
             } finally {
                 isLoading = false
             }
@@ -349,7 +370,6 @@ class MainActivity : AppCompatActivity() {
         layoutDetailTable.visibility = View.VISIBLE
         
         if (currentPage == 0) {
-            tvDetailTitle.text = "Экспрессы (загружено ${expresses.size})"
             layoutDetailContent.addView(buildHeaderRow())
         }
         
@@ -429,18 +449,32 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             try {
                 tvDetailTitle.text = "Загрузка..."
+                Log.d(TAG, "loadData started")
+                
+                // Проверяем количество записей в базе
+                val expCount = withContext(Dispatchers.IO) { database.expDao().getAllExp().size }
+                val dataCount = withContext(Dispatchers.IO) { database.dataDao().getAllData().size }
+                Log.d(TAG, "DB: exp=$expCount, data=$dataCount")
+                
+                if (expCount == 0 || dataCount == 0) {
+                    tvDetailTitle.text = "Нет данных. Импортируйте файлы в Аналитике."
+                    layoutDetailTable.visibility = View.VISIBLE
+                    return@launch
+                }
                 
                 val analytics = withContext(Dispatchers.IO) { analyticsEngine.calculateAnalytics() }
                 
                 allExpressResults = ((analytics["allExpresses"] as? List<ExpressResult>) ?: emptyList())
                     .sortedByDescending { it.dateTime }
                 
+                Log.d(TAG, "allExpressResults count = ${allExpressResults.size}")
+                
                 resetPagination()
                 loadExpressPage()
                 
             } catch (e: Exception) {
                 Log.e(TAG, "Ошибка загрузки", e)
-                tvDetailTitle.text = "Ошибка загрузки"
+                tvDetailTitle.text = "Ошибка: ${e.message}"
             }
         }
     }
