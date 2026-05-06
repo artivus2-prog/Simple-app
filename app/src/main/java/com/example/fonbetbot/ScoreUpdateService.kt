@@ -286,7 +286,7 @@ class ScoreUpdateService : Service() {
                     database.expDao().deleteAll()
                     database.expDao().insertAll(updatedExp)
                     Log.d("ScoreUpdate", "Обновлено статусов: $finishedCount")
-                }
+                } else {Log.d("dome")}
             } catch (e: Exception) {
                 Log.e("ScoreUpdate", "Ошибка обновления статусов: ${e.message}")
             }
