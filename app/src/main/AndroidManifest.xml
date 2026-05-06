@@ -2,15 +2,30 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Разрешения -->
+    <!-- Существующие разрешения -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" 
         android:maxSdkVersion="28" />
+    
+    <!-- Разрешения для фоновой работы -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    
+    <!-- Для Android 12+ -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    
+    <!-- Для работы в фоне без ограничений (Android 8+) -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    
+    <!-- Доступ к фоновым задачам -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    
+    <!-- Для получения BOOT_COMPLETED (автозапуск после перезагрузки) -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:allowBackup="true"
@@ -48,15 +63,29 @@
             android:exported="false"
             android:theme="@style/Theme.FonbetBot"
             android:screenOrientation="portrait" />
+        
+        <!-- Экран настроек -->
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.FonbetBot"
+            android:screenOrientation="portrait" />
+        
+        <!-- Обновленный сервис с правильным типом -->
         <service
-    android:name=".ScoreUpdateService"
-    android:foregroundServiceType="dataSync"
-    android:exported="false" />
-    <activity
-    android:name=".SettingsActivity"
-    android:exported="false"
-    android:theme="@style/Theme.FonbetBot"
-    android:screenOrientation="portrait" />
+            android:name=".ScoreUpdateService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
+            
+        <!-- Ресивер для автозапуска после перезагрузки -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+        
     </application>
-
 </manifest>
