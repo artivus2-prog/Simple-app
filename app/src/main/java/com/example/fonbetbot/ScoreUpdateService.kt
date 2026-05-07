@@ -33,17 +33,6 @@ class ScoreUpdateService : Service() {
         private const val ACTIVE_HOURS = 2L
     }
 
-    private data class MatchTrackingInfo(
-        val matchId: Long,
-        var lastSh: Int = -1,
-        var lastSa: Int = -1,
-        var lastMinute: Int = -1,
-        var lastUpdateTime: LocalDateTime = LocalDateTime.now()
-    )
-    
-    private val matchTracker = mutableMapOf<Long, MatchTrackingInfo>()
-    private val matchMinutes = mutableMapOf<Long, Int>()
-
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
@@ -90,11 +79,12 @@ class ScoreUpdateService : Service() {
         }
     }
 
+    // ИСПРАВЛЕНО: правильные формулы с +1.5
     private fun isMatchWin(sh: Int, sa: Int, type: Int): Boolean {
         return when (type) {
             924 -> sh >= sa
-            927 -> (sh + 1.5) > sa
-            928 -> (sa + 1.5) >= sh
+            927 -> (sh + 1.5) > sa    // Ф1(+1.5)
+            928 -> (sa + 1.5) >= sh   // Ф2(+1.5)
             else -> sh >= sa
         }
     }
@@ -172,21 +162,13 @@ class ScoreUpdateService : Service() {
                             matchId = match.m_id.toInt(),
                             onSuccess = { factors ->
                                 if (factors != null && factors.score1 >= 0 && factors.score2 >= 0) {
-                                    val tracking = matchTracker.getOrPut(match.m_id) {
-                                        MatchTrackingInfo(matchId = match.m_id)
-                                    }
-                                    
+                                    // Обновляем счёт в БД, curtime НЕ трогаем
                                     if (match.sh != factors.score1 || match.sa != factors.score2) {
                                         saveScoreToDb(match.m_id, factors.score1, factors.score2)
                                         updatedCount++
                                     }
                                     
-                                    matchMinutes[match.m_id] = factors.matchTime
-                                    tracking.lastSh = factors.score1
-                                    tracking.lastSa = factors.score2
-                                    tracking.lastMinute = factors.matchTime
-                                    tracking.lastUpdateTime = LocalDateTime.now()
-                                    
+                                    // Передаём живую минуту для отображения
                                     onScoreUpdated?.invoke(
                                         match.m_id,
                                         factors.score1,
@@ -254,7 +236,6 @@ class ScoreUpdateService : Service() {
                                 if (hoursSinceCreation > ACTIVE_HOURS) {
                                     // CT > 2ч — данных не будет
                                     // 0:0 — это ВЫИГРЫШ для любого типа ставки
-                                    // Не меняем hasLosingMatch, матч выиграл
                                 } else {
                                     // CT < 2ч — ещё ждём данные из API
                                     allHaveScore = false
@@ -293,7 +274,7 @@ class ScoreUpdateService : Service() {
                     database.expDao().deleteAll()
                     database.expDao().insertAll(updatedExp)
                     Log.d("ScoreUpdate", "✅ Обновлено статусов в БД: $updatedCount")
-                } else {Log.d("ScoreUpdate","some")}
+                }
             } catch (e: Exception) {
                 Log.e("ScoreUpdate", "Ошибка обновления статусов: ${e.message}", e)
             }
@@ -302,6 +283,7 @@ class ScoreUpdateService : Service() {
         return updatedCount
     }
 
+    // Обновляет ТОЛЬКО счёт (sh, sa), curtime НЕ трогаем
     private fun saveScoreToDb(matchId: Long, sh: Int, sa: Int) {
         kotlinx.coroutines.runBlocking(Dispatchers.IO) {
             try {

@@ -6,8 +6,45 @@ import android.net.Uri
 import org.apache.poi.ss.usermodel.CellType
 import org.apache.poi.ss.usermodel.WorkbookFactory
 import java.io.InputStream
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 class ExcelReader(private val context: Context) {
+    
+    /**
+     * Конвертирует Excel-число даты в строку формата yyyy-MM-dd HH:mm:ss
+     */
+    private fun excelDateToString(excelDate: Double): String {
+        return try {
+            // Базовая дата в Excel: 30 декабря 1899 года
+            val baseDate = LocalDateTime.of(1899, 12, 30, 0, 0)
+            val days = excelDate.toLong()
+            val fraction = excelDate - days
+            
+            // Вычисляем время из дробной части
+            val totalSeconds = (fraction * 24 * 60 * 60).toLong()
+            val hours = totalSeconds / 3600
+            val minutes = (totalSeconds % 3600) / 60
+            val seconds = totalSeconds % 60
+            
+            val dateTime = baseDate.plusDays(days)
+                .plusHours(hours)
+                .plusMinutes(minutes)
+                .plusSeconds(seconds)
+            
+            dateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+        } catch (e: Exception) {
+            excelDate.toString()
+        }
+    }
+    
+    /**
+     * Проверяет, является ли строка Excel-числом даты (>40000)
+     */
+    private fun isExcelDateNumber(value: String): Boolean {
+        val num = value.trim().toDoubleOrNull() ?: return false
+        return num > 40000 // Даты после 2009 года
+    }
     
     fun readExpData(uri: Uri): List<ExpEntity> {
         val inputStream: InputStream = context.contentResolver.openInputStream(uri)!!
@@ -19,12 +56,20 @@ class ExcelReader(private val context: Context) {
         for (i in 1 until sheet.physicalNumberOfRows) {
             val row = sheet.getRow(i) ?: continue
             try {
+                // Специальная обработка ct (индекс 5)
+                val ctRaw = getStringCellValue(row, 5)
+                val ct = if (isExcelDateNumber(ctRaw)) {
+                    excelDateToString(ctRaw.toDouble())
+                } else {
+                    ctRaw
+                }
+                
                 val exp = ExpEntity(
                     id = getNumericCellValue(row, 1).toInt(),
                     id_exp = getNumericCellValue(row, 2).toInt(),
                     kfall = getNumericCellValue(row, 3),
                     sts_all = getNumericCellValue(row, 4).toInt(),
-                    ct = getStringCellValue(row, 5),
+                    ct = ct,
                     profloss = getNumericCellValue(row, 6),
                     balans = getNumericCellValue(row, 7).toInt(),
                     sumbet = getNumericCellValue(row, 8).toInt(),

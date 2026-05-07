@@ -178,10 +178,8 @@ class MainActivity : AppCompatActivity() {
     // ========== ОБНОВЛЕНИЕ СЧЁТА В РЕАЛЬНОМ ВРЕМЕНИ ==========
     
     private fun updateMatchDisplay(matchId: Long, sh: Int, sa: Int, minute: Int) {
-        // Сохраняем минуту
         matchMinutesMap[matchId] = minute
         
-        // Обновляем строку счёта
         val scoreView = layoutDetailContent.findViewWithTag<TextView>("match_score_$matchId")
         if (scoreView != null) {
             val scoreText = if (minute > 0) {
@@ -191,24 +189,18 @@ class MainActivity : AppCompatActivity() {
             }
             scoreView.text = scoreText
             
-            // Обновляем цвет счёта (жёлтый если матч идёт, белый если завершён)
-            val minuteLimit = 90 // Для футбола
+            val minuteLimit = 90
             if (minute in 1..minuteLimit) {
-                scoreView.setTextColor(Color.parseColor("#F0B90B")) // Жёлтый — матч идёт
+                scoreView.setTextColor(Color.parseColor("#F0B90B"))
             } else if (minute > minuteLimit) {
-                scoreView.setTextColor(Color.parseColor("#EAECEF")) // Белый — добавленное время
+                scoreView.setTextColor(Color.parseColor("#EAECEF"))
             }
         }
         
-        // Обновляем данные в кэше для правильного отображения при скролле
         allExpressResultsCache = allExpressResultsCache.map { express ->
             express.copy(
                 matches = express.matches.map { match ->
-                    if (match.matchId == matchId) {
-                        match.copy(sh = sh, sa = sa)
-                    } else {
-                        match
-                    }
+                    if (match.matchId == matchId) match.copy(sh = sh, sa = sa) else match
                 }
             )
         }
@@ -216,11 +208,7 @@ class MainActivity : AppCompatActivity() {
         allExpressResults = allExpressResults.map { express ->
             express.copy(
                 matches = express.matches.map { match ->
-                    if (match.matchId == matchId) {
-                        match.copy(sh = sh, sa = sa)
-                    } else {
-                        match
-                    }
+                    if (match.matchId == matchId) match.copy(sh = sh, sa = sa) else match
                 }
             )
         }
@@ -252,32 +240,29 @@ class MainActivity : AppCompatActivity() {
     // ========== ВСПОМОГАТЕЛЬНЫЕ ==========
     
     private fun isExpressFinished(express: ExpressResult): Boolean {
-        // Проверяем, есть ли проигрышный матч
         if (express.matches.any { match ->
             val isWin = when (match.type) {
                 924 -> match.sh >= match.sa
-                927 -> (match.sh + 1.5) > match.sa  // ИСПРАВЛЕНО: +1.5 вместо +1
-                928 -> (match.sa + 1.5) >= match.sh // ИСПРАВЛЕНО: +1.5 вместо +1
+                927 -> (match.sh + 1.5) > match.sa
+                928 -> (match.sa + 1.5) >= match.sh
                 else -> match.sh >= match.sa
             }
-            !isWin && (match.sh > 0 || match.sa > 0) // Есть счёт и матч проигран
+            !isWin && (match.sh > 0 || match.sa > 0)
         }) return true
         
-        // Проверяем, все ли матчи выиграли
         if (express.matches.all { match ->
             val isWin = when (match.type) {
                 924 -> match.sh >= match.sa
-                927 -> (match.sh + 1.5) > match.sa  // ИСПРАВЛЕНО
-                928 -> (match.sa + 1.5) >= match.sh // ИСПРАВЛЕНО
+                927 -> (match.sh + 1.5) > match.sa
+                928 -> (match.sa + 1.5) >= match.sh
                 else -> match.sh >= match.sa
             }
-            isWin && (match.sh > 0 || match.sa > 0) // Есть счёт и матч выигран
+            isWin && (match.sh > 0 || match.sa > 0)
         }) return true
         
-        // Проверяем время жизни (если создан более 2 часов назад и нет активных матчей)
         if (!isLive(express)) {
             val hasActiveMatches = express.matches.any { match ->
-                match.sh == 0 && match.sa == 0 // Нет счёта — матч может быть активным
+                match.sh == 0 && match.sa == 0
             }
             if (!hasActiveMatches) return true
         }
@@ -288,12 +273,6 @@ class MainActivity : AppCompatActivity() {
     private fun isLive(express: ExpressResult): Boolean {
         val now = LocalDateTime.now()
         return ChronoUnit.HOURS.between(express.dateTime, now) < LIVE_HOURS
-    }
-    
-    private fun getStatusColor(express: ExpressResult): String {
-        val finished = isExpressFinished(express)
-        return if (!finished) COLOR_GOLD
-        else if (express.isWin) COLOR_GREEN else COLOR_RED
     }
     
     // ========== ПАГИНАЦИЯ ==========
@@ -407,7 +386,6 @@ class MainActivity : AppCompatActivity() {
         
         row.addView(dataTv("$idPrefix #${express.expId}", 70, itemBg, itemColor))
         
-        // Ячейка с датой и временем (редактируемая)
         val dateTv = dataTv(dateTimeStr, 130, itemBg, COLOR_TEXT_PRIMARY)
         dateTv.tag = "date_${express.expId}"
         dateTv.setOnLongClickListener {
@@ -423,7 +401,7 @@ class MainActivity : AppCompatActivity() {
         return row
     }
     
-    // ==================== ДИАЛОГ РЕДАКТИРОВАНИЯ ДАТЫ ЭКСПРЕССА ====================
+    // ==================== ДИАЛОГ РЕДАКТИРОВАНИЯ CT ====================
     
     private fun showEditExpDateTimeDialog(express: ExpressResult) {
         lifecycleScope.launch {
@@ -431,22 +409,53 @@ class MainActivity : AppCompatActivity() {
                 database.expDao().getAllExp().find { it.id_exp == express.expId }?.ct ?: ""
             }
             
+            // Пытаемся привести к читаемому формату если это Excel-число
+            val formattedDate = try {
+                val numericValue = currentCt.trim().toDoubleOrNull()
+                if (numericValue != null && numericValue > 40000) {
+                    // Excel дата — конвертируем
+                    val baseDate = LocalDateTime.of(1899, 12, 30, 0, 0)
+                    val days = numericValue.toLong()
+                    val fraction = numericValue - days
+                    val totalSeconds = (fraction * 24 * 60 * 60).toLong()
+                    val hours = totalSeconds / 3600
+                    val minutes = (totalSeconds % 3600) / 60
+                    val seconds = totalSeconds % 60
+                    
+                    baseDate.plusDays(days)
+                        .plusHours(hours)
+                        .plusMinutes(minutes)
+                        .plusSeconds(seconds)
+                        .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+                } else {
+                    currentCt
+                }
+            } catch (e: Exception) {
+                currentCt
+            }
+            
             val editText = EditText(this@MainActivity).apply {
-                setText(currentCt)
+                setText(formattedDate)
                 hint = "yyyy-MM-dd HH:mm:ss"
                 setTextColor(Color.parseColor("#EAECEF"))
                 setHintTextColor(Color.parseColor("#848E9C"))
                 setBackgroundColor(Color.parseColor("#2B3139"))
                 setPadding(32, 16, 32, 16)
+                textSize = 14f
+                inputType = InputType.TYPE_CLASS_TEXT
+                isSingleLine = true
             }
             
             AlertDialog.Builder(this@MainActivity)
                 .setTitle("CT экспресса #${express.expId}")
+                .setMessage("Формат: yyyy-MM-dd HH:mm:ss")
                 .setView(editText)
                 .setPositiveButton("Сохранить") { _, _ ->
                     val newCt = editText.text.toString().trim()
                     if (newCt.isNotBlank()) {
                         updateExpDateTime(express.expId, newCt)
+                    } else {
+                        Toast.makeText(this@MainActivity, "Введите дату", Toast.LENGTH_SHORT).show()
                     }
                 }
                 .setNegativeButton("Отмена", null)
@@ -471,7 +480,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
-    // ==================== ДИАЛОГ РЕДАКТИРОВАНИЯ СЧЁТА И МИНУТЫ МАТЧА ====================
+    // ==================== ДИАЛОГ РЕДАКТИРОВАНИЯ СЧЁТА ====================
     
     private fun showEditMatchScoreDialog(match: MatchResult, expId: Int) {
         val layout = LinearLayout(this).apply {
@@ -486,6 +495,7 @@ class MainActivity : AppCompatActivity() {
             setHintTextColor(Color.parseColor("#848E9C"))
             setBackgroundColor(Color.parseColor("#2B3139"))
             setPadding(32, 16, 32, 16)
+            textSize = 16f
         }
         
         val etMinute = EditText(this).apply {
@@ -496,6 +506,7 @@ class MainActivity : AppCompatActivity() {
             setHintTextColor(Color.parseColor("#848E9C"))
             setBackgroundColor(Color.parseColor("#2B3139"))
             setPadding(32, 16, 32, 16)
+            textSize = 16f
         }
         
         layout.addView(TextView(this).apply {
@@ -580,7 +591,6 @@ class MainActivity : AppCompatActivity() {
                 else -> "Т${match.type}"
             }
             
-            // Получаем текущую минуту из карты
             val currentMinute = matchMinutesMap[match.matchId] ?: match.curtime
             
             val scoreText: String = if (match.sh > 0 || match.sa > 0) {
@@ -595,7 +605,6 @@ class MainActivity : AppCompatActivity() {
             
             val kfText: String = String.format("%.2f", match.startkf)
             
-            // ИСПРАВЛЕНО: правильная проверка выигрыша с +1.5
             val isWinCorrect = when (match.type) {
                 924 -> match.sh >= match.sa
                 927 -> (match.sh + 1.5) > match.sa
@@ -607,7 +616,7 @@ class MainActivity : AppCompatActivity() {
             val mc: String = if (hasScore) {
                 if (isWinCorrect) COLOR_GREEN else COLOR_RED
             } else {
-                "#848E9C" // Серый — нет счёта
+                "#848E9C"
             }
             
             val resultText: String = if (hasScore) {
@@ -627,11 +636,10 @@ class MainActivity : AppCompatActivity() {
                 addView(matchDataTv(match.home.take(14), 100, COLOR_TEXT_PRIMARY, 10f, false))
                 addView(matchDataTv(match.away.take(14), 100, COLOR_TEXT_PRIMARY, 10f, false))
                 
-                // Ячейка со счётом (редактируемая)
                 val scoreTv = matchDataTv(scoreText, 80, 
                     if (currentMinute in 1..90) "#F0B90B" else "#EAECEF", 
                     11f, true).apply {
-                    tag = "match_score_${match.matchId}" // Тег для обновления
+                    tag = "match_score_${match.matchId}"
                     setOnLongClickListener {
                         showEditMatchScoreDialog(match, express.expId)
                         true
