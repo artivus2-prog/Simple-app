@@ -1,7 +1,9 @@
 ﻿// MainActivity.kt — ПОЛНАЯ ВЕРСИЯ С АВТООПРОСОМ GETBETS
-// Матч активен: curtime > 0 и < 100, или curtime = 0 и CT <= 2ч
+// getBets добавляет только НОВЫЕ экспрессы
+// ScoreUpdateService обновляет счёт через getMatchScore
+// Матч активен: curtime 1..125
 // Экспресс завершён: есть проигравший, или все матчи завершены и CT > 2ч
-// Колонка m_id с редактированием, 0:0 валидный счёт
+// Исправлен дубляж матчей при повторном раскрытии экспресса
 package com.example.fonbetbot
 
 import android.content.Context
@@ -42,7 +44,6 @@ class MainActivity : AppCompatActivity() {
     private var allExpressResults = listOf<ExpressResult>()
     private var allExpressResultsCache = listOf<ExpressResult>()
     
-    // Новые поля для API и таймера
     private lateinit var apiClient: ApiClient
     private lateinit var dataManager: DataManager
     private lateinit var settingsPrefs: SharedPreferences
@@ -79,28 +80,21 @@ class MainActivity : AppCompatActivity() {
         private const val COLOR_MATCH_HEADER_BG = "#1A1F26"
         private const val COLOR_GRID = "#2B3139"
         
-        // Настройки
         const val PREFS_NAME = "bet_settings"
         const val KEY_ALL_MIN_KEF = "all_min_kef"
         const val KEY_TYPE_924_MIN = "type_924_min"
         const val KEY_TYPE_924_MAX = "type_924_max"
-        const val KEY_TYPE_927_MIN = "type_927_min"
-        const val KEY_TYPE_927_MAX = "type_927_max"
-        const val KEY_TYPE_928_MIN = "type_928_min"
-        const val KEY_TYPE_928_MAX = "type_928_max"
-        
-        // ДОБАВЛЕННЫЕ КОНСТАНТЫ:
         const val KEY_TYPE_924_MONITOR_START = "type_924_monitor_start"
         const val KEY_TYPE_924_MONITOR_END = "type_924_monitor_end"
-           // ДОБАВЛЕННЫЕ КОНСТАНТЫ:
-        const val KEY_TYPE_928_MONITOR_START = "type_928_monitor_start"
-        const val KEY_TYPE_928_MONITOR_END = "type_928_monitor_end"
-        // ДОБАВЛЕННЫЕ КОНСТАНТЫ:
+        const val KEY_TYPE_927_MIN = "type_927_min"
+        const val KEY_TYPE_927_MAX = "type_927_max"
         const val KEY_TYPE_927_MONITOR_START = "type_927_monitor_start"
         const val KEY_TYPE_927_MONITOR_END = "type_927_monitor_end"
-        
-
-const val KEY_MAX_ACTIVE_EXP = "max_active_exp"
+        const val KEY_TYPE_928_MIN = "type_928_min"
+        const val KEY_TYPE_928_MAX = "type_928_max"
+        const val KEY_TYPE_928_MONITOR_START = "type_928_monitor_start"
+        const val KEY_TYPE_928_MONITOR_END = "type_928_monitor_end"
+        const val KEY_MAX_ACTIVE_EXP = "max_active_exp"
         const val KEY_MAX_MATCHES = "max_matches"
         const val KEY_TIMEOUT = "timeout"
         
@@ -124,7 +118,6 @@ const val KEY_MAX_ACTIVE_EXP = "max_active_exp"
         tvFilterLabel = findViewById(R.id.tv_filter_label)
         btnSettings = findViewById(R.id.btn_settings)
         
-        // Инициализация новых компонентов
         apiClient = ApiClient()
         settingsPrefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         
@@ -176,7 +169,6 @@ const val KEY_MAX_ACTIVE_EXP = "max_active_exp"
             }
         }
         
-        // Перезапускаем опрос если был остановлен
         if (betRequestJob?.isActive != true) {
             startBetPolling()
         }
@@ -197,7 +189,7 @@ const val KEY_MAX_ACTIVE_EXP = "max_active_exp"
         scoreServiceIntent?.let { stopService(it) }
     }
     
-    // ========== АВТООПРОС GETBETS ==========
+    // ==================== АВТООПРОС GETBETS ====================
     
     private fun startBetPolling() {
         betRequestJob?.cancel()
@@ -221,7 +213,6 @@ const val KEY_MAX_ACTIVE_EXP = "max_active_exp"
         isGettingBets = true
         
         try {
-            // 1. Проверяем лимит активных экспрессов
             val maxActive = settingsPrefs.getInt(KEY_MAX_ACTIVE_EXP, 5)
             val activeCount = withContext(Dispatchers.IO) {
                 allExpressResultsCache.count { !isExpressFinished(it) }
@@ -234,12 +225,10 @@ const val KEY_MAX_ACTIVE_EXP = "max_active_exp"
                 return
             }
             
-            // 2. Формируем настройки
             val settings = buildBetSettings()
             addLog("📡 Отправка запроса getBets...")
             addLog("   Матчей макс: ${settings.maxMatchesPerExpress}, Кэф мин: ${settings.allMinKef}")
             
-            // 3. Выполняем запрос
             val bets = withContext(Dispatchers.IO) {
                 suspendCancellableCoroutine<List<ApiClient.BetData>> { continuation ->
                     apiClient.getBets(
@@ -258,19 +247,18 @@ const val KEY_MAX_ACTIVE_EXP = "max_active_exp"
                 return
             }
             
-            // 4. Проверяем дубликаты по m_id
             val duplicateCount = withContext(Dispatchers.IO) {
                 dataManager.countDuplicates(bets)
             }
             
             if (duplicateCount > 0) {
                 addLog("🔄 Найдено дубликатов: $duplicateCount/${bets.size} — экспресс пропущен")
+                addLog("ℹ️ Счёт обновляется через ScoreUpdateService (другое API)")
                 return
             }
             
             addLog("✅ Все ${bets.size} матчей новые, импортируем...")
             
-            // 5. Импортируем в БД
             val importResult = withContext(Dispatchers.IO) {
                 dataManager.importBets(bets)
             }
@@ -278,7 +266,6 @@ const val KEY_MAX_ACTIVE_EXP = "max_active_exp"
             addLog("✅ Импортирован ${importResult.newExpressCount} экспресс с ${importResult.newMatchCount} матчами")
             addLog("   Новые ID экспрессов: ${importResult.newExpIds}")
             
-            // 6. Обновляем интерфейс
             ScoreUpdateService.requestFullRecalc = true
             refreshData()
             
@@ -290,51 +277,49 @@ const val KEY_MAX_ACTIVE_EXP = "max_active_exp"
         }
     }
     
-    // MainActivity.kt — заменить метод buildBetSettings()
-
-private fun buildBetSettings(): ApiClient.BetSettings {
-    val maxMatches = settingsPrefs.getInt(KEY_MAX_MATCHES, 2)
-    val allMinKef = settingsPrefs.getFloat(KEY_ALL_MIN_KEF, 1.67f).toDouble()
-    val maxActive = settingsPrefs.getInt(KEY_MAX_ACTIVE_EXP, 5)
-    
-    val type924Settings = ApiClient.TypeSettings(
-        name = "1х/футбол/хоккей",
-        minBet = settingsPrefs.getFloat(KEY_TYPE_924_MIN, 1.15f).toDouble(),
-        maxBet = settingsPrefs.getFloat(KEY_TYPE_924_MAX, 1.50f).toDouble(),
-        monitorStart = settingsPrefs.getInt(KEY_TYPE_924_MONITOR_START, 80),
-        monitorEnd = settingsPrefs.getInt(KEY_TYPE_924_MONITOR_END, 100)
-    )
-    
-    val type927Settings = ApiClient.TypeSettings(
-        name = "ф1(+1.5)/футбол/хоккей",
-        minBet = settingsPrefs.getFloat(KEY_TYPE_927_MIN, 1.15f).toDouble(),
-        maxBet = settingsPrefs.getFloat(KEY_TYPE_927_MAX, 1.50f).toDouble(),
-        monitorStart = settingsPrefs.getInt(KEY_TYPE_927_MONITOR_START, 1),
-        monitorEnd = settingsPrefs.getInt(KEY_TYPE_927_MONITOR_END, 45)
-    )
-    
-    val type928Settings = ApiClient.TypeSettings(
-        name = "ф2(+1.5)/футбол/хоккей",
-        minBet = settingsPrefs.getFloat(KEY_TYPE_928_MIN, 1.15f).toDouble(),
-        maxBet = settingsPrefs.getFloat(KEY_TYPE_928_MAX, 1.50f).toDouble(),
-        monitorStart = settingsPrefs.getInt(KEY_TYPE_928_MONITOR_START, 1),
-        monitorEnd = settingsPrefs.getInt(KEY_TYPE_928_MONITOR_END, 45)
-    )
-    
-    return ApiClient.BetSettings(
-        maxMatchesPerExpress = maxMatches,
-        multiply = 2,
-        allMinKef = allMinKef,
-        maxActiveExpresses = maxActive,
-        types = mapOf(
-            924 to type924Settings,
-            927 to type927Settings,
-            928 to type928Settings
+    private fun buildBetSettings(): ApiClient.BetSettings {
+        val maxMatches = settingsPrefs.getInt(KEY_MAX_MATCHES, 2)
+        val allMinKef = settingsPrefs.getFloat(KEY_ALL_MIN_KEF, 1.67f).toDouble()
+        val maxActive = settingsPrefs.getInt(KEY_MAX_ACTIVE_EXP, 5)
+        
+        val type924Settings = ApiClient.TypeSettings(
+            name = "1х/футбол/хоккей",
+            minBet = settingsPrefs.getFloat(KEY_TYPE_924_MIN, 1.15f).toDouble(),
+            maxBet = settingsPrefs.getFloat(KEY_TYPE_924_MAX, 1.50f).toDouble(),
+            monitorStart = settingsPrefs.getInt(KEY_TYPE_924_MONITOR_START, 80),
+            monitorEnd = settingsPrefs.getInt(KEY_TYPE_924_MONITOR_END, 100)
         )
-    )
-}
+        
+        val type927Settings = ApiClient.TypeSettings(
+            name = "ф1(+1.5)/футбол/хоккей",
+            minBet = settingsPrefs.getFloat(KEY_TYPE_927_MIN, 1.15f).toDouble(),
+            maxBet = settingsPrefs.getFloat(KEY_TYPE_927_MAX, 1.50f).toDouble(),
+            monitorStart = settingsPrefs.getInt(KEY_TYPE_927_MONITOR_START, 1),
+            monitorEnd = settingsPrefs.getInt(KEY_TYPE_927_MONITOR_END, 45)
+        )
+        
+        val type928Settings = ApiClient.TypeSettings(
+            name = "ф2(+1.5)/футбол/хоккей",
+            minBet = settingsPrefs.getFloat(KEY_TYPE_928_MIN, 1.15f).toDouble(),
+            maxBet = settingsPrefs.getFloat(KEY_TYPE_928_MAX, 1.50f).toDouble(),
+            monitorStart = settingsPrefs.getInt(KEY_TYPE_928_MONITOR_START, 1),
+            monitorEnd = settingsPrefs.getInt(KEY_TYPE_928_MONITOR_END, 45)
+        )
+        
+        return ApiClient.BetSettings(
+            maxMatchesPerExpress = maxMatches,
+            multiply = 2,
+            allMinKef = allMinKef,
+            maxActiveExpresses = maxActive,
+            types = mapOf(
+                924 to type924Settings,
+                927 to type927Settings,
+                928 to type928Settings
+            )
+        )
+    }
     
-    // ========== ФОНОВЫЙ СЕРВИС ==========
+    // ==================== ФОНОВЫЙ СЕРВИС ====================
     
     private fun requestBackgroundPermissions() {
         if (!BatteryOptimizationHelper.isIgnoringBatteryOptimizations(this)) {
@@ -363,7 +348,7 @@ private fun buildBetSettings(): ApiClient.BetSettings {
         addLog("🔄 Фоновое обновление счетов запущено")
     }
     
-    // ========== ОБНОВЛЕНИЕ СЧЁТА В РЕАЛЬНОМ ВРЕМЕНИ ==========
+    // ==================== ОБНОВЛЕНИЕ СЧЁТА В UI ====================
     
     private fun updateMatchDisplay(matchId: Long, sh: Int, sa: Int, minute: Int) {
         matchMinutesMap[matchId] = minute
@@ -377,7 +362,7 @@ private fun buildBetSettings(): ApiClient.BetSettings {
             }
             scoreView.text = scoreText
             
-            if (minute in 1..99) {
+            if (minute in 1..125) {
                 scoreView.setTextColor(Color.parseColor("#F0B90B"))
             } else {
                 scoreView.setTextColor(Color.parseColor("#EAECEF"))
@@ -401,7 +386,7 @@ private fun buildBetSettings(): ApiClient.BetSettings {
         }
     }
     
-    // ========== ФИЛЬТР ==========
+    // ==================== ФИЛЬТР ====================
     
     private fun applyFilterAndReload() {
         lifecycleScope.launch {
@@ -424,28 +409,31 @@ private fun buildBetSettings(): ApiClient.BetSettings {
         }
     }
     
-    // ========== ПРОВЕРКА ЗАВЕРШЁННОСТИ ==========
-    
-    private fun isMatchActive(match: MatchResult): Boolean {
-        return match.curtime in 1..99
-    }
+    // ==================== ПРОВЕРКА ЗАВЕРШЁННОСТИ ====================
     
     private fun isExpressFinished(express: ExpressResult): Boolean {
+        // 1. Проигравший матч — экспресс завершён
         if (express.matches.any { match ->
             val isWin = when (match.type) {
                 924 -> match.sh >= match.sa
                 927 -> (match.sh + 1.5) > match.sa
-                928 -> (match.sa + 1.5) > match.sh
+                928 -> (match.sa + 1.5) >= match.sh
                 else -> match.sh >= match.sa
             }
             !isWin && match.curtime > 0
         }) return true
 
+        // 2. Экспресс старше LIVE_HOURS — завершён
         if (!isLive(express)) return true
 
-        if (express.matches.any { it.curtime in 1..99 }) return false
+        // 3. Матч в игре — экспресс активен
+        if (express.matches.any { it.curtime in 1..125 }) return false
 
-        return true
+        // 4. Все матчи имеют счёт — завершён
+        val allHaveScore = express.matches.all { it.curtime > 0 }
+        if (allHaveScore) return true
+        
+        return false
     }
     
     private fun isLive(express: ExpressResult): Boolean {
@@ -453,7 +441,7 @@ private fun buildBetSettings(): ApiClient.BetSettings {
         return ChronoUnit.HOURS.between(express.dateTime, now) < LIVE_HOURS
     }
     
-    // ========== ПАГИНАЦИЯ ==========
+    // ==================== ПАГИНАЦИЯ ====================
     
     private fun resetPagination() {
         currentPage = 0
@@ -513,7 +501,7 @@ private fun buildBetSettings(): ApiClient.BetSettings {
         if (!isLoading && !allPagesLoaded) loadExpressPage()
     }
     
-    // ========== ТАБЛИЦА ==========
+    // ==================== ТАБЛИЦА ====================
     
     private fun buildHeaderRow(): LinearLayout {
         return LinearLayout(this).apply {
@@ -786,9 +774,10 @@ private fun buildBetSettings(): ApiClient.BetSettings {
     private fun buildMatchDetailRows(express: ExpressResult): List<View> {
         val views = mutableListOf<View>()
         val totalWidth = 500
+        val expId = express.expId
         
         views.add(TextView(this).apply {
-            text = "Матчи экспресса #${express.expId}"
+            text = "Матчи экспресса #$expId"
             textSize = 10f
             setPadding(dp(8), dp(6), dp(8), dp(6))
             gravity = Gravity.START
@@ -796,14 +785,14 @@ private fun buildBetSettings(): ApiClient.BetSettings {
             setTextColor(Color.parseColor("#F0B90B"))
             setTypeface(null, android.graphics.Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(dp(totalWidth), ViewGroup.LayoutParams.WRAP_CONTENT)
-            tag = "match_header_${express.expId}"
+            tag = "match_header_$expId"
         })
         
         views.add(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(dp(totalWidth), ViewGroup.LayoutParams.WRAP_CONTENT)
             setBackgroundColor(Color.parseColor(COLOR_MATCH_HEADER_BG))
-            tag = "match_subheader_${express.expId}"
+            tag = "match_subheader_$expId"
             addView(matchHeaderTv("m_id", 60))
             addView(matchHeaderTv("Команда 1", 90))
             addView(matchHeaderTv("Команда 2", 90))
@@ -812,7 +801,7 @@ private fun buildBetSettings(): ApiClient.BetSettings {
             addView(matchHeaderTv("Тип", 90))
         })
         
-        for (match in express.matches) {
+        for ((matchIndex, match) in express.matches.withIndex()) {
             val typeShort: String = when (match.type) {
                 924 -> "1X"
                 927 -> "Ф1(+1.5)"
@@ -824,7 +813,7 @@ private fun buildBetSettings(): ApiClient.BetSettings {
             
             val hasScoreData = (match.sh > 0 || match.sa > 0) || (match.sh == 0 && match.sa == 0 && match.curtime > 0)
             val scoreText: String = if (hasScoreData) {
-                if (currentMinute in 1..99) {
+                if (currentMinute in 1..125) {
                     "${match.sh}:${match.sa} (${currentMinute}')"
                 } else {
                     "${match.sh}:${match.sa}"
@@ -857,15 +846,16 @@ private fun buildBetSettings(): ApiClient.BetSettings {
             
             val ligaInfoText: String = "#${match.matchId} | ${match.liganame.take(35)} | $resultText"
             
+            // Строка матча
             views.add(LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 layoutParams = LinearLayout.LayoutParams(dp(totalWidth), ViewGroup.LayoutParams.WRAP_CONTENT)
                 setBackgroundColor(Color.parseColor(COLOR_MATCH_BG))
-                tag = "match_${match.matchId}"
+                tag = "match_${expId}_${match.matchId}_$matchIndex"
                 
                 addView(matchDataTv("${match.matchId}", 60, "#848E9C", 9f, false).apply {
                     setOnLongClickListener {
-                        showEditMatchIdDialog(match, express.expId)
+                        showEditMatchIdDialog(match, expId)
                         true
                     }
                 })
@@ -874,11 +864,11 @@ private fun buildBetSettings(): ApiClient.BetSettings {
                 addView(matchDataTv(match.away.take(13), 90, COLOR_TEXT_PRIMARY, 10f, false))
                 
                 val scoreTv = matchDataTv(scoreText, 80, 
-                    if (currentMinute in 1..99) "#F0B90B" else "#EAECEF", 
+                    if (currentMinute in 1..125) "#F0B90B" else "#EAECEF", 
                     11f, true).apply {
                     tag = "match_score_${match.matchId}"
                     setOnLongClickListener {
-                        showEditMatchScoreDialog(match, express.expId)
+                        showEditMatchScoreDialog(match, expId)
                         true
                     }
                 }
@@ -888,25 +878,27 @@ private fun buildBetSettings(): ApiClient.BetSettings {
                 addView(matchDataTv(typeShort, 90, "#848E9C", 10f, false))
             })
             
+            // Строка с информацией о лиге
             views.add(LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 layoutParams = LinearLayout.LayoutParams(dp(totalWidth), ViewGroup.LayoutParams.WRAP_CONTENT)
                 setBackgroundColor(Color.parseColor("#11161C"))
-                tag = "match_info_${match.matchId}"
+                tag = "match_info_${expId}_${match.matchId}_$matchIndex"
                 addView(matchDataTv(ligaInfoText, totalWidth, mc, 9f, false))
             })
         }
         
+        // Разделитель
         views.add(View(this).apply {
             layoutParams = LinearLayout.LayoutParams(dp(totalWidth), dp(2))
             setBackgroundColor(Color.parseColor(COLOR_GRID))
-            tag = "sep_${express.expId}"
+            tag = "sep_$expId"
         })
         
         return views
     }
     
-    // ========== РАСКРЫТИЕ/СКРЫТИЕ ==========
+    // ==================== РАСКРЫТИЕ/СКРЫТИЕ ====================
     
     private fun toggleExpress(express: ExpressResult) {
         if (express.expId in expandedExpressIds) {
@@ -931,19 +923,33 @@ private fun buildBetSettings(): ApiClient.BetSettings {
         val row = layoutDetailContent.findViewWithTag<LinearLayout>("express_${express.expId}") ?: return
         val index = layoutDetailContent.indexOfChild(row)
         if (index == -1) return
+        
+        // Сначала удаляем все существующие строки матчей этого экспресса
+        removeMatchRows(express.expId)
+        
+        // Находим актуальный индекс после удаления
+        val updatedIndex = layoutDetailContent.indexOfChild(row)
+        if (updatedIndex == -1) return
+        
+        // Добавляем новые строки матчей
         buildMatchDetailRows(express).forEachIndexed { i, v ->
-            layoutDetailContent.addView(v, index + 1 + i)
+            layoutDetailContent.addView(v, updatedIndex + 1 + i)
         }
     }
     
     private fun removeMatchRows(expId: Int) {
         val toRemove = mutableListOf<View>()
         for (i in 0 until layoutDetailContent.childCount) {
-            val tag = layoutDetailContent.getChildAt(i).tag as? String ?: continue
+            val child = layoutDetailContent.getChildAt(i)
+            val tag = child.tag as? String ?: continue
+            
+            // Удаляем все строки, связанные с этим экспрессом
             if (tag.startsWith("match_header_$expId") ||
                 tag.startsWith("match_subheader_$expId") ||
+                tag.startsWith("match_${expId}_") ||
+                tag.startsWith("match_info_${expId}_") ||
                 tag == "sep_$expId") {
-                toRemove.add(layoutDetailContent.getChildAt(i))
+                toRemove.add(child)
             }
         }
         toRemove.forEach { layoutDetailContent.removeView(it) }
@@ -962,7 +968,7 @@ private fun buildBetSettings(): ApiClient.BetSettings {
         }
     }
     
-    // ========== ФАБРИКИ ==========
+    // ==================== ФАБРИКИ VIEW ====================
     
     private fun headerTv(text: String, w: Int) = TextView(this).apply {
         this.text = text; textSize = 11f; setPadding(dp(4), dp(6), dp(4), dp(6))
@@ -996,7 +1002,7 @@ private fun buildBetSettings(): ApiClient.BetSettings {
     
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
     
-    // ========== ЛОГИ ==========
+    // ==================== ЛОГИ ====================
     
     fun addLog(message: String) {
         val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"))
@@ -1024,7 +1030,7 @@ private fun buildBetSettings(): ApiClient.BetSettings {
         synchronized(logLines) { tvLogs.text = logLines.joinToString("\n") }
     }
     
-    // ========== ЗАГРУЗКА ==========
+    // ==================== ЗАГРУЗКА ДАННЫХ ====================
     
     private fun loadData() {
         lifecycleScope.launch {
