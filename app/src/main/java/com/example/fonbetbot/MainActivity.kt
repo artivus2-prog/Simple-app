@@ -850,7 +850,7 @@ class MainActivity : AppCompatActivity() {
             // Минуту берём из кеша, если есть; иначе из match.curtime
             val currentMinute = matchMinutesMap[match.matchId] ?: match.curtime
             
-            val hasScoreData = (match.sh > 0 || match.sa > 0) || (match.sh == 0 && match.sa == 0 && match.curtime > 0)
+            val hasScoreData = matmatch.curtime > 0
             val scoreText: String = if (hasScoreData) {
                 if (currentMinute in 1..125) {
                     "${match.sh}:${match.sa} (${currentMinute}')"
