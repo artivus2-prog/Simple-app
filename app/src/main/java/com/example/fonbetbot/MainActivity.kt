@@ -1,4 +1,4 @@
-﻿// MainActivity.kt — ПОЛНАЯ ВЕРСИЯ С АВТООПРОСОМ GETBETS
+﻿// MainActivity.kt — ПОЛНАЯ ВЕРСИЯ С ИСПРАВЛЕНИЯМИ
 // getBets добавляет только НОВЫЕ экспрессы
 // ScoreUpdateService обновляет счёт через getMatchScore
 // Матч активен: curtime 1..125
@@ -6,7 +6,7 @@
 // Исправлен дубляж матчей при повторном раскрытии экспресса
 // Добавлено подтверждение выхода по кнопке Назад
 // Экран не гаснет при открытом приложении
-// Счёт в таблице берётся из базы
+// ИСПРАВЛЕНО: загрузка данных из БД при раскрытии экспресса
 package com.example.fonbetbot
 
 import android.content.Context
@@ -374,12 +374,11 @@ class MainActivity : AppCompatActivity() {
     // ==================== ОБНОВЛЕНИЕ СЧЁТА В UI ====================
     
     private fun updateMatchDisplay(matchId: Long, sh: Int, sa: Int, minute: Int) {
-        // Минуту сохраняем только в кеше для UI
         matchMinutesMap[matchId] = minute
         
         val scoreView = layoutDetailContent.findViewWithTag<TextView>("match_score_$matchId")
         if (scoreView != null) {
-            val scoreText = if (minute in 1..125) {
+            val scoreText = if (minute > 0) {
                 "$sh:$sa ($minute')"
             } else {
                 "$sh:$sa"
@@ -393,12 +392,10 @@ class MainActivity : AppCompatActivity() {
             }
         }
         
-        // Обновляем кеш в памяти
         allExpressResultsCache = allExpressResultsCache.map { express ->
             express.copy(
                 matches = express.matches.map { match ->
-                    if (match.matchId == matchId) match.copy(sh = sh, sa = sa) 
-                    else match
+                    if (match.matchId == matchId) match.copy(sh = sh, sa = sa) else match
                 }
             )
         }
@@ -406,25 +403,9 @@ class MainActivity : AppCompatActivity() {
         allExpressResults = allExpressResults.map { express ->
             express.copy(
                 matches = express.matches.map { match ->
-                    if (match.matchId == matchId) match.copy(sh = sh, sa = sa) 
-                    else match
+                    if (match.matchId == matchId) match.copy(sh = sh, sa = sa) else match
                 }
             )
-        }
-        
-        // Сохраняем в БД только счёт, минуту не трогаем
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val allData = database.dataDao().getAllData()
-                val updated = allData.map {
-                    if (it.m_id == matchId) it.copy(sh = sh, sa = sa) 
-                    else it
-                }
-                database.dataDao().deleteAll()
-                database.dataDao().insertAll(updated)
-            } catch (e: Exception) {
-                Log.e(TAG, "Ошибка сохранения счёта в БД: ${e.message}")
-            }
         }
     }
     
@@ -458,7 +439,7 @@ class MainActivity : AppCompatActivity() {
             val isWin = when (match.type) {
                 924 -> match.sh >= match.sa
                 927 -> (match.sh + 1.5) > match.sa
-                928 -> (match.sa + 1.5) >= match.sh
+                928 -> match.sh < match.sa + 1.5
                 else -> match.sh >= match.sa
             }
             !isWin && match.curtime > 0
@@ -807,7 +788,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
-    // ==================== ДЕТАЛИЗАЦИЯ МАТЧЕЙ ====================
+    // ==================== ДЕТАЛИЗАЦИЯ МАТЧЕЙ (ИСПРАВЛЕНО) ====================
     
     private fun buildMatchDetailRows(express: ExpressResult): List<View> {
         val views = mutableListOf<View>()
@@ -847,15 +828,17 @@ class MainActivity : AppCompatActivity() {
                 else -> "Т${match.type}"
             }
             
-            // Минуту берём из кеша, если есть; иначе из match.curtime
-            val currentMinute = matchMinutesMap[match.matchId] ?: match.curtime
+            // ИСПРАВЛЕНО: используем реальные данные матча, а не кеш
+            val currentMinute = match.curtime
+            val sh = match.sh
+            val sa = match.sa
             
-            val hasScoreData = match.curtime > 0
+            val hasScoreData = (sh > 0 || sa > 0) || (sh == 0 && sa == 0 && currentMinute > 0)
             val scoreText: String = if (hasScoreData) {
                 if (currentMinute in 1..125) {
-                    "${match.sh}:${match.sa} (${currentMinute}')"
+                    "$sh:$sa ($currentMinute')"
                 } else {
-                    "${match.sh}:${match.sa}"
+                    "$sh:$sa"
                 }
             } else {
                 "—"
@@ -863,14 +846,15 @@ class MainActivity : AppCompatActivity() {
             
             val kfText: String = String.format("%.2f", match.startkf)
             
+            // ИСПРАВЛЕНО: правильная логика определения победы для всех типов
             val isWinCorrect = when (match.type) {
-                924 -> match.sh >= match.sa
-                927 -> (match.sh + 1.5) > match.sa
-                928 -> (match.sa + 1.5) >= match.sh
-                else -> match.sh >= match.sa
+                924 -> sh >= sa
+                927 -> (sh + 1.5) > sa
+                928 -> sh < sa + 1.5
+                else -> sh >= sa
             }
             
-            val hasScore = match.curtime > 0
+            val hasScore = sh > 0 || sa > 0 || currentMinute > 0
             val mc: String = if (hasScore) {
                 if (isWinCorrect) COLOR_GREEN else COLOR_RED
             } else {
@@ -934,7 +918,7 @@ class MainActivity : AppCompatActivity() {
         return views
     }
     
-    // ==================== РАСКРЫТИЕ/СКРЫТИЕ ====================
+    // ==================== РАСКРЫТИЕ/СКРЫТИЕ (ИСПРАВЛЕНО) ====================
     
     private fun toggleExpress(express: ExpressResult) {
         if (express.expId in expandedExpressIds) {
@@ -943,9 +927,70 @@ class MainActivity : AppCompatActivity() {
             updateExpressRowIndicator(express.expId, false)
         } else {
             expandedExpressIds.add(express.expId)
-            val freshExpress = allExpressResultsCache.find { it.expId == express.expId } ?: express
-            insertMatchRows(freshExpress)
-            updateExpressRowIndicator(express.expId, true)
+            
+            // ИСПРАВЛЕНО: загружаем свежие данные из БД
+            lifecycleScope.launch {
+                try {
+                    val freshData = withContext(Dispatchers.IO) {
+                        database.dataDao().getAllData().filter { it.id_exp == express.expId }
+                    }
+                    
+                    if (freshData.isNotEmpty()) {
+                        // Создаём обновлённый ExpressResult с актуальными данными из БД
+                        val matchResults = freshData.map { match ->
+                            val isWin = when (match.type) {
+                                924 -> match.sh >= match.sa
+                                927 -> (match.sh + 1.5) > match.sa
+                                928 -> match.sh < match.sa + 1.5
+                                else -> match.sh >= match.sa
+                            }
+                            
+                            MatchResult(
+                                matchId = match.m_id,
+                                home = match.home,
+                                away = match.away,
+                                sh = match.sh,
+                                sa = match.sa,
+                                type = match.type,
+                                isWin = isWin,
+                                liganame = match.liganame,
+                                startkf = match.startkf,
+                                curtime = match.curtime
+                            )
+                        }
+                        
+                        val freshExpress = express.copy(
+                            matches = matchResults,
+                            isWin = matchResults.all { it.isWin && it.curtime > 0 }
+                        )
+                        
+                        // Обновляем кеш
+                        allExpressResultsCache = allExpressResultsCache.map { 
+                            if (it.expId == express.expId) freshExpress else it 
+                        }
+                        allExpressResults = allExpressResults.map { 
+                            if (it.expId == express.expId) freshExpress else it 
+                        }
+                        
+                        // Показываем обновлённые строки
+                        withContext(Dispatchers.Main) {
+                            removeMatchRows(express.expId)
+                            insertMatchRows(freshExpress)
+                        }
+                    } else {
+                        // Если данных нет, используем кеш
+                        withContext(Dispatchers.Main) {
+                            insertMatchRows(express)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Ошибка загрузки данных из БД: ${e.message}")
+                    // Fallback: используем кеш
+                    withContext(Dispatchers.Main) {
+                        insertMatchRows(express)
+                    }
+                }
+            }
         }
     }
     
@@ -994,8 +1039,32 @@ class MainActivity : AppCompatActivity() {
         expresses.forEach { express ->
             layoutDetailContent.addView(buildExpressRow(express))
             if (express.expId in expandedExpressIds) {
-                val fresh = allExpressResultsCache.find { it.expId == express.expId } ?: express
-                insertMatchRows(fresh)
+                // ИСПРАВЛЕНО: при восстановлении раскрытых экспрессов загружаем из БД
+                lifecycleScope.launch {
+                    val freshData = withContext(Dispatchers.IO) {
+                        database.dataDao().getAllData().filter { it.id_exp == express.expId }
+                    }
+                    if (freshData.isNotEmpty()) {
+                        val matchResults = freshData.map { match ->
+                            MatchResult(
+                                matchId = match.m_id,
+                                home = match.home,
+                                away = match.away,
+                                sh = match.sh,
+                                sa = match.sa,
+                                type = match.type,
+                                isWin = false,
+                                liganame = match.liganame,
+                                startkf = match.startkf,
+                                curtime = match.curtime
+                            )
+                        }
+                        val fresh = express.copy(matches = matchResults)
+                        insertMatchRows(fresh)
+                    } else {
+                        insertMatchRows(express)
+                    }
+                }
             }
         }
     }
@@ -1062,7 +1131,7 @@ class MainActivity : AppCompatActivity() {
         synchronized(logLines) { tvLogs.text = logLines.joinToString("\n") }
     }
     
-    // ==================== ЗАГРУЗКА ДАННЫХ ====================
+    // ==================== ЗАГРУЗКА ДАННЫХ (ИСПРАВЛЕНО) ====================
     
     private fun loadData() {
         lifecycleScope.launch {
@@ -1078,7 +1147,14 @@ class MainActivity : AppCompatActivity() {
                     return@launch
                 }
                 
-                val analytics = withContext(Dispatchers.IO) { analyticsEngine.calculateAnalytics() }
+                // Принудительный пересчёт перед загрузкой
+                ScoreUpdateService.requestFullRecalc = true
+                
+                val analytics = withContext(Dispatchers.IO) { 
+                    delay(500) // Ждём пересчёта
+                    analyticsEngine.calculateAnalytics() 
+                }
+                
                 allExpressResultsCache = ((analytics["allExpresses"] as? List<ExpressResult>) ?: emptyList())
                     .sortedByDescending { it.dateTime }
                 
@@ -1107,8 +1183,16 @@ class MainActivity : AppCompatActivity() {
             try {
                 val expCount = withContext(Dispatchers.IO) { database.expDao().getAllExp().size }
                 val dataCount = withContext(Dispatchers.IO) { database.dataDao().getAllData().size }
+                
                 if (expCount > 0 && dataCount > 0) {
-                    val analytics = withContext(Dispatchers.IO) { analyticsEngine.calculateAnalytics() }
+                    // Принудительно пересчитываем аналитику из БД
+                    ScoreUpdateService.requestFullRecalc = true
+                    
+                    val analytics = withContext(Dispatchers.IO) { 
+                        delay(500) // Ждём пересчёта
+                        analyticsEngine.calculateAnalytics() 
+                    }
+                    
                     allExpressResultsCache = ((analytics["allExpresses"] as? List<ExpressResult>) ?: emptyList())
                         .sortedByDescending { it.dateTime }
                     
