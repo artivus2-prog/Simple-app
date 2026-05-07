@@ -111,7 +111,7 @@ class AnalyticsEngine(private val database: AppDatabase) {
                 }
                 
                 // Определяем результат экспресса ТОЛЬКО ПО СЧЁТУ
-                val allHaveScore = matchResults.all { it.sh > 0 || it.sa > 0 }
+                val allHaveScore = matchResults.all { it.curtime > 0 }
                 val hasLosingMatch = matchResults.any { !it.isWin }
                 
                 val allWins = if (allHaveScore) {

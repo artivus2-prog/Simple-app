@@ -157,7 +157,7 @@ class ScoreUpdateService : Service() {
                 val matches = updatedMatches.filter { it.id_exp == exp.id_exp }
                 if (matches.isEmpty()) return@map exp
 
-                val allHaveScore = matches.all { it.curtime > 1 }
+                val allHaveScore = matches.all { it.curtime > 0 }
                 val newStsAll = if (allHaveScore) {
                     if (matches.all { isMatchWin(it.sh, it.sa, it.type) }) 2 else -1
                 } else {

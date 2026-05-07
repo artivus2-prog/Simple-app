@@ -424,7 +424,7 @@ class MainActivity : AppCompatActivity() {
                 928 -> (match.sa + 1.5) > match.sh
                 else -> match.sh >= match.sa
             }
-            !isWin && (match.sh >= 0 || match.sa >= 0)
+            !isWin && match.curtime > 0
         }) return true
 
         if (!isLive(express)) return true
