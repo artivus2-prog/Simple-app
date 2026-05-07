@@ -246,30 +246,26 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun isExpressFinished(express: ExpressResult): Boolean {
-        // 1. Есть проигравший матч (был счёт > 0 и не зашёл по формуле) — сразу завершён
-        if (express.matches.any { match ->
-            val isWin = when (match.type) {
-                924 -> match.sh >= match.sa
-                927 -> (match.sh + 1.5) > match.sa
-                928 -> (match.sa + 1.5) >= match.sh
-                else -> match.sh >= match.sa
-            }
-            !isWin && (match.sh > 0 || match.sa > 0)
-        }) return true
-        
-        // 2. Есть активный матч (curtime 1..99) — экспресс не завершён
-        if (express.matches.any { isMatchActive(it) }) return false
-        
-        // 3. CT старше LIVE_HOURS и нет активных матчей — завершён
-        if (!isLive(express)) return true
-        
-        // 4. CT свежий, у всех матчей curtime = 0 или >= 100, нет проигравших — проверяем:
-        //    если у всех curtime >= 100 — завершён выигрышем
-        //    если у кого-то curtime = 0 — ещё ждём
-        if (express.matches.all { it.curtime >= 100 }) return true
-        
-        return false
-    }
+    // 1. Есть проигравший матч (был счёт > 0 и не зашёл по формуле) — сразу завершён
+    if (express.matches.any { match ->
+        val isWin = when (match.type) {
+            924 -> match.sh >= match.sa
+            927 -> (match.sh + 1.5) > match.sa
+            928 -> (match.sa + 1.5) > match.sh
+            else -> match.sh >= match.sa
+        }
+        !isWin && (match.sh >= 0 || match.sa >= 0)
+    }) return true
+
+    // 2. CT старше 2 часов — всегда завершён
+    if (!isLive(express)) return true
+
+    // 3. Есть активный матч (curtime 1..99) — не завершён
+    if (express.matches.any { it.curtime in 1..99 }) return false
+
+    // 4. Все матчи завершены (curtime >= 100 или curtime == 0 без данных)
+    return true
+}
     
     private fun isLive(express: ExpressResult): Boolean {
         val now = LocalDateTime.now()
