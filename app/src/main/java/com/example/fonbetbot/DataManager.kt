@@ -21,7 +21,33 @@ class DataManager(private val database: AppDatabase) {
         val newExpIds: List<Int> = emptyList()
     )
     
-    suspend fun importBets(bets: List<BetData>): ImportResult {
+    /**
+     * Проверяет, есть ли хотя бы один матч из списка в базе
+     * @return true если есть дубликаты
+     */
+    suspend fun hasDuplicates(bets: List<ApiClient.BetData>): Boolean {
+        return withContext(Dispatchers.IO) {
+            val existingData = database.dataDao().getAllData()
+            val existingMIds = existingData.map { it.m_id }.toSet()
+            
+            bets.any { bet -> bet.mId.toLong() in existingMIds }
+        }
+    }
+    
+    /**
+     * Проверяет и считает количество дубликатов
+     * @return количество дубликатов
+     */
+    suspend fun countDuplicates(bets: List<ApiClient.BetData>): Int {
+        return withContext(Dispatchers.IO) {
+            val existingData = database.dataDao().getAllData()
+            val existingMIds = existingData.map { it.m_id }.toSet()
+            
+            bets.count { bet -> bet.mId.toLong() in existingMIds }
+        }
+    }
+    
+    suspend fun importBets(bets: List<ApiClient.BetData>): ImportResult {
         return withContext(Dispatchers.IO) {
             var newExpressCount = 0
             var newMatchCount = 0
@@ -46,7 +72,7 @@ class DataManager(private val database: AppDatabase) {
             var nextExpId = maxExpId + 1
             
             // Все полученные матчи = 1 экспресс (1-4 матча)
-            val newBets = bets.filter { bet -> bet.m_id !in processedMIds }
+            val newBets = bets.filter { bet -> bet.mId.toLong() !in processedMIds }
             
             if (newBets.isEmpty()) {
                 return@withContext ImportResult(0, 0, bets.size, bets.size)
@@ -60,30 +86,30 @@ class DataManager(private val database: AppDatabase) {
                     DataEntity(
                         id = currentDataId++,
                         id_exp = currentExpId,
-                        m_id = bet.m_id,
-                        id_liga = bet.id_liga,
-                        liganame = bet.liganame,
-                        id_home = bet.comand1id,
+                        m_id = bet.mId.toLong(),
+                        id_liga = bet.idLiga,
+                        liganame = bet.ligaName,
+                        id_home = bet.comand1Id.toLong(),
                         home = bet.home,
-                        id_away = bet.comand2id,
+                        id_away = bet.comand2Id.toLong(),
                         away = bet.away,
-                        startkf = bet.startkf,
-                        lastkf = bet.lastkf,
-                        curtime = bet.curtime,
+                        startkf = bet.startKf,
+                        lastkf = bet.lastKf,
+                        curtime = bet.matchTime,
                         sh = bet.sh,
                         sa = bet.sa,
                         type = bet.type,
                         sts = bet.sts,
                         url = bet.url,
                         uzh = bet.uzh.toString(),
-                        tbtype = bet.tbtype
+                        tbtype = bet.tbType
                     )
                 )
-                processedMIds.add(bet.m_id)
+                processedMIds.add(bet.mId.toLong())
             }
             
             val kfall = if (newBets.isNotEmpty()) {
-                newBets.map { it.lastkf }.reduce { acc, kf -> acc * kf }
+                newBets.map { it.lastKf }.reduce { acc, kf -> acc * kf }
             } else 0.0
             
             newExpEntities.add(

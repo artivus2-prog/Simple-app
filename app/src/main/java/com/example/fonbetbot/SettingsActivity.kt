@@ -21,6 +21,8 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var etType928Min: EditText
     private lateinit var etType928Max: EditText
     private lateinit var etTimeout: EditText
+    private lateinit var etMaxActiveExp: EditText
+    private lateinit var etMaxMatches: EditText
     private lateinit var btnSave: Button
     private lateinit var btnReset: Button
     private lateinit var btnBack: Button
@@ -35,6 +37,8 @@ class SettingsActivity : AppCompatActivity() {
         const val KEY_TYPE_928_MIN = "type_928_min"
         const val KEY_TYPE_928_MAX = "type_928_max"
         const val KEY_TIMEOUT = "timeout"
+        const val KEY_MAX_ACTIVE_EXP = "max_active_exp"
+        const val KEY_MAX_MATCHES = "max_matches"
 
         // Значения по умолчанию
         const val DEFAULT_ALL_MIN_KEF = 1.67
@@ -45,6 +49,8 @@ class SettingsActivity : AppCompatActivity() {
         const val DEFAULT_TYPE_928_MIN = 1.15
         const val DEFAULT_TYPE_928_MAX = 1.50
         const val DEFAULT_TIMEOUT = 60
+        const val DEFAULT_MAX_ACTIVE_EXP = 5
+        const val DEFAULT_MAX_MATCHES = 2
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -61,6 +67,8 @@ class SettingsActivity : AppCompatActivity() {
         etType928Min = findViewById(R.id.et_type_928_min)
         etType928Max = findViewById(R.id.et_type_928_max)
         etTimeout = findViewById(R.id.et_timeout)
+        etMaxActiveExp = findViewById(R.id.et_max_active_exp)
+        etMaxMatches = findViewById(R.id.et_max_matches)
         btnSave = findViewById(R.id.btn_save)
         btnReset = findViewById(R.id.btn_reset)
         btnBack = findViewById(R.id.btn_back)
@@ -81,6 +89,8 @@ class SettingsActivity : AppCompatActivity() {
         etType928Min.setText(prefs.getFloat(KEY_TYPE_928_MIN, DEFAULT_TYPE_928_MIN.toFloat()).toString())
         etType928Max.setText(prefs.getFloat(KEY_TYPE_928_MAX, DEFAULT_TYPE_928_MAX.toFloat()).toString())
         etTimeout.setText(prefs.getInt(KEY_TIMEOUT, DEFAULT_TIMEOUT).toString())
+        etMaxActiveExp.setText(prefs.getInt(KEY_MAX_ACTIVE_EXP, DEFAULT_MAX_ACTIVE_EXP).toString())
+        etMaxMatches.setText(prefs.getInt(KEY_MAX_MATCHES, DEFAULT_MAX_MATCHES).toString())
     }
 
     private fun saveSettings() {
@@ -94,6 +104,8 @@ class SettingsActivity : AppCompatActivity() {
                 .putFloat(KEY_TYPE_928_MIN, etType928Min.text.toString().toFloat())
                 .putFloat(KEY_TYPE_928_MAX, etType928Max.text.toString().toFloat())
                 .putInt(KEY_TIMEOUT, etTimeout.text.toString().toInt())
+                .putInt(KEY_MAX_ACTIVE_EXP, etMaxActiveExp.text.toString().toInt())
+                .putInt(KEY_MAX_MATCHES, etMaxMatches.text.toString().toInt())
                 .apply()
 
             Toast.makeText(this, "Настройки сохранены", Toast.LENGTH_SHORT).show()
@@ -111,6 +123,8 @@ class SettingsActivity : AppCompatActivity() {
         etType928Min.setText(DEFAULT_TYPE_928_MIN.toString())
         etType928Max.setText(DEFAULT_TYPE_928_MAX.toString())
         etTimeout.setText(DEFAULT_TIMEOUT.toString())
+        etMaxActiveExp.setText(DEFAULT_MAX_ACTIVE_EXP.toString())
+        etMaxMatches.setText(DEFAULT_MAX_MATCHES.toString())
         Toast.makeText(this, "Сброшено на значения по умолчанию", Toast.LENGTH_SHORT).show()
     }
 }

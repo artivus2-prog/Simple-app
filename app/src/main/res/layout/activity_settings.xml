@@ -296,6 +296,50 @@
             android:padding="12dp"
             android:inputType="number"
             android:gravity="center"
+            android:layout_marginBottom="16dp" />
+
+        <!-- Максимальное количество одновременно активных экспрессов -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Максимум одновременно активных экспрессов"
+            android:textSize="13sp"
+            android:textColor="#EAECEF"
+            android:layout_marginBottom="8dp" />
+
+        <EditText
+            android:id="@+id/et_max_active_exp"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="5"
+            android:textSize="14sp"
+            android:textColor="#EAECEF"
+            android:background="#1E2329"
+            android:padding="12dp"
+            android:inputType="number"
+            android:gravity="center"
+            android:layout_marginBottom="16dp" />
+
+        <!-- Максимальное количество матчей в экспрессе -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Максимум матчей в экспрессе"
+            android:textSize="13sp"
+            android:textColor="#EAECEF"
+            android:layout_marginBottom="8dp" />
+
+        <EditText
+            android:id="@+id/et_max_matches"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="2"
+            android:textSize="14sp"
+            android:textColor="#EAECEF"
+            android:background="#1E2329"
+            android:padding="12dp"
+            android:inputType="number"
+            android:gravity="center"
             android:layout_marginBottom="24dp" />
 
         <!-- Кнопки -->

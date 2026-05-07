@@ -1,10 +1,12 @@
-﻿// MainActivity.kt — ПОЛНАЯ ФИНАЛЬНАЯ ВЕРСИЯ
+﻿// MainActivity.kt — ПОЛНАЯ ВЕРСИЯ С АВТООПРОСОМ GETBETS
 // Матч активен: curtime > 0 и < 100, или curtime = 0 и CT <= 2ч
 // Экспресс завершён: есть проигравший, или все матчи завершены и CT > 2ч
 // Колонка m_id с редактированием, 0:0 валидный счёт
 package com.example.fonbetbot
 
+import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
@@ -40,6 +42,13 @@ class MainActivity : AppCompatActivity() {
     private var allExpressResults = listOf<ExpressResult>()
     private var allExpressResultsCache = listOf<ExpressResult>()
     
+    // Новые поля для API и таймера
+    private lateinit var apiClient: ApiClient
+    private lateinit var dataManager: DataManager
+    private lateinit var settingsPrefs: SharedPreferences
+    private var betRequestJob: Job? = null
+    private var isGettingBets = false
+    
     private val PAGE_SIZE = 30
     private var currentPage = 0
     private var isLoading = false
@@ -69,6 +78,22 @@ class MainActivity : AppCompatActivity() {
         private const val COLOR_MATCH_BG = "#161A1E"
         private const val COLOR_MATCH_HEADER_BG = "#1A1F26"
         private const val COLOR_GRID = "#2B3139"
+        
+        // Настройки
+        const val PREFS_NAME = "bet_settings"
+        const val KEY_ALL_MIN_KEF = "all_min_kef"
+        const val KEY_TYPE_924_MIN = "type_924_min"
+        const val KEY_TYPE_924_MAX = "type_924_max"
+        const val KEY_TYPE_927_MIN = "type_927_min"
+        const val KEY_TYPE_927_MAX = "type_927_max"
+        const val KEY_TYPE_928_MIN = "type_928_min"
+        const val KEY_TYPE_928_MAX = "type_928_max"
+        const val KEY_MAX_ACTIVE_EXP = "max_active_exp"
+        const val KEY_MAX_MATCHES = "max_matches"
+        const val KEY_TIMEOUT = "timeout"
+        
+        const val CLIENT_ID = 18845703L
+        const val DEFAULT_TIMEOUT = 60
     }
     
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -87,12 +112,17 @@ class MainActivity : AppCompatActivity() {
         tvFilterLabel = findViewById(R.id.tv_filter_label)
         btnSettings = findViewById(R.id.btn_settings)
         
+        // Инициализация новых компонентов
+        apiClient = ApiClient()
+        settingsPrefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        
         btnSettings.setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
         
         database = AppDatabase.getDatabase(this)
         analyticsEngine = AnalyticsEngine(database)
+        dataManager = DataManager(database)
         
         btnAnalytics.setOnClickListener {
             addLog("Переход в Аналитику")
@@ -120,6 +150,7 @@ class MainActivity : AppCompatActivity() {
         addLog("MainActivity создана")
         loadData()
         startScoreService()
+        startBetPolling()
     }
     
     override fun onResume() {
@@ -131,6 +162,11 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 updateMatchDisplay(mId, sh, sa, minute)
             }
+        }
+        
+        // Перезапускаем опрос если был остановлен
+        if (betRequestJob?.isActive != true) {
+            startBetPolling()
         }
     }
     
@@ -145,7 +181,143 @@ class MainActivity : AppCompatActivity() {
     
     override fun onDestroy() {
         super.onDestroy()
+        betRequestJob?.cancel()
         scoreServiceIntent?.let { stopService(it) }
+    }
+    
+    // ========== АВТООПРОС GETBETS ==========
+    
+    private fun startBetPolling() {
+        betRequestJob?.cancel()
+        betRequestJob = lifecycleScope.launch {
+            while (isActive) {
+                val timeoutSeconds = settingsPrefs.getInt(KEY_TIMEOUT, DEFAULT_TIMEOUT)
+                addLog("⏰ Следующий запрос getBets через ${timeoutSeconds}с")
+                
+                delay(timeoutSeconds * 1000L)
+                
+                if (!isGettingBets) {
+                    requestBets()
+                } else {
+                    addLog("⏳ Предыдущий запрос ещё выполняется, пропускаем цикл")
+                }
+            }
+        }
+    }
+    
+    private suspend fun requestBets() {
+        isGettingBets = true
+        
+        try {
+            // 1. Проверяем лимит активных экспрессов
+            val maxActive = settingsPrefs.getInt(KEY_MAX_ACTIVE_EXP, 5)
+            val activeCount = withContext(Dispatchers.IO) {
+                allExpressResultsCache.count { !isExpressFinished(it) }
+            }
+            
+            addLog("📊 Активных экспрессов: $activeCount/$maxActive")
+            
+            if (activeCount >= maxActive) {
+                addLog("⚠️ Достигнут лимит активных экспрессов ($maxActive). Ожидание завершения...")
+                return
+            }
+            
+            // 2. Формируем настройки
+            val settings = buildBetSettings()
+            addLog("📡 Отправка запроса getBets...")
+            addLog("   Матчей макс: ${settings.maxMatchesPerExpress}, Кэф мин: ${settings.allMinKef}")
+            
+            // 3. Выполняем запрос
+            val bets = withContext(Dispatchers.IO) {
+                suspendCancellableCoroutine<List<ApiClient.BetData>> { continuation ->
+                    apiClient.getBets(
+                        userId = CLIENT_ID,
+                        settings = settings,
+                        onSuccess = { bets -> continuation.resume(bets) {} },
+                        onError = { error -> continuation.resumeWith(Result.failure(Exception(error))) }
+                    )
+                }
+            }
+            
+            addLog("📥 Получено матчей от сервера: ${bets.size}")
+            
+            if (bets.isEmpty()) {
+                addLog("ℹ️ Сервер не вернул новых ставок")
+                return
+            }
+            
+            // 4. Проверяем дубликаты по m_id
+            val duplicateCount = withContext(Dispatchers.IO) {
+                dataManager.countDuplicates(bets)
+            }
+            
+            if (duplicateCount > 0) {
+                addLog("🔄 Найдено дубликатов: $duplicateCount/${bets.size} — экспресс пропущен")
+                return
+            }
+            
+            addLog("✅ Все ${bets.size} матчей новые, импортируем...")
+            
+            // 5. Импортируем в БД
+            val importResult = withContext(Dispatchers.IO) {
+                dataManager.importBets(bets)
+            }
+            
+            addLog("✅ Импортирован ${importResult.newExpressCount} экспресс с ${importResult.newMatchCount} матчами")
+            addLog("   Новые ID экспрессов: ${importResult.newExpIds}")
+            
+            // 6. Обновляем интерфейс
+            ScoreUpdateService.requestFullRecalc = true
+            refreshData()
+            
+        } catch (e: Exception) {
+            addLog("❌ Ошибка getBets: ${e.message}")
+            Log.e(TAG, "Ошибка getBets", e)
+        } finally {
+            isGettingBets = false
+        }
+    }
+    
+    private fun buildBetSettings(): ApiClient.BetSettings {
+        val maxMatches = settingsPrefs.getInt(KEY_MAX_MATCHES, 2)
+        val allMinKef = settingsPrefs.getFloat(KEY_ALL_MIN_KEF, 1.67f).toDouble()
+        val maxActive = settingsPrefs.getInt(KEY_MAX_ACTIVE_EXP, 5)
+        
+        val type924Settings = ApiClient.TypeSettings(
+            name = "1х/футбол/хоккей",
+            minBet = settingsPrefs.getFloat(KEY_TYPE_924_MIN, 1.15f).toDouble(),
+            maxBet = settingsPrefs.getFloat(KEY_TYPE_924_MAX, 1.50f).toDouble(),
+            monitorStart = 80,
+            monitorEnd = 100
+        )
+        
+        val type927Settings = ApiClient.TypeSettings(
+            name = "ф1(+1.5)/футбол/хоккей",
+            minBet = settingsPrefs.getFloat(KEY_TYPE_927_MIN, 1.15f).toDouble(),
+            maxBet = settingsPrefs.getFloat(KEY_TYPE_927_MAX, 1.50f).toDouble(),
+            monitorStart = 1,
+            monitorEnd = 45
+        )
+        
+        val type928Settings = ApiClient.TypeSettings(
+            name = "ф2(+1.5)/футбол/хоккей",
+            minBet = settingsPrefs.getFloat(KEY_TYPE_928_MIN, 1.15f).toDouble(),
+            maxBet = settingsPrefs.getFloat(KEY_TYPE_928_MAX, 1.50f).toDouble(),
+            monitorStart = 1,
+            monitorEnd = 45
+        )
+        
+        return ApiClient.BetSettings(
+            maxMatchesPerExpress = maxMatches,
+            multiply = 2,
+            allMinKef = allMinKef,
+            maxActiveExpresses = maxActive,
+            types = mapOf(
+                924 to type924Settings,
+                927 to type927Settings,
+                928 to type928Settings
+            )
+        )
     }
     
     // ========== ФОНОВЫЙ СЕРВИС ==========
@@ -241,31 +413,26 @@ class MainActivity : AppCompatActivity() {
     // ========== ПРОВЕРКА ЗАВЕРШЁННОСТИ ==========
     
     private fun isMatchActive(match: MatchResult): Boolean {
-        // Матч активен если curtime > 0 и < 100 (игра идёт)
         return match.curtime in 1..99
     }
     
     private fun isExpressFinished(express: ExpressResult): Boolean {
-    // 1. Есть проигравший матч (был счёт > 0 и не зашёл по формуле) — сразу завершён
-    if (express.matches.any { match ->
-        val isWin = when (match.type) {
-            924 -> match.sh >= match.sa
-            927 -> (match.sh + 1.5) > match.sa
-            928 -> (match.sa + 1.5) > match.sh
-            else -> match.sh >= match.sa
-        }
-        !isWin && (match.sh >= 0 || match.sa >= 0)
-    }) return true
+        if (express.matches.any { match ->
+            val isWin = when (match.type) {
+                924 -> match.sh >= match.sa
+                927 -> (match.sh + 1.5) > match.sa
+                928 -> (match.sa + 1.5) > match.sh
+                else -> match.sh >= match.sa
+            }
+            !isWin && (match.sh >= 0 || match.sa >= 0)
+        }) return true
 
-    // 2. CT старше 2 часов — всегда завершён
-    if (!isLive(express)) return true
+        if (!isLive(express)) return true
 
-    // 3. Есть активный матч (curtime 1..99) — не завершён
-    if (express.matches.any { it.curtime in 1..99 }) return false
+        if (express.matches.any { it.curtime in 1..99 }) return false
 
-    // 4. Все матчи завершены (curtime >= 100 или curtime == 0 без данных)
-    return true
-}
+        return true
+    }
     
     private fun isLive(express: ExpressResult): Boolean {
         val now = LocalDateTime.now()
