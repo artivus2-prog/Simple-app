@@ -1,4 +1,4 @@
-﻿// MainActivity.kt — С ПЕРЕКЛЮЧАТЕЛЕМ АКТИВНЫЕ/ВСЕ
+﻿// MainActivity.kt — С ПЕРЕКЛЮЧАТЕЛЕМ АКТИВНЫЕ/ВСЕ (ИСПРАВЛЕННЫЙ)
 package com.example.fonbetbot
 
 import android.app.AlertDialog
@@ -246,7 +246,6 @@ class MainActivity : AppCompatActivity() {
                     scrollView.post { scrollView.scrollTo(0, savedScrollY) }
                 }
                 
-                // Обновляем заголовок
                 updateTitle()
                 
             } catch (e: Exception) {
@@ -313,14 +312,12 @@ class MainActivity : AppCompatActivity() {
             "${it.home.take(6)}-${it.away.take(6)} ${it.sh}:${it.sa}" 
         }
         
-        // Вычисляем оставшееся время для активных
         val timeInfo = if (status == ExpressStatus.ACTIVE) {
             val now = LocalDateTime.now()
             val minutesUntilFinish = ChronoUnit.MINUTES.between(now, express.dateTime.plusHours(ACTIVE_HOURS))
             if (minutesUntilFinish > 0) " (${minutesUntilFinish}м)" else ""
         } else ""
         
-        // ID (кликабельный для раскрытия)
         row.addView(TextView(this).apply {
             text = "$idPrefix #${express.expId}"
             textSize = 10f
@@ -333,7 +330,6 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { toggleExpress(express) }
         })
         
-        // Дата (кликабельная для редактирования)
         row.addView(TextView(this).apply {
             text = dateStr
             textSize = 10f
@@ -347,7 +343,6 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { showDatePicker(express) }
         })
         
-        // Время (кликабельное для редактирования)
         row.addView(TextView(this).apply {
             text = timeStr
             textSize = 10f
@@ -361,7 +356,6 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { showTimePicker(express) }
         })
         
-        // Коэффициент
         row.addView(TextView(this).apply {
             text = kfStr
             textSize = 10f
@@ -373,7 +367,6 @@ class MainActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(dp(60), ViewGroup.LayoutParams.WRAP_CONTENT)
         })
         
-        // Статус с оставшимся временем
         row.addView(TextView(this).apply {
             text = if (status == ExpressStatus.ACTIVE) "⚡ $statusText$timeInfo" else statusText
             textSize = 9f
@@ -386,7 +379,6 @@ class MainActivity : AppCompatActivity() {
             tag = "status_${express.expId}"
         })
         
-        // Матчи
         row.addView(TextView(this).apply {
             text = matchesShort
             textSize = 10f
@@ -409,7 +401,6 @@ class MainActivity : AppCompatActivity() {
         val statusText = getStatusText(status)
         val statusColor = getStatusColor(status)
         
-        // Заголовок с информацией о статусе и кнопкой удаления
         views.add(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(dp(totalWidth), ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -426,7 +417,6 @@ class MainActivity : AppCompatActivity() {
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             })
             
-            // Время создания
             addView(TextView(this@MainActivity).apply {
                 text = express.dateTime.format(DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm"))
                 textSize = 9f
@@ -436,7 +426,6 @@ class MainActivity : AppCompatActivity() {
                 layoutParams = LinearLayout.LayoutParams(dp(130), ViewGroup.LayoutParams.WRAP_CONTENT)
             })
             
-            // Кнопка удаления экспресса
             addView(Button(this@MainActivity).apply {
                 text = "✕"
                 textSize = 12f
@@ -462,21 +451,14 @@ class MainActivity : AppCompatActivity() {
         })
         
         for (match in express.matches) {
-            val scoreText: String = if (match.sh > 0 || match.sa > 0) {
-                "${match.sh}:${match.sa}"
-            } else {
-                "—"
-            }
-            
+            val scoreText: String = if (match.sh > 0 || match.sa > 0) "${match.sh}:${match.sa}" else "—"
             val kfText: String = String.format("%.2f", match.startkf)
-            
             val typeText: String = when (match.type) {
                 924 -> "1X"
                 927 -> "Ф1(+1.5)"
                 928 -> "Ф2(+1.5)"
                 else -> "Т${match.type}"
             }
-            
             val ligaInfoText: String = match.liganame.take(40)
             
             views.add(LinearLayout(this).apply {
@@ -538,7 +520,6 @@ class MainActivity : AppCompatActivity() {
     
     private fun showDatePicker(express: ExpressResultSimplified) {
         val currentDate = express.dateTime.toLocalDate()
-        
         DatePickerDialog(
             this,
             { _, year, month, dayOfMonth ->
@@ -554,7 +535,6 @@ class MainActivity : AppCompatActivity() {
     
     private fun showTimePicker(express: ExpressResultSimplified) {
         val currentTime = express.dateTime.toLocalTime()
-        
         TimePickerDialog(
             this,
             { _, hourOfDay, minute ->
@@ -623,10 +603,7 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle("Удалить матч?")
             .setMessage("${match.home} vs ${match.away}\nСчёт: ${match.sh}:${match.sa}")
-            .setPositiveButton("Удалить") { dialog, _ ->
-                deleteMatch(match.matchId)
-                dialog.dismiss()
-            }
+            .setPositiveButton("Удалить") { dialog, _ -> deleteMatch(match.matchId); dialog.dismiss() }
             .setNegativeButton("Отмена") { dialog, _ -> dialog.dismiss() }
             .show()
     }
@@ -635,10 +612,7 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle("Удалить экспресс #${express.expId}?")
             .setMessage("Будут удалены все матчи этого экспресса\nСтатус: ${getStatusText(getExpressStatus(express))}")
-            .setPositiveButton("Удалить") { dialog, _ ->
-                deleteExpress(express.expId)
-                dialog.dismiss()
-            }
+            .setPositiveButton("Удалить") { dialog, _ -> deleteExpress(express.expId); dialog.dismiss() }
             .setNegativeButton("Отмена") { dialog, _ -> dialog.dismiss() }
             .show()
     }
@@ -651,20 +625,11 @@ class MainActivity : AppCompatActivity() {
                 withContext(Dispatchers.IO) {
                     val allExp = database.expDao().getAllExp()
                     val newCtString = newDateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
-                    
-                    val updated = allExp.map { 
-                        if (it.id_exp == expId) it.copy(ct = newCtString) else it 
-                    }
+                    val updated = allExp.map { if (it.id_exp == expId) it.copy(ct = newCtString) else it }
                     database.expDao().deleteAll()
                     database.expDao().insertAll(updated)
                 }
-                
-                val newStatus = if (ChronoUnit.HOURS.between(newDateTime, LocalDateTime.now()) < ACTIVE_HOURS) {
-                    "АКТИВЕН"
-                } else {
-                    "ЗАВЕРШЁН"
-                }
-                
+                val newStatus = if (ChronoUnit.HOURS.between(newDateTime, LocalDateTime.now()) < ACTIVE_HOURS) "АКТИВЕН" else "ЗАВЕРШЁН"
                 addLog("✅ Экспресс #$expId: ${newDateTime.format(DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm"))} → $newStatus")
                 refreshData()
             } catch (e: Exception) {
@@ -678,9 +643,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 withContext(Dispatchers.IO) {
                     val allData = database.dataDao().getAllData()
-                    val updated = allData.map { 
-                        if (it.m_id == matchId) it.copy(sh = newSh, sa = newSa) else it 
-                    }
+                    val updated = allData.map { if (it.m_id == matchId) it.copy(sh = newSh, sa = newSa) else it }
                     database.dataDao().deleteAll()
                     database.dataDao().insertAll(updated)
                 }
@@ -715,10 +678,8 @@ class MainActivity : AppCompatActivity() {
                 withContext(Dispatchers.IO) {
                     val allData = database.dataDao().getAllData()
                     val allExp = database.expDao().getAllExp()
-                    
                     val updatedData = allData.filter { it.id_exp != expId }
                     val updatedExp = allExp.filter { it.id_exp != expId }
-                    
                     database.dataDao().deleteAll()
                     database.dataDao().insertAll(updatedData)
                     database.expDao().deleteAll()
@@ -780,9 +741,7 @@ class MainActivity : AppCompatActivity() {
         if (currentPage == 0) layoutDetailContent.addView(buildHeaderRow())
         expresses.forEach { express ->
             layoutDetailContent.addView(buildExpressRow(express))
-            if (express.expId in expandedExpressIds) {
-                insertMatchRows(express)
-            }
+            if (express.expId in expandedExpressIds) insertMatchRows(express)
         }
     }
     
@@ -846,7 +805,6 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             try {
                 tvDetailTitle.text = "Загрузка..."
-                
                 val expCount = withContext(Dispatchers.IO) { database.expDao().getAllExp().size }
                 val dataCount = withContext(Dispatchers.IO) { database.dataDao().getAllData().size }
                 
@@ -859,20 +817,15 @@ class MainActivity : AppCompatActivity() {
                 val analytics = withContext(Dispatchers.IO) { analyticsEngine.calculateAnalytics() }
                 allExpressResultsCache = ((analytics["allExpresses"] as? List<ExpressResultSimplified>) ?: emptyList())
                 
-                // Применяем фильтр
                 allExpressResults = if (showOnlyActive) {
                     allExpressResultsCache.filter { getExpressStatus(it) == ExpressStatus.ACTIVE }
                 } else {
                     allExpressResultsCache
                 }
                 
-                if (savedExpandedIds != null) {
-                    expandedExpressIds.addAll(savedExpandedIds!!)
-                }
-                
+                if (savedExpandedIds != null) expandedExpressIds.addAll(savedExpandedIds!!)
                 resetPagination()
                 loadExpressPage()
-                
             } catch (e: Exception) {
                 Log.e(TAG, "Ошибка", e)
                 tvDetailTitle.text = "Ошибка: ${e.message}"
@@ -889,7 +842,6 @@ class MainActivity : AppCompatActivity() {
                     val analytics = withContext(Dispatchers.IO) { analyticsEngine.calculateAnalytics() }
                     allExpressResultsCache = ((analytics["allExpresses"] as? List<ExpressResultSimplified>) ?: emptyList())
                     
-                    // Применяем фильтр
                     allExpressResults = if (showOnlyActive) {
                         allExpressResultsCache.filter { getExpressStatus(it) == ExpressStatus.ACTIVE }
                     } else {
