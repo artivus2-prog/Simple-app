@@ -829,7 +829,7 @@ class MainActivity : AppCompatActivity() {
             
             val currentMinute = matchMinutesMap[match.matchId] ?: match.curtime
             
-            val hasScoreData = (match.sh > 0 || match.sa > 0) || (match.sh == 0 && match.sa == 0 && match.curtime > 0)
+            val hasScoreData = match.curtime > 0
             val scoreText: String = if (hasScoreData) {
                 if (currentMinute in 1..125) {
                     "${match.sh}:${match.sa} (${currentMinute}')"
