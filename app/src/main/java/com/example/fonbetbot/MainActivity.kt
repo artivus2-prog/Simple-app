@@ -4,6 +4,8 @@
 // Матч активен: curtime 1..125
 // Экспресс завершён: есть проигравший, или все матчи завершены и CT > 2ч
 // Исправлен дубляж матчей при повторном раскрытии экспресса
+// Добавлено подтверждение выхода по кнопке Назад
+// Экран не гаснет при открытом приложении
 package com.example.fonbetbot
 
 import android.content.Context
@@ -69,6 +71,8 @@ class MainActivity : AppCompatActivity() {
     
     private val matchMinutesMap = mutableMapOf<Long, Int>()
     
+    private var backPressedTime: Long = 0
+    
     companion object {
         private const val TAG = "MainActivity"
         private const val COLOR_GREEN = "#03A66D"
@@ -105,6 +109,10 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        
+        // Не даём экрану гаснуть пока приложение открыто
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        
         requestBackgroundPermissions()
         scrollView = findViewById(R.id.scroll_view)
         layoutDetailTable = findViewById(R.id.layout_detail_table)
@@ -187,6 +195,20 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         betRequestJob?.cancel()
         scoreServiceIntent?.let { stopService(it) }
+        // Убираем флаг при уничтожении
+        window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+    
+    override fun onBackPressed() {
+        if (backPressedTime + 2000 > System.currentTimeMillis()) {
+            // Повторное нажатие в течение 2 секунд — выходим
+            super.onBackPressed()
+            finishAffinity()
+        } else {
+            // Первое нажатие — показываем подсказку
+            backPressedTime = System.currentTimeMillis()
+            Toast.makeText(this, "Нажмите ещё раз для выхода", Toast.LENGTH_SHORT).show()
+        }
     }
     
     // ==================== АВТООПРОС GETBETS ====================
@@ -412,7 +434,6 @@ class MainActivity : AppCompatActivity() {
     // ==================== ПРОВЕРКА ЗАВЕРШЁННОСТИ ====================
     
     private fun isExpressFinished(express: ExpressResult): Boolean {
-        // 1. Проигравший матч — экспресс завершён
         if (express.matches.any { match ->
             val isWin = when (match.type) {
                 924 -> match.sh >= match.sa
@@ -423,13 +444,10 @@ class MainActivity : AppCompatActivity() {
             !isWin && match.curtime > 0
         }) return true
 
-        // 2. Экспресс старше LIVE_HOURS — завершён
         if (!isLive(express)) return true
 
-        // 3. Матч в игре — экспресс активен
         if (express.matches.any { it.curtime in 1..125 }) return false
 
-        // 4. Все матчи имеют счёт — завершён
         val allHaveScore = express.matches.all { it.curtime > 0 }
         if (allHaveScore) return true
         
@@ -846,7 +864,6 @@ class MainActivity : AppCompatActivity() {
             
             val ligaInfoText: String = "#${match.matchId} | ${match.liganame.take(35)} | $resultText"
             
-            // Строка матча
             views.add(LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 layoutParams = LinearLayout.LayoutParams(dp(totalWidth), ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -878,7 +895,6 @@ class MainActivity : AppCompatActivity() {
                 addView(matchDataTv(typeShort, 90, "#848E9C", 10f, false))
             })
             
-            // Строка с информацией о лиге
             views.add(LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 layoutParams = LinearLayout.LayoutParams(dp(totalWidth), ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -888,7 +904,6 @@ class MainActivity : AppCompatActivity() {
             })
         }
         
-        // Разделитель
         views.add(View(this).apply {
             layoutParams = LinearLayout.LayoutParams(dp(totalWidth), dp(2))
             setBackgroundColor(Color.parseColor(COLOR_GRID))
@@ -924,14 +939,11 @@ class MainActivity : AppCompatActivity() {
         val index = layoutDetailContent.indexOfChild(row)
         if (index == -1) return
         
-        // Сначала удаляем все существующие строки матчей этого экспресса
         removeMatchRows(express.expId)
         
-        // Находим актуальный индекс после удаления
         val updatedIndex = layoutDetailContent.indexOfChild(row)
         if (updatedIndex == -1) return
         
-        // Добавляем новые строки матчей
         buildMatchDetailRows(express).forEachIndexed { i, v ->
             layoutDetailContent.addView(v, updatedIndex + 1 + i)
         }
@@ -943,7 +955,6 @@ class MainActivity : AppCompatActivity() {
             val child = layoutDetailContent.getChildAt(i)
             val tag = child.tag as? String ?: continue
             
-            // Удаляем все строки, связанные с этим экспрессом
             if (tag.startsWith("match_header_$expId") ||
                 tag.startsWith("match_subheader_$expId") ||
                 tag.startsWith("match_${expId}_") ||
