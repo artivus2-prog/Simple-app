@@ -3,6 +3,7 @@
 // WakeLock продлевается каждые 30 секунд
 // Полный пересчёт только при старте и ручных изменениях
 // Цикл: только активные матчи (CT >= сейчас - 2ч)
+// Минута матча не сохраняется в БД, только счёт
 package com.example.fonbetbot
 
 import android.app.Notification
@@ -299,7 +300,7 @@ class ScoreUpdateService : Service() {
                                         updatedCount++
                                         Log.d("ScoreUpdate", "📝 m_id=${match.m_id}: ${match.sh}:${match.sa} → ${factors.score1}:${factors.score2}")
                                     }
-                                    // Отправляем обновление в UI (даже если счёт не изменился, минута могла измениться)
+                                    // Отправляем обновление в UI (минуту тоже передаём, но в БД не сохраняем)
                                     onScoreUpdated?.invoke(
                                         match.m_id, 
                                         if (factors.score1 >= 0) factors.score1 else match.sh,
@@ -400,12 +401,14 @@ class ScoreUpdateService : Service() {
         }
     }
 
+    // Сохраняем в БД только счёт, минуту НЕ трогаем
     private fun saveScoreToDb(matchId: Long, sh: Int, sa: Int) {
         kotlinx.coroutines.runBlocking(Dispatchers.IO) {
             try {
                 val allData = database.dataDao().getAllData()
                 val updated = allData.map {
-                    if (it.m_id == matchId) it.copy(sh = sh, sa = sa) else it
+                    if (it.m_id == matchId) it.copy(sh = sh, sa = sa) 
+                    else it
                 }
                 database.dataDao().deleteAll()
                 database.dataDao().insertAll(updated)

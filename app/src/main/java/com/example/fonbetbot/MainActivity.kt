@@ -6,6 +6,7 @@
 // Исправлен дубляж матчей при повторном раскрытии экспресса
 // Добавлено подтверждение выхода по кнопке Назад
 // Экран не гаснет при открытом приложении
+// Счёт в таблице берётся из базы
 package com.example.fonbetbot
 
 import android.content.Context
@@ -373,11 +374,12 @@ class MainActivity : AppCompatActivity() {
     // ==================== ОБНОВЛЕНИЕ СЧЁТА В UI ====================
     
     private fun updateMatchDisplay(matchId: Long, sh: Int, sa: Int, minute: Int) {
+        // Минуту сохраняем только в кеше для UI
         matchMinutesMap[matchId] = minute
         
         val scoreView = layoutDetailContent.findViewWithTag<TextView>("match_score_$matchId")
         if (scoreView != null) {
-            val scoreText = if (minute > 0) {
+            val scoreText = if (minute in 1..125) {
                 "$sh:$sa ($minute')"
             } else {
                 "$sh:$sa"
@@ -391,10 +393,12 @@ class MainActivity : AppCompatActivity() {
             }
         }
         
+        // Обновляем кеш в памяти
         allExpressResultsCache = allExpressResultsCache.map { express ->
             express.copy(
                 matches = express.matches.map { match ->
-                    if (match.matchId == matchId) match.copy(sh = sh, sa = sa) else match
+                    if (match.matchId == matchId) match.copy(sh = sh, sa = sa) 
+                    else match
                 }
             )
         }
@@ -402,9 +406,25 @@ class MainActivity : AppCompatActivity() {
         allExpressResults = allExpressResults.map { express ->
             express.copy(
                 matches = express.matches.map { match ->
-                    if (match.matchId == matchId) match.copy(sh = sh, sa = sa) else match
+                    if (match.matchId == matchId) match.copy(sh = sh, sa = sa) 
+                    else match
                 }
             )
+        }
+        
+        // Сохраняем в БД только счёт, минуту не трогаем
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val allData = database.dataDao().getAllData()
+                val updated = allData.map {
+                    if (it.m_id == matchId) it.copy(sh = sh, sa = sa) 
+                    else it
+                }
+                database.dataDao().deleteAll()
+                database.dataDao().insertAll(updated)
+            } catch (e: Exception) {
+                Log.e(TAG, "Ошибка сохранения счёта в БД: ${e.message}")
+            }
         }
     }
     
@@ -827,9 +847,10 @@ class MainActivity : AppCompatActivity() {
                 else -> "Т${match.type}"
             }
             
+            // Минуту берём из кеша, если есть; иначе из match.curtime
             val currentMinute = matchMinutesMap[match.matchId] ?: match.curtime
             
-            val hasScoreData = match.curtime > 0
+            val hasScoreData = (match.sh > 0 || match.sa > 0) || (match.sh == 0 && match.sa == 0 && match.curtime > 0)
             val scoreText: String = if (hasScoreData) {
                 if (currentMinute in 1..125) {
                     "${match.sh}:${match.sa} (${currentMinute}')"
