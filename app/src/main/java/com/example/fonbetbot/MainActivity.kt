@@ -1,4 +1,7 @@
-﻿// MainActivity.kt — ПОЛНАЯ ВЕРСИЯ С ФОНОВЫМ СЕРВИСОМ ОБНОВЛЕНИЯ СЧЕТОВ, ФИЛЬТРОМ, СОХРАНЕНИЕМ В БД, ЛОГОМ, ВОССТАНОВЛЕНИЕМ РАСКРЫТЫХ ЭКСПРЕССОВ, ОБНОВЛЕНИЕМ СЧЁТА В РЕАЛЬНОМ ВРЕМЕНИ И РЕДАКТИРОВАНИЕМ ТАБЛИЦЫ
+﻿// MainActivity.kt — ПОЛНАЯ ВЕРСИЯ
+// Добавлена колонка m_id с возможностью редактирования
+// Исправлен isExpressFinished для старых экспрессов
+// 0:0 отображается корректно при curtime > 0
 package com.example.fonbetbot
 
 import android.content.Intent
@@ -54,7 +57,6 @@ class MainActivity : AppCompatActivity() {
     private val logLines = mutableListOf<String>()
     private val MAX_LOG_LINES = 500
     
-    // Карта для хранения текущих минут матчей
     private val matchMinutesMap = mutableMapOf<Long, Int>()
     
     companion object {
@@ -189,10 +191,9 @@ class MainActivity : AppCompatActivity() {
             }
             scoreView.text = scoreText
             
-            val minuteLimit = 90
-            if (minute in 1..minuteLimit) {
+            if (minute in 1..90) {
                 scoreView.setTextColor(Color.parseColor("#F0B90B"))
-            } else if (minute > minuteLimit) {
+            } else if (minute > 90) {
                 scoreView.setTextColor(Color.parseColor("#EAECEF"))
             }
         }
@@ -237,9 +238,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
-    // ========== ВСПОМОГАТЕЛЬНЫЕ ==========
+    // ========== ПРОВЕРКА ЗАВЕРШЁННОСТИ ЭКСПРЕССА ==========
     
     private fun isExpressFinished(express: ExpressResult): Boolean {
+        // 1. Есть проигравший матч (был счёт и не зашёл)
         if (express.matches.any { match ->
             val isWin = when (match.type) {
                 924 -> match.sh >= match.sa
@@ -250,6 +252,7 @@ class MainActivity : AppCompatActivity() {
             !isWin && (match.sh > 0 || match.sa > 0)
         }) return true
         
+        // 2. Все матчи зашли (у всех был счёт и все выиграли)
         if (express.matches.all { match ->
             val isWin = when (match.type) {
                 924 -> match.sh >= match.sa
@@ -260,12 +263,8 @@ class MainActivity : AppCompatActivity() {
             isWin && (match.sh > 0 || match.sa > 0)
         }) return true
         
-        if (!isLive(express)) {
-            val hasActiveMatches = express.matches.any { match ->
-                match.sh == 0 && match.sa == 0
-            }
-            if (!hasActiveMatches) return true
-        }
+        // 3. Экспресс старше LIVE_HOURS — считается завершённым
+        if (!isLive(express)) return true
         
         return false
     }
@@ -409,11 +408,9 @@ class MainActivity : AppCompatActivity() {
                 database.expDao().getAllExp().find { it.id_exp == express.expId }?.ct ?: ""
             }
             
-            // Пытаемся привести к читаемому формату если это Excel-число
             val formattedDate = try {
                 val numericValue = currentCt.trim().toDoubleOrNull()
                 if (numericValue != null && numericValue > 40000) {
-                    // Excel дата — конвертируем
                     val baseDate = LocalDateTime.of(1899, 12, 30, 0, 0)
                     val days = numericValue.toLong()
                     val fraction = numericValue - days
@@ -475,6 +472,55 @@ class MainActivity : AppCompatActivity() {
             }
             withContext(Dispatchers.Main) {
                 addLog("✏ CT экспресса #$expId обновлён: $newCt")
+                ScoreUpdateService.requestFullRecalc = true
+                refreshData()
+            }
+        }
+    }
+    
+    // ==================== ДИАЛОГ РЕДАКТИРОВАНИЯ m_id ====================
+    
+    private fun showEditMatchIdDialog(match: MatchResult, expId: Int) {
+        val editText = EditText(this).apply {
+            setText("${match.matchId}")
+            hint = "m_id"
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setTextColor(Color.parseColor("#EAECEF"))
+            setHintTextColor(Color.parseColor("#848E9C"))
+            setBackgroundColor(Color.parseColor("#2B3139"))
+            setPadding(32, 16, 32, 16)
+            textSize = 16f
+        }
+        
+        AlertDialog.Builder(this)
+            .setTitle("Редактировать m_id")
+            .setMessage("Матч: ${match.home} vs ${match.away}")
+            .setView(editText)
+            .setPositiveButton("Сохранить") { _, _ ->
+                val newMId = editText.text.toString().trim().toLongOrNull()
+                if (newMId != null && newMId > 0) {
+                    updateMatchId(match.matchId, newMId)
+                } else {
+                    Toast.makeText(this, "Введите корректный m_id", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+    
+    private fun updateMatchId(oldMId: Long, newMId: Long) {
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                val allData = database.dataDao().getAllData()
+                val updated = allData.map {
+                    if (it.m_id == oldMId) it.copy(m_id = newMId) else it
+                }
+                database.dataDao().deleteAll()
+                database.dataDao().insertAll(updated)
+            }
+            withContext(Dispatchers.Main) {
+                addLog("✏ m_id изменён: $oldMId → $newMId")
+                ScoreUpdateService.requestFullRecalc = true
                 refreshData()
             }
         }
@@ -550,6 +596,7 @@ class MainActivity : AppCompatActivity() {
             }
             withContext(Dispatchers.Main) {
                 addLog("✏ Матч $matchId обновлён: $sh:$sa ($curtime')")
+                ScoreUpdateService.requestFullRecalc = true
                 refreshData()
             }
         }
@@ -557,7 +604,7 @@ class MainActivity : AppCompatActivity() {
     
     private fun buildMatchDetailRows(express: ExpressResult): List<View> {
         val views = mutableListOf<View>()
-        val totalWidth = 440
+        val totalWidth = 500
         
         views.add(TextView(this).apply {
             text = "Матчи экспресса #${express.expId}"
@@ -576,11 +623,12 @@ class MainActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(dp(totalWidth), ViewGroup.LayoutParams.WRAP_CONTENT)
             setBackgroundColor(Color.parseColor(COLOR_MATCH_HEADER_BG))
             tag = "match_subheader_${express.expId}"
-            addView(matchHeaderTv("Команда 1", 100))
-            addView(matchHeaderTv("Команда 2", 100))
+            addView(matchHeaderTv("m_id", 60))
+            addView(matchHeaderTv("Команда 1", 90))
+            addView(matchHeaderTv("Команда 2", 90))
             addView(matchHeaderTv("Счёт", 80))
             addView(matchHeaderTv("Кэф", 50))
-            addView(matchHeaderTv("Тип", 110))
+            addView(matchHeaderTv("Тип", 90))
         })
         
         for (match in express.matches) {
@@ -593,7 +641,8 @@ class MainActivity : AppCompatActivity() {
             
             val currentMinute = matchMinutesMap[match.matchId] ?: match.curtime
             
-            val scoreText: String = if (match.sh > 0 || match.sa > 0) {
+            val hasScoreData = (match.sh > 0 || match.sa > 0) || (match.sh == 0 && match.sa == 0 && match.curtime > 0)
+            val scoreText: String = if (hasScoreData) {
                 if (currentMinute > 0) {
                     "${match.sh}:${match.sa} (${currentMinute}')"
                 } else {
@@ -612,7 +661,7 @@ class MainActivity : AppCompatActivity() {
                 else -> match.sh >= match.sa
             }
             
-            val hasScore = match.sh > 0 || match.sa > 0
+            val hasScore = match.sh > 0 || match.sa > 0 || match.curtime > 0
             val mc: String = if (hasScore) {
                 if (isWinCorrect) COLOR_GREEN else COLOR_RED
             } else {
@@ -625,7 +674,7 @@ class MainActivity : AppCompatActivity() {
                 "Ожидание"
             }
             
-            val ligaInfoText: String = "${match.liganame.take(40)} | $resultText"
+            val ligaInfoText: String = "#${match.matchId} | ${match.liganame.take(35)} | $resultText"
             
             views.add(LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -633,8 +682,15 @@ class MainActivity : AppCompatActivity() {
                 setBackgroundColor(Color.parseColor(COLOR_MATCH_BG))
                 tag = "match_${match.matchId}"
                 
-                addView(matchDataTv(match.home.take(14), 100, COLOR_TEXT_PRIMARY, 10f, false))
-                addView(matchDataTv(match.away.take(14), 100, COLOR_TEXT_PRIMARY, 10f, false))
+                addView(matchDataTv("${match.matchId}", 60, "#848E9C", 9f, false).apply {
+                    setOnLongClickListener {
+                        showEditMatchIdDialog(match, express.expId)
+                        true
+                    }
+                })
+                
+                addView(matchDataTv(match.home.take(13), 90, COLOR_TEXT_PRIMARY, 10f, false))
+                addView(matchDataTv(match.away.take(13), 90, COLOR_TEXT_PRIMARY, 10f, false))
                 
                 val scoreTv = matchDataTv(scoreText, 80, 
                     if (currentMinute in 1..90) "#F0B90B" else "#EAECEF", 
@@ -648,7 +704,7 @@ class MainActivity : AppCompatActivity() {
                 addView(scoreTv)
                 
                 addView(matchDataTv(kfText, 50, "#F0B90B", 10f, false))
-                addView(matchDataTv(typeShort, 110, "#848E9C", 10f, false))
+                addView(matchDataTv(typeShort, 90, "#848E9C", 10f, false))
             })
             
             views.add(LinearLayout(this).apply {
