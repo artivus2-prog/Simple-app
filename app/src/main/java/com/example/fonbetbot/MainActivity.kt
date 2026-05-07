@@ -278,47 +278,49 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
-    private fun buildBetSettings(): ApiClient.BetSettings {
-        val maxMatches = settingsPrefs.getInt(KEY_MAX_MATCHES, 2)
-        val allMinKef = settingsPrefs.getFloat(KEY_ALL_MIN_KEF, 1.67f).toDouble()
-        val maxActive = settingsPrefs.getInt(KEY_MAX_ACTIVE_EXP, 5)
-        
-        val type924Settings = ApiClient.TypeSettings(
-            name = "1х/футбол/хоккей",
-            minBet = settingsPrefs.getFloat(KEY_TYPE_924_MIN, 1.15f).toDouble(),
-            maxBet = settingsPrefs.getFloat(KEY_TYPE_924_MAX, 1.50f).toDouble(),
-            monitorStart = 80,
-            monitorEnd = 100
+    // MainActivity.kt — заменить метод buildBetSettings()
+
+private fun buildBetSettings(): ApiClient.BetSettings {
+    val maxMatches = settingsPrefs.getInt(KEY_MAX_MATCHES, 2)
+    val allMinKef = settingsPrefs.getFloat(KEY_ALL_MIN_KEF, 1.67f).toDouble()
+    val maxActive = settingsPrefs.getInt(KEY_MAX_ACTIVE_EXP, 5)
+    
+    val type924Settings = ApiClient.TypeSettings(
+        name = "1х/футбол/хоккей",
+        minBet = settingsPrefs.getFloat(KEY_TYPE_924_MIN, 1.15f).toDouble(),
+        maxBet = settingsPrefs.getFloat(KEY_TYPE_924_MAX, 1.50f).toDouble(),
+        monitorStart = settingsPrefs.getInt(KEY_TYPE_924_MONITOR_START, 80),
+        monitorEnd = settingsPrefs.getInt(KEY_TYPE_924_MONITOR_END, 100)
+    )
+    
+    val type927Settings = ApiClient.TypeSettings(
+        name = "ф1(+1.5)/футбол/хоккей",
+        minBet = settingsPrefs.getFloat(KEY_TYPE_927_MIN, 1.15f).toDouble(),
+        maxBet = settingsPrefs.getFloat(KEY_TYPE_927_MAX, 1.50f).toDouble(),
+        monitorStart = settingsPrefs.getInt(KEY_TYPE_927_MONITOR_START, 1),
+        monitorEnd = settingsPrefs.getInt(KEY_TYPE_927_MONITOR_END, 45)
+    )
+    
+    val type928Settings = ApiClient.TypeSettings(
+        name = "ф2(+1.5)/футбол/хоккей",
+        minBet = settingsPrefs.getFloat(KEY_TYPE_928_MIN, 1.15f).toDouble(),
+        maxBet = settingsPrefs.getFloat(KEY_TYPE_928_MAX, 1.50f).toDouble(),
+        monitorStart = settingsPrefs.getInt(KEY_TYPE_928_MONITOR_START, 1),
+        monitorEnd = settingsPrefs.getInt(KEY_TYPE_928_MONITOR_END, 45)
+    )
+    
+    return ApiClient.BetSettings(
+        maxMatchesPerExpress = maxMatches,
+        multiply = 2,
+        allMinKef = allMinKef,
+        maxActiveExpresses = maxActive,
+        types = mapOf(
+            924 to type924Settings,
+            927 to type927Settings,
+            928 to type928Settings
         )
-        
-        val type927Settings = ApiClient.TypeSettings(
-            name = "ф1(+1.5)/футбол/хоккей",
-            minBet = settingsPrefs.getFloat(KEY_TYPE_927_MIN, 1.15f).toDouble(),
-            maxBet = settingsPrefs.getFloat(KEY_TYPE_927_MAX, 1.50f).toDouble(),
-            monitorStart = 1,
-            monitorEnd = 45
-        )
-        
-        val type928Settings = ApiClient.TypeSettings(
-            name = "ф2(+1.5)/футбол/хоккей",
-            minBet = settingsPrefs.getFloat(KEY_TYPE_928_MIN, 1.15f).toDouble(),
-            maxBet = settingsPrefs.getFloat(KEY_TYPE_928_MAX, 1.50f).toDouble(),
-            monitorStart = 1,
-            monitorEnd = 45
-        )
-        
-        return ApiClient.BetSettings(
-            maxMatchesPerExpress = maxMatches,
-            multiply = 2,
-            allMinKef = allMinKef,
-            maxActiveExpresses = maxActive,
-            types = mapOf(
-                924 to type924Settings,
-                927 to type927Settings,
-                928 to type928Settings
-            )
-        )
-    }
+    )
+}
     
     // ========== ФОНОВЫЙ СЕРВИС ==========
     

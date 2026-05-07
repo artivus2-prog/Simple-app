@@ -89,7 +89,7 @@
             android:textColor="#F0B90B"
             android:layout_marginBottom="12dp" />
 
-        <!-- Тип 924 - 1Х -->
+        <!-- ==================== Тип 924 - 1Х ==================== -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -98,12 +98,13 @@
             android:textColor="#848E9C"
             android:layout_marginBottom="6dp" />
 
+        <!-- Коэффициенты 924 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginBottom="12dp">
+            android:layout_marginBottom="8dp">
 
             <TextView
                 android:layout_width="wrap_content"
@@ -149,7 +150,67 @@
                 android:gravity="center" />
         </LinearLayout>
 
-        <!-- Тип 927 - Фора 1 (+1.5) -->
+        <!-- Мониторинг 924 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Мониторинг (минуты матча)"
+            android:textSize="11sp"
+            android:textColor="#5E6673"
+            android:layout_marginBottom="6dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="16dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Начало:"
+                android:textSize="11sp"
+                android:textColor="#848E9C"
+                android:layout_marginEnd="6dp" />
+
+            <EditText
+                android:id="@+id/et_type_924_monitor_start"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:text="80"
+                android:textSize="12sp"
+                android:textColor="#EAECEF"
+                android:background="#1E2329"
+                android:padding="8dp"
+                android:inputType="number"
+                android:gravity="center"
+                android:layout_marginEnd="8dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Конец:"
+                android:textSize="11sp"
+                android:textColor="#848E9C"
+                android:layout_marginEnd="6dp" />
+
+            <EditText
+                android:id="@+id/et_type_924_monitor_end"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:text="100"
+                android:textSize="12sp"
+                android:textColor="#EAECEF"
+                android:background="#1E2329"
+                android:padding="8dp"
+                android:inputType="number"
+                android:gravity="center" />
+        </LinearLayout>
+
+        <!-- ==================== Тип 927 - Фора 1 (+1.5) ==================== -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -158,12 +219,13 @@
             android:textColor="#848E9C"
             android:layout_marginBottom="6dp" />
 
+        <!-- Коэффициенты 927 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginBottom="12dp">
+            android:layout_marginBottom="8dp">
 
             <TextView
                 android:layout_width="wrap_content"
@@ -209,13 +271,13 @@
                 android:gravity="center" />
         </LinearLayout>
 
-        <!-- Тип 928 - Фора 2 (+1.5) -->
+        <!-- Мониторинг 927 -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Фора 2 (+1.5) (футбол/хоккей)"
-            android:textSize="12sp"
-            android:textColor="#848E9C"
+            android:text="Мониторинг (минуты матча)"
+            android:textSize="11sp"
+            android:textColor="#5E6673"
             android:layout_marginBottom="6dp" />
 
         <LinearLayout
@@ -224,6 +286,67 @@
             android:orientation="horizontal"
             android:gravity="center_vertical"
             android:layout_marginBottom="16dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Начало:"
+                android:textSize="11sp"
+                android:textColor="#848E9C"
+                android:layout_marginEnd="6dp" />
+
+            <EditText
+                android:id="@+id/et_type_927_monitor_start"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:text="1"
+                android:textSize="12sp"
+                android:textColor="#EAECEF"
+                android:background="#1E2329"
+                android:padding="8dp"
+                android:inputType="number"
+                android:gravity="center"
+                android:layout_marginEnd="8dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Конец:"
+                android:textSize="11sp"
+                android:textColor="#848E9C"
+                android:layout_marginEnd="6dp" />
+
+            <EditText
+                android:id="@+id/et_type_927_monitor_end"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:text="45"
+                android:textSize="12sp"
+                android:textColor="#EAECEF"
+                android:background="#1E2329"
+                android:padding="8dp"
+                android:inputType="number"
+                android:gravity="center" />
+        </LinearLayout>
+
+        <!-- ==================== Тип 928 - Фора 2 (+1.5) ==================== -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Фора 2 (+1.5) (футбол/хоккей)"
+            android:textSize="12sp"
+            android:textColor="#848E9C"
+            android:layout_marginBottom="6dp" />
+
+        <!-- Коэффициенты 928 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="8dp">
 
             <TextView
                 android:layout_width="wrap_content"
@@ -266,6 +389,66 @@
                 android:background="#1E2329"
                 android:padding="10dp"
                 android:inputType="numberDecimal"
+                android:gravity="center" />
+        </LinearLayout>
+
+        <!-- Мониторинг 928 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Мониторинг (минуты матча)"
+            android:textSize="11sp"
+            android:textColor="#5E6673"
+            android:layout_marginBottom="6dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="16dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Начало:"
+                android:textSize="11sp"
+                android:textColor="#848E9C"
+                android:layout_marginEnd="6dp" />
+
+            <EditText
+                android:id="@+id/et_type_928_monitor_start"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:text="1"
+                android:textSize="12sp"
+                android:textColor="#EAECEF"
+                android:background="#1E2329"
+                android:padding="8dp"
+                android:inputType="number"
+                android:gravity="center"
+                android:layout_marginEnd="8dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Конец:"
+                android:textSize="11sp"
+                android:textColor="#848E9C"
+                android:layout_marginEnd="6dp" />
+
+            <EditText
+                android:id="@+id/et_type_928_monitor_end"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:text="45"
+                android:textSize="12sp"
+                android:textColor="#EAECEF"
+                android:background="#1E2329"
+                android:padding="8dp"
+                android:inputType="number"
                 android:gravity="center" />
         </LinearLayout>
 
