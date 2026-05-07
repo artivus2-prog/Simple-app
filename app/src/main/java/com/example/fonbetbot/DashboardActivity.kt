@@ -1,4 +1,4 @@
-﻿// DashboardActivity.kt
+﻿// DashboardActivity.kt — ИСПРАВЛЕННАЯ ВЕРСИЯ (без статусов, только данные)
 package com.example.fonbetbot
 
 import android.graphics.Color
@@ -22,7 +22,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.*
 import java.time.format.DateTimeFormatter
-import java.util.*
 
 class DashboardActivity : AppCompatActivity() {
     
@@ -38,9 +37,8 @@ class DashboardActivity : AppCompatActivity() {
     private lateinit var database: AppDatabase
     private lateinit var analyticsEngine: AnalyticsEngine
     
-    private var allLeagueStats = listOf<LeagueStats>()
-    private var allExpressResults = listOf<ExpressResult>()
-    private var filteredExpressResults = listOf<ExpressResult>()
+    private var allExpressResults = listOf<ExpressResultSimplified>()
+    private var filteredExpressResults = listOf<ExpressResultSimplified>()
     private var selectedLeague: String? = null
     private var dateStart: LocalDate? = null
     private var dateEnd: LocalDate? = null
@@ -54,6 +52,13 @@ class DashboardActivity : AppCompatActivity() {
         private const val COLOR_TEXT_SECONDARY = "#848E9C"
         private const val COLOR_GRID = "#2B3139"
     }
+    
+    // Простые data-классы для графиков
+    private data class LeagueStatsSimple(
+        val liganame: String,
+        val total: Int,
+        val rate: Double
+    )
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -69,25 +74,10 @@ class DashboardActivity : AppCompatActivity() {
         tvDateRangeInfo = findViewById(R.id.tv_date_range_info)
         spinnerLeague = findViewById(R.id.spinner_league)
         
-        // Скрываем сводку
-        val tvStats = findViewById<TextView>(R.id.tv_stats)
-        tvStats.visibility = View.GONE
-        val summaryCard = tvStats.parent.parent as? View
-        summaryCard?.visibility = View.GONE
-        
-        // Скрываем навигацию по неделям
-        val layoutWeekNav = findViewById<LinearLayout>(R.id.layout_week_nav)
-        layoutWeekNav.visibility = View.GONE
-        val btnPrevWeek = findViewById<Button>(R.id.btn_prev_week)
-        val btnNextWeek = findViewById<Button>(R.id.btn_next_week)
-        val tvWeekInfo = findViewById<TextView>(R.id.tv_week_info)
-        btnPrevWeek.visibility = View.GONE
-        btnNextWeek.visibility = View.GONE
-        tvWeekInfo.visibility = View.GONE
-        
-        // Скрываем таблицу
-        val layoutDetailTable = findViewById<View>(R.id.layout_detail_table)
-        layoutDetailTable.visibility = View.GONE
+        // Скрываем лишние элементы
+        findViewById<TextView>(R.id.tv_stats).visibility = View.GONE
+        findViewById<LinearLayout>(R.id.layout_week_nav).visibility = View.GONE
+        findViewById<View>(R.id.layout_detail_table).visibility = View.GONE
         
         database = AppDatabase.getDatabase(this)
         analyticsEngine = AnalyticsEngine(database)
@@ -100,7 +90,9 @@ class DashboardActivity : AppCompatActivity() {
         
         spinnerLeague.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                selectedLeague = if (position > 0) allLeagueStats[position - 1].liganame else null
+                selectedLeague = if (position > 0) {
+                    (spinnerLeague.adapter.getItem(position) as String).split(" (")[0]
+                } else null
                 applyFilters()
                 refreshAllCharts()
             }
@@ -165,7 +157,6 @@ class DashboardActivity : AppCompatActivity() {
             textColor = Color.parseColor(COLOR_TEXT_SECONDARY)
             textSize = 10f
             axisMinimum = 0f
-            axisMaximum = 100f
             setDrawGridLines(true)
             gridColor = Color.parseColor(COLOR_GRID)
             gridLineWidth = 0.5f
@@ -194,7 +185,6 @@ class DashboardActivity : AppCompatActivity() {
             axisLineColor = Color.parseColor(COLOR_GRID)
             axisMinimum = 0f
             axisMaximum = 100f
-            labelRotationAngle = 0f
         }
         
         chart.axisLeft.apply {
@@ -208,7 +198,6 @@ class DashboardActivity : AppCompatActivity() {
         
         chart.axisRight.isEnabled = false
         chart.legend.isEnabled = false
-        
         chart.extraLeftOffset = 10f
         chart.extraRightOffset = 10f
     }
@@ -254,7 +243,7 @@ class DashboardActivity : AppCompatActivity() {
         if (dateStart != null && dateEnd != null) {
             val start = dateStart!!.atStartOfDay()
             val end = dateEnd!!.atTime(23, 59, 59)
-            filtered = filtered.filter { e -> val d = e.dateTime; !d.isBefore(start) && !d.isAfter(end) }
+            filtered = filtered.filter { e -> !e.dateTime.isBefore(start) && !e.dateTime.isAfter(end) }
         }
         if (selectedLeague != null) {
             filtered = filtered.filter { e -> e.matches.any { m -> m.liganame == selectedLeague } }
@@ -263,49 +252,55 @@ class DashboardActivity : AppCompatActivity() {
     }
     
     private fun refreshAllCharts() {
-        val data = filteredExpressResults
-        refreshChartsForFiltered(data)
+        if (filteredExpressResults.isEmpty()) {
+            pieChart.clear()
+            pieChart.centerText = "Нет данных"
+            pieChart.invalidate()
+            barChartDay.clear()
+            barChartDay.invalidate()
+            barChartHour.clear()
+            barChartHour.invalidate()
+            barChartLeague.clear()
+            barChartLeague.invalidate()
+            return
+        }
         
-        val leagueMatches = data.flatMap { it.matches }
-        val leagueMap = leagueMatches.groupBy { it.liganame }
+        refreshChartsForFiltered(filteredExpressResults)
+        
+        // Собираем статистику по лигам
+        val allMatches = filteredExpressResults.flatMap { it.matches }
+        val leagueMap = allMatches.groupBy { it.liganame }
         val leagueStatsList = leagueMap.map { (liga, matches) ->
-            val wins = matches.count { it.isWin }
-            val total = matches.size
-            LeagueStats(liga, total, wins, if (total > 0) (wins.toDouble() / total) * 100 else 0.0)
+            LeagueStatsSimple(liga, matches.size, 0.0)
         }.sortedByDescending { it.total }.take(15)
         
         if (leagueStatsList.isNotEmpty()) {
             setupLeagueBarChart(leagueStatsList)
-        } else {
-            barChartLeague.clear()
-            barChartLeague.invalidate()
         }
     }
     
-    private fun refreshChartsForFiltered(filtered: List<ExpressResult>) {
+    private fun refreshChartsForFiltered(filtered: List<ExpressResultSimplified>) {
         val total = filtered.size
-        val wins = filtered.count { it.isWin }
-        val rate = if (total > 0) (wins.toDouble() / total) * 100 else 0.0
+        if (total == 0) return
         
-        setupPieChart(AnalyticsSummary(total, wins, total - wins, rate, ""))
+        // Круговая диаграмма: просто показываем общее количество
+        setupPieChart(total)
         
-        val byDay = LinkedHashMap<DayOfWeek, Pair<Int, Int>>()
+        // По дням недели
+        val byDay = LinkedHashMap<DayOfWeek, Int>()
         for (d in DayOfWeek.entries) {
-            val ex = filtered.filter { it.dateTime.dayOfWeek == d }
-            byDay[d] = Pair(ex.count { it.isWin }, ex.size)
+            byDay[d] = filtered.count { it.dateTime.dayOfWeek == d }
         }
         setupDayBarChart(byDay)
         
-        val byHour = TreeMap<Int, Pair<Int, Int>>()
+        // По часам
+        val byHour = TreeMap<Int, Int>()
         for (h in 0..23) {
-            val ex = filtered.filter { it.dateTime.hour == h }
-            if (ex.isNotEmpty()) byHour[h] = Pair(ex.count { it.isWin }, ex.size)
+            val count = filtered.count { it.dateTime.hour == h }
+            if (count > 0) byHour[h] = count
         }
         if (byHour.isNotEmpty()) {
             setupHourBarChart(byHour)
-        } else {
-            barChartHour.clear()
-            barChartHour.invalidate()
         }
     }
     
@@ -319,140 +314,114 @@ class DashboardActivity : AppCompatActivity() {
                 
                 val analytics = withContext(Dispatchers.IO) { analyticsEngine.calculateAnalytics() }
                 
-                allExpressResults = (analytics["allExpresses"] as? List<ExpressResult>) ?: emptyList()
+                allExpressResults = (analytics["allExpresses"] as? List<ExpressResultSimplified>) ?: emptyList()
                 applyFilters()
                 
-                allLeagueStats = (analytics["byLeague"] as? List<LeagueStats>) ?: emptyList()
+                // Заполняем спиннер лиг
+                val allLeagues = allExpressResults
+                    .flatMap { it.matches }
+                    .map { it.liganame }
+                    .distinct()
+                    .sorted()
+                
                 spinnerLeague.adapter = ArrayAdapter(
                     this@DashboardActivity,
                     android.R.layout.simple_spinner_item,
-                    listOf("Все лиги") + allLeagueStats.map { "${it.liganame} (${it.total})" }
+                    listOf("Все лиги") + allLeagues
                 ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
                 
                 refreshAllCharts()
                 
                 btnRefresh.isEnabled = true
-                btnRefresh.text = "Обновить аналитику"
+                btnRefresh.text = "Обновить"
                 
             } catch (e: Exception) {
                 Log.e(TAG, "Ошибка загрузки аналитики", e)
                 btnRefresh.isEnabled = true
-                btnRefresh.text = "Обновить аналитику"
+                btnRefresh.text = "Обновить"
             }
         }
     }
     
     // ========== ГРАФИКИ ==========
     
-    private fun setupPieChart(t: AnalyticsSummary) {
-        if (t.totalExpress == 0) {
-            pieChart.clear()
-            pieChart.centerText = "Нет данных"
-            pieChart.invalidate()
-            return
-        }
-        
-        val entries = mutableListOf<PieEntry>()
-        if (t.winExpress > 0) entries.add(PieEntry(t.winExpress.toFloat(), "Выигрыши"))
-        if (t.loseExpress > 0) entries.add(PieEntry(t.loseExpress.toFloat(), "Проигрыши"))
-        
-        if (entries.isEmpty()) {
-            pieChart.clear()
-            pieChart.centerText = "Нет данных"
-            pieChart.invalidate()
-            return
-        }
-        
-        val dataSet = PieDataSet(entries, "").apply {
-            colors = listOf(Color.parseColor(COLOR_GREEN), Color.parseColor(COLOR_RED))
-            valueTextSize = 14f
-            valueTextColor = Color.parseColor(COLOR_TEXT_PRIMARY)
-            sliceSpace = 4f
-            selectionShift = 8f
-        }
-        
-        pieChart.data = PieData(dataSet).apply { setValueFormatter(PercentFormatter(pieChart)) }
-        pieChart.centerText = "${String.format("%.1f", t.winRate)}%\nпроходимость"
-        pieChart.animateY(1200)
+    private fun setupPieChart(total: Int) {
+        pieChart.clear()
+        pieChart.data = PieData(
+            PieDataSet(listOf(PieEntry(total.toFloat(), "Экспрессы")), "").apply {
+                colors = listOf(Color.parseColor(COLOR_GREEN))
+                valueTextSize = 14f
+                valueTextColor = Color.parseColor(COLOR_TEXT_PRIMARY)
+            }
+        )
+        pieChart.centerText = "$total\nэкспрессов"
+        pieChart.animateY(800)
         pieChart.invalidate()
     }
     
-    private fun setupDayBarChart(d: Map<DayOfWeek, Pair<Int, Int>>) {
+    private fun setupDayBarChart(dayData: Map<DayOfWeek, Int>) {
         val entries = mutableListOf<BarEntry>()
         val colors = mutableListOf<Int>()
+        val labels = listOf("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс")
         
         DayOfWeek.entries.forEachIndexed { i, day ->
-            val (w, t) = d[day] ?: (0 to 0)
-            val r = if (t > 0) (w.toFloat() / t) * 100 else 0f
-            entries.add(BarEntry(i.toFloat(), r))
-            colors.add(when {
-                t == 0 -> Color.parseColor("#3A4048")
-                r >= 50 -> Color.parseColor(COLOR_GREEN)
-                else -> Color.parseColor(COLOR_RED)
-            })
+            val count = dayData[day] ?: 0
+            entries.add(BarEntry(i.toFloat(), count.toFloat()))
+            colors.add(if (count > 0) Color.parseColor(COLOR_GREEN) else Color.parseColor("#3A4048"))
         }
         
-        val dataSet = BarDataSet(entries, "").apply {
-            this.colors = colors
-            valueTextSize = 11f
-            valueTextColor = Color.parseColor(COLOR_TEXT_PRIMARY)
-            setDrawValues(true)
-        }
+        barChartDay.xAxis.valueFormatter = IndexAxisValueFormatter(labels)
+        barChartDay.xAxis.labelCount = 7
         
-        barChartDay.data = BarData(dataSet).apply { barWidth = 0.65f }
-        barChartDay.animateY(1000)
+        barChartDay.data = BarData(
+            BarDataSet(entries, "").apply {
+                this.colors = colors
+                valueTextSize = 10f
+                valueTextColor = Color.parseColor(COLOR_TEXT_PRIMARY)
+            }
+        ).apply { barWidth = 0.65f }
+        
+        barChartDay.animateY(800)
         barChartDay.invalidate()
     }
     
-    private fun setupHourBarChart(h: TreeMap<Int, Pair<Int, Int>>) {
+    private fun setupHourBarChart(hourData: TreeMap<Int, Int>) {
         val entries = mutableListOf<BarEntry>()
         val colors = mutableListOf<Int>()
         
-        for ((hour, stats) in h) {
-            val (w, t) = stats
-            val r = if (t > 0) (w.toFloat() / t) * 100 else 0f
-            entries.add(BarEntry(hour.toFloat(), r))
-            colors.add(when {
-                r >= 50 -> Color.parseColor(COLOR_GREEN)
-                else -> Color.parseColor(COLOR_RED)
-            })
+        for ((hour, count) in hourData) {
+            entries.add(BarEntry(hour.toFloat(), count.toFloat()))
+            colors.add(Color.parseColor(COLOR_GREEN))
         }
         
-        val dataSet = BarDataSet(entries, "").apply {
-            this.colors = colors
-            valueTextSize = 10f
-            valueTextColor = Color.parseColor(COLOR_TEXT_PRIMARY)
-            setDrawValues(true)
-        }
+        barChartHour.data = BarData(
+            BarDataSet(entries, "").apply {
+                this.colors = colors
+                valueTextSize = 9f
+                valueTextColor = Color.parseColor(COLOR_TEXT_PRIMARY)
+            }
+        ).apply { barWidth = 0.7f }
         
-        barChartHour.data = BarData(dataSet).apply { barWidth = 0.7f }
-        barChartHour.animateY(1000)
+        barChartHour.animateY(800)
         barChartHour.invalidate()
     }
     
-    private fun setupLeagueBarChart(ls: List<LeagueStats>) {
+    private fun setupLeagueBarChart(leagueStats: List<LeagueStatsSimple>) {
         val entries = mutableListOf<BarEntry>()
         val labels = mutableListOf<String>()
         
-        ls.forEachIndexed { i, lg ->
-            entries.add(BarEntry(i.toFloat(), lg.rate.toFloat()))
-            labels.add("${lg.liganame.take(20)} (${String.format("%.0f", lg.rate)}%)")
+        leagueStats.forEachIndexed { i, lg ->
+            entries.add(BarEntry(i.toFloat(), lg.total.toFloat()))
+            labels.add(lg.liganame.take(20))
         }
         
         val gradientColors = mutableListOf<Int>()
-        for (i in ls.indices) {
-            val ratio = i.toFloat() / maxOf(ls.size - 1, 1)
+        for (i in leagueStats.indices) {
+            val ratio = i.toFloat() / maxOf(leagueStats.size - 1, 1)
             val r = (3 + (240 - 3) * ratio).toInt()
             val g = (166 + (184 - 166) * (1 - ratio)).toInt()
             val b = (109 + (11 - 109) * (1 - ratio)).toInt()
             gradientColors.add(Color.rgb(r, g, b))
-        }
-        
-        val dataSet = BarDataSet(entries, "").apply {
-            colors = gradientColors
-            valueTextSize = 10f
-            valueTextColor = Color.parseColor("#EAECEF")
-            setDrawValues(true)
         }
         
         barChartLeague.xAxis.apply {
@@ -461,11 +430,17 @@ class DashboardActivity : AppCompatActivity() {
             textColor = Color.parseColor("#EAECEF")
             granularity = 1f
             labelCount = labels.size
-            setDrawGridLines(false)
         }
         
-        barChartLeague.data = BarData(dataSet).apply { barWidth = 0.7f }
-        barChartLeague.animateY(1000)
+        barChartLeague.data = BarData(
+            BarDataSet(entries, "").apply {
+                colors = gradientColors
+                valueTextSize = 9f
+                valueTextColor = Color.parseColor("#EAECEF")
+            }
+        ).apply { barWidth = 0.7f }
+        
+        barChartLeague.animateY(800)
         barChartLeague.invalidate()
     }
 }
