@@ -88,7 +88,19 @@ class MainActivity : AppCompatActivity() {
         const val KEY_TYPE_927_MAX = "type_927_max"
         const val KEY_TYPE_928_MIN = "type_928_min"
         const val KEY_TYPE_928_MAX = "type_928_max"
-        const val KEY_MAX_ACTIVE_EXP = "max_active_exp"
+        
+        // ДОБАВЛЕННЫЕ КОНСТАНТЫ:
+        const val KEY_TYPE_924_MONITOR_START = "type_924_monitor_start"
+        const val KEY_TYPE_924_MONITOR_END = "type_924_monitor_end"
+           // ДОБАВЛЕННЫЕ КОНСТАНТЫ:
+        const val KEY_TYPE_928_MONITOR_START = "type_928_monitor_start"
+        const val KEY_TYPE_928_MONITOR_END = "type_928_monitor_end"
+        // ДОБАВЛЕННЫЕ КОНСТАНТЫ:
+        const val KEY_TYPE_927_MONITOR_START = "type_927_monitor_start"
+        const val KEY_TYPE_927_MONITOR_END = "type_927_monitor_end"
+        
+
+const val KEY_MAX_ACTIVE_EXP = "max_active_exp"
         const val KEY_MAX_MATCHES = "max_matches"
         const val KEY_TIMEOUT = "timeout"
         
