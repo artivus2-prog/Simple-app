@@ -1,7 +1,7 @@
-﻿// MainActivity.kt — ПОЛНАЯ ВЕРСИЯ
-// Добавлена колонка m_id с возможностью редактирования
-// Исправлен isExpressFinished для старых экспрессов
-// 0:0 отображается корректно при curtime > 0
+﻿// MainActivity.kt — ПОЛНАЯ ФИНАЛЬНАЯ ВЕРСИЯ
+// Матч активен: curtime > 0 и < 100, или curtime = 0 и CT <= 2ч
+// Экспресс завершён: есть проигравший, или все матчи завершены и CT > 2ч
+// Колонка m_id с редактированием, 0:0 валидный счёт
 package com.example.fonbetbot
 
 import android.content.Intent
@@ -47,7 +47,7 @@ class MainActivity : AppCompatActivity() {
     
     private val expandedExpressIds = mutableSetOf<Int>()
     
-    private val LIVE_HOURS = 3L
+    private val LIVE_HOURS = 2L
     
     private var savedExpandedIds: Set<Int>? = null
     private var savedScrollY: Int = 0
@@ -191,9 +191,9 @@ class MainActivity : AppCompatActivity() {
             }
             scoreView.text = scoreText
             
-            if (minute in 1..90) {
+            if (minute in 1..99) {
                 scoreView.setTextColor(Color.parseColor("#F0B90B"))
-            } else if (minute > 90) {
+            } else {
                 scoreView.setTextColor(Color.parseColor("#EAECEF"))
             }
         }
@@ -238,10 +238,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
-    // ========== ПРОВЕРКА ЗАВЕРШЁННОСТИ ЭКСПРЕССА ==========
+    // ========== ПРОВЕРКА ЗАВЕРШЁННОСТИ ==========
+    
+    private fun isMatchActive(match: MatchResult): Boolean {
+        // Матч активен если curtime > 0 и < 100 (игра идёт)
+        return match.curtime in 1..99
+    }
     
     private fun isExpressFinished(express: ExpressResult): Boolean {
-        // 1. Есть проигравший матч (был счёт и не зашёл)
+        // 1. Есть проигравший матч (был счёт > 0 и не зашёл по формуле) — сразу завершён
         if (express.matches.any { match ->
             val isWin = when (match.type) {
                 924 -> match.sh >= match.sa
@@ -252,19 +257,16 @@ class MainActivity : AppCompatActivity() {
             !isWin && (match.sh > 0 || match.sa > 0)
         }) return true
         
-        // 2. Все матчи зашли (у всех был счёт и все выиграли)
-        if (express.matches.all { match ->
-            val isWin = when (match.type) {
-                924 -> match.sh >= match.sa
-                927 -> (match.sh + 1.5) > match.sa
-                928 -> (match.sa + 1.5) >= match.sh
-                else -> match.sh >= match.sa
-            }
-            isWin && (match.sh > 0 || match.sa > 0)
-        }) return true
+        // 2. Есть активный матч (curtime 1..99) — экспресс не завершён
+        if (express.matches.any { isMatchActive(it) }) return false
         
-        // 3. Экспресс старше LIVE_HOURS — считается завершённым
+        // 3. CT старше LIVE_HOURS и нет активных матчей — завершён
         if (!isLive(express)) return true
+        
+        // 4. CT свежий, у всех матчей curtime = 0 или >= 100, нет проигравших — проверяем:
+        //    если у всех curtime >= 100 — завершён выигрышем
+        //    если у кого-то curtime = 0 — ещё ждём
+        if (express.matches.all { it.curtime >= 100 }) return true
         
         return false
     }
@@ -602,6 +604,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
+    // ==================== ДЕТАЛИЗАЦИЯ МАТЧЕЙ ====================
+    
     private fun buildMatchDetailRows(express: ExpressResult): List<View> {
         val views = mutableListOf<View>()
         val totalWidth = 500
@@ -643,7 +647,7 @@ class MainActivity : AppCompatActivity() {
             
             val hasScoreData = (match.sh > 0 || match.sa > 0) || (match.sh == 0 && match.sa == 0 && match.curtime > 0)
             val scoreText: String = if (hasScoreData) {
-                if (currentMinute > 0) {
+                if (currentMinute in 1..99) {
                     "${match.sh}:${match.sa} (${currentMinute}')"
                 } else {
                     "${match.sh}:${match.sa}"
@@ -693,7 +697,7 @@ class MainActivity : AppCompatActivity() {
                 addView(matchDataTv(match.away.take(13), 90, COLOR_TEXT_PRIMARY, 10f, false))
                 
                 val scoreTv = matchDataTv(scoreText, 80, 
-                    if (currentMinute in 1..90) "#F0B90B" else "#EAECEF", 
+                    if (currentMinute in 1..99) "#F0B90B" else "#EAECEF", 
                     11f, true).apply {
                     tag = "match_score_${match.matchId}"
                     setOnLongClickListener {
@@ -761,9 +765,9 @@ class MainActivity : AppCompatActivity() {
             val tag = layoutDetailContent.getChildAt(i).tag as? String ?: continue
             if (tag.startsWith("match_header_$expId") ||
                 tag.startsWith("match_subheader_$expId") ||
-                tag.startsWith("match_") ||
-                tag.startsWith("match_info_") ||
-                tag == "sep_$expId") toRemove.add(layoutDetailContent.getChildAt(i))
+                tag == "sep_$expId") {
+                toRemove.add(layoutDetailContent.getChildAt(i))
+            }
         }
         toRemove.forEach { layoutDetailContent.removeView(it) }
     }
