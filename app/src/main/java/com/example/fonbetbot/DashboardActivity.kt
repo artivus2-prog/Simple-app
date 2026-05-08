@@ -1,4 +1,4 @@
-﻿// DashboardActivity.kt
+﻿// DashboardActivity.kt — ПОЛНЫЙ ИСПРАВЛЕННЫЙ ФАЙЛ
 package com.example.fonbetbot
 
 import android.graphics.Color
@@ -19,7 +19,6 @@ import com.github.mikephil.charting.formatter.PercentFormatter
 import com.google.android.material.datepicker.MaterialDatePicker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import java.time.*
 import java.time.format.DateTimeFormatter
@@ -124,7 +123,7 @@ class DashboardActivity : AppCompatActivity() {
         applyBarChartStyle(barChartDay)
         applyBarChartStyle(barChartHour)
         applyHorizontalBarChartStyle(barChartLeague)
-        applyKfBarChartStyle(barChartKf)
+        applyKfBarChartStyle()
     }
     
     private fun applyPieChartStyle(chart: PieChart) {
@@ -180,12 +179,12 @@ class DashboardActivity : AppCompatActivity() {
         chart.legend.isEnabled = false
     }
     
-    private fun applyKfBarChartStyle(chart: BarChart) {
-        chart.setBackgroundColor(Color.parseColor(COLOR_CARD))
-        chart.setNoDataText("Нет данных")
-        chart.setNoDataTextColor(Color.parseColor(COLOR_TEXT_SECONDARY))
-        chart.description.isEnabled = false
-        chart.xAxis.apply {
+    private fun applyKfBarChartStyle() {
+        barChartKf.setBackgroundColor(Color.parseColor(COLOR_CARD))
+        barChartKf.setNoDataText("Нет данных")
+        barChartKf.setNoDataTextColor(Color.parseColor(COLOR_TEXT_SECONDARY))
+        barChartKf.description.isEnabled = false
+        barChartKf.xAxis.apply {
             position = XAxis.XAxisPosition.BOTTOM
             textColor = Color.parseColor(COLOR_TEXT_SECONDARY)
             textSize = 9f
@@ -196,7 +195,7 @@ class DashboardActivity : AppCompatActivity() {
             granularity = 1f
             labelRotationAngle = -45f
         }
-        chart.axisLeft.apply {
+        barChartKf.axisLeft.apply {
             textColor = Color.parseColor(COLOR_TEXT_SECONDARY)
             textSize = 10f
             axisMinimum = 0f
@@ -207,8 +206,8 @@ class DashboardActivity : AppCompatActivity() {
             setDrawAxisLine(true)
             axisLineColor = Color.parseColor(COLOR_GRID)
         }
-        chart.axisRight.isEnabled = false
-        chart.legend.apply {
+        barChartKf.axisRight.isEnabled = false
+        barChartKf.legend.apply {
             textColor = Color.parseColor(COLOR_TEXT_PRIMARY)
             textSize = 10f
             verticalAlignment = Legend.LegendVerticalAlignment.TOP
@@ -217,7 +216,7 @@ class DashboardActivity : AppCompatActivity() {
             setDrawInside(true)
             yOffset = 10f
         }
-        chart.setVisibleXRangeMaximum(8f)
+        barChartKf.setVisibleXRangeMaximum(8f)
     }
     
     private fun applyHorizontalBarChartStyle(chart: HorizontalBarChart) {
@@ -426,7 +425,9 @@ class DashboardActivity : AppCompatActivity() {
             selectionShift = 8f
         }
         
-        pieChart.data = PieData(dataSet).apply { setValueFormatter(PercentFormatter(pieChart)) }
+        val pieData = PieData(dataSet)
+        pieData.setValueFormatter(PercentFormatter(pieChart))
+        pieChart.data = pieData
         pieChart.centerText = "${String.format("%.1f", t.winRate)}%\nпроходимость"
         pieChart.animateY(1200)
         pieChart.invalidate()
@@ -454,7 +455,9 @@ class DashboardActivity : AppCompatActivity() {
             setDrawValues(true)
         }
         
-        barChartDay.data = BarData(dataSet).apply { barWidth = 0.65f }
+        val barData = BarData(dataSet)
+        barData.barWidth = 0.65f
+        barChartDay.data = barData
         barChartDay.animateY(1000)
         barChartDay.invalidate()
     }
@@ -480,7 +483,9 @@ class DashboardActivity : AppCompatActivity() {
             setDrawValues(true)
         }
         
-        barChartHour.data = BarData(dataSet).apply { barWidth = 0.7f }
+        val barData = BarData(dataSet)
+        barData.barWidth = 0.7f
+        barChartHour.data = barData
         barChartHour.animateY(1000)
         barChartHour.invalidate()
     }
@@ -519,7 +524,9 @@ class DashboardActivity : AppCompatActivity() {
             setDrawGridLines(false)
         }
         
-        barChartLeague.data = BarData(dataSet).apply { barWidth = 0.7f }
+        val barData = BarData(dataSet)
+        barData.barWidth = 0.7f
+        barChartLeague.data = barData
         barChartLeague.animateY(1000)
         barChartLeague.invalidate()
     }
@@ -574,23 +581,20 @@ class DashboardActivity : AppCompatActivity() {
         val barSpace = 0.02f
         val barWidth = 0.28f
         
-        val barData = BarData(dataSet924, dataSet927, dataSet928).apply {
-            barWidth = barWidth
-        }
+        val barData = BarData(dataSet924, dataSet927, dataSet928)
+        barData.barWidth = barWidth
         
-        barChartKf.apply {
-            data = barData
-            groupBars(0f, groupSpace, barSpace)
-            
-            xAxis.apply {
-                valueFormatter = IndexAxisValueFormatter(labels)
-                labelCount = labels.size
-            }
-            
-            setVisibleXRangeMaximum(8f)
-            moveViewToX(0f)
-            animateY(1000)
-            invalidate()
-        }
+        // Настройка X-оси
+        val xAxis = barChartKf.xAxis
+        xAxis.valueFormatter = IndexAxisValueFormatter(labels)
+        xAxis.labelCount = labels.size
+        
+        // Установка данных
+        barChartKf.data = barData
+        barChartKf.groupBars(0f, groupSpace, barSpace)
+        barChartKf.setVisibleXRangeMaximum(8f)
+        barChartKf.moveViewToX(0f)
+        barChartKf.animateY(1000)
+        barChartKf.invalidate()
     }
 }
