@@ -864,7 +864,7 @@ class MainActivity : AppCompatActivity() {
                 else -> sh >= sa
             }
             
-            val hasScore = sh > 0 || sa > 0 || currentMinute > 0
+            val hasScore = currentMinute > 0
             val mc: String = if (hasScore) {
                 if (isWinCorrect) COLOR_GREEN else COLOR_RED
             } else {
