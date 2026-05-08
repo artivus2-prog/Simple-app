@@ -1,4 +1,4 @@
-﻿// AnalyticsEngine.kt — ИСПРАВЛЕННАЯ ВЕРСИЯ С ГРАДАЦИЕЙ startkf
+﻿// AnalyticsEngine.kt — ИСПРАВЛЕННАЯ ВЕРСИЯ
 package com.example.fonbetbot
 
 import kotlinx.coroutines.Dispatchers
@@ -64,11 +64,15 @@ data class MixedTypeStats(
     val rate: Double
 )
 
-// НОВАЯ структура данных для градации по startkf
-data class KfRangeStats(
-    val rangeLabel: String,    // Например "1.00-1.05"
-    val minKf: Double,
-    val maxKf: Double,
+data class KfBucketStats(
+    val kfRange: String,
+    val total: Int,
+    val wins: Int,
+    val rate: Double,
+    val typeStats: Map<Int, TypeKfDetail>
+)
+
+data class TypeKfDetail(
     val total: Int,
     val wins: Int,
     val rate: Double
@@ -91,9 +95,6 @@ class AnalyticsEngine(private val database: AppDatabase) {
             
             val updatedExpStatuses = mutableListOf<ExpEntity>()
             
-            // Собираем все startkf для определения диапазонов
-            val allStartKfs = mutableListOf<Double>()
-            
             for ((expId, matches) in dataByExpId) {
                 if (matches.isEmpty()) continue
                 
@@ -105,13 +106,6 @@ class AnalyticsEngine(private val database: AppDatabase) {
                         927 -> (match.sh + 1.5) > match.sa
                         928 -> (match.sa + 1.5) >= match.sh
                         else -> match.sh >= match.sa
-                    }
-                    
-                    // Сохраняем startkf для статистики
-                    if (match.startkf > 0) {
-                        synchronized(allStartKfs) {
-                            allStartKfs.add(match.startkf)
-                        }
                     }
                     
                     MatchResult(
@@ -185,7 +179,7 @@ class AnalyticsEngine(private val database: AppDatabase) {
                 )
             }
             
-            calculateStatistics(expressResults, allStartKfs)
+            calculateStatistics(expressResults)
         }
     }
     
@@ -227,10 +221,7 @@ class AnalyticsEngine(private val database: AppDatabase) {
         }
     }
     
-    private fun calculateStatistics(
-        expressResults: List<ExpressResult>, 
-        allStartKfs: List<Double>
-    ): Map<String, Any> {
+    private fun calculateStatistics(expressResults: List<ExpressResult>): Map<String, Any> {
         val result = mutableMapOf<String, Any>()
         
         result["allExpresses"] = expressResults
@@ -240,62 +231,19 @@ class AnalyticsEngine(private val database: AppDatabase) {
         val loseExpress = totalExpress - winExpress
         val winRate = if (totalExpress > 0) (winExpress.toDouble() / totalExpress) * 100 else 0.0
         
-        // ==================== ДЕТАЛЬНАЯ СТАТИСТИКА ====================
-        val detailsBuilder = StringBuilder()
-        detailsBuilder.appendLine("=== ОБЩАЯ СТАТИСТИКА ===")
-        detailsBuilder.appendLine("Всего экспрессов: $totalExpress")
-        detailsBuilder.appendLine("Выигрышных: $winExpress")
-        detailsBuilder.appendLine("Проигрышных: $loseExpress")
-        detailsBuilder.appendLine("Процент проходимости: ${String.format(Locale.US, "%.1f", winRate)}%")
-        detailsBuilder.appendLine()
-        
-        // Статистика по типам ставок
-        val allMatches = expressResults.flatMap { it.matches }
-        val type924Matches = allMatches.filter { it.type == 924 }
-        val type927Matches = allMatches.filter { it.type == 927 }
-        val type928Matches = allMatches.filter { it.type == 928 }
-        
-        detailsBuilder.appendLine("=== ПО ТИПАМ СТАВОК (максимум) ===")
-        
-        val type924WinRate = if (type924Matches.isNotEmpty()) 
-            (type924Matches.count { it.isWin }.toDouble() / type924Matches.size) * 100 else 0.0
-        detailsBuilder.appendLine("Тип 924 (1X): ${type924Matches.size} матчей, " +
-            "${type924Matches.count { it.isWin }} выигрышей, " +
-            "${String.format(Locale.US, "%.1f", type924WinRate)}%")
-        
-        val type927WinRate = if (type927Matches.isNotEmpty()) 
-            (type927Matches.count { it.isWin }.toDouble() / type927Matches.size) * 100 else 0.0
-        detailsBuilder.appendLine("Тип 927 (Ф1 +1.5): ${type927Matches.size} матчей, " +
-            "${type927Matches.count { it.isWin }} выигрышей, " +
-            "${String.format(Locale.US, "%.1f", type927WinRate)}%")
-        
-        val type928WinRate = if (type928Matches.isNotEmpty()) 
-            (type928Matches.count { it.isWin }.toDouble() / type928Matches.size) * 100 else 0.0
-        detailsBuilder.appendLine("Тип 928 (Ф2 +1.5): ${type928Matches.size} матчей, " +
-            "${type928Matches.count { it.isWin }} выигрышей, " +
-            "${String.format(Locale.US, "%.1f", type928WinRate)}%")
-        detailsBuilder.appendLine()
-        
-        // ==================== ГРАДАЦИЯ ПО startkf ====================
-        val kfRangeStats = calculateKfRangeStats(allMatches, detailsBuilder)
-        result["byKfRange"] = kfRangeStats
-        
-        // Статистика по экспрессам с разным количеством матчей
-        val byMatchCount = expressResults.groupBy { it.matches.size }
-        detailsBuilder.appendLine("=== ПО КОЛИЧЕСТВУ МАТЧЕЙ В ЭКСПРЕССЕ ===")
-        byMatchCount.entries.sortedBy { it.key }.forEach { (count, expresses) ->
-            val wins = expresses.count { it.isWin }
-            val rate = if (expresses.isNotEmpty()) (wins.toDouble() / expresses.size) * 100 else 0.0
-            detailsBuilder.appendLine("$count матчей: ${expresses.size} экспрессов, $wins выигрышей, ${String.format(Locale.US, "%.1f", rate)}%")
-        }
-        detailsBuilder.appendLine()
-        
         result["total"] = AnalyticsSummary(
             totalExpress = totalExpress,
             winExpress = winExpress,
             loseExpress = loseExpress,
             winRate = winRate,
-            details = detailsBuilder.toString()
+            details = buildString {
+                appendLine("=== ОБЩАЯ СТАТИСТИКА ===")
+                appendLine("Всего экспрессов: $totalExpress")
+                appendLine("Выигрышных: $winExpress")
+                appendLine("Проигрышных: $loseExpress")
+                appendLine("Процент проходимости: ${String.format(Locale.US, "%.1f", winRate)}%")
+                appendLine()
+            }
         )
         
         // Статистика по дням недели
@@ -352,6 +300,7 @@ class AnalyticsEngine(private val database: AppDatabase) {
         result["byWeek"] = weekStatsList
         
         // Статистика по лигам
+        val allMatches = expressResults.flatMap { express -> express.matches }
         val byLeague = allMatches.groupBy { it.liganame }
         val leagueStatsList = mutableListOf<LeagueStats>()
         
@@ -377,111 +326,68 @@ class AnalyticsEngine(private val database: AppDatabase) {
         }
         result["byType"] = typeStats
         
-        return result
-    }
-    
-    /**
-     * Рассчитывает проходимость по градациям startkf.
-     * Градация: 1.00-1.05, 1.05-1.10, 1.10-1.15, и т.д.
-     * Шаг 0.05.
-     */
-    private fun calculateKfRangeStats(
-        allMatches: List<MatchResult>,
-        detailsBuilder: StringBuilder
-    ): List<KfRangeStats> {
-        // Определяем минимальный и максимальный startkf
-        val validKfs = allMatches.filter { it.startkf > 0 }.map { it.startkf }
-        if (validKfs.isEmpty()) {
-            detailsBuilder.appendLine("=== ГРАДАЦИЯ ПО STARTKF === ")
-            detailsBuilder.appendLine("Нет данных с коэффициентами")
-            return emptyList()
+        // Статистика по градациям start_kf с шагом 0.05
+        val kfStep = 0.05
+        val minKf = 1.15
+        val kfBucketsMap = mutableMapOf<String, MutableMap<Int, Pair<Int, Int>>>()
+        
+        val allMatchesWithKf = allMatches.filter { it.startkf > 0 }
+        val actualMaxKf = allMatchesWithKf.maxOfOrNull { it.startkf } ?: 1.50
+        
+        var currentKf = minKf
+        while (currentKf < actualMaxKf + kfStep) {
+            val nextKf = currentKf + kfStep
+            val rangeLabel = String.format(Locale.US, "%.2f-%.2f", currentKf, nextKf)
+            kfBucketsMap[rangeLabel] = mutableMapOf(
+                924 to Pair(0, 0),
+                927 to Pair(0, 0),
+                928 to Pair(0, 0)
+            )
+            currentKf = nextKf
         }
         
-        val minKf = validKfs.minOrNull() ?: 1.0
-        val maxKf = validKfs.maxOrNull() ?: 2.0
-        
-        // Округляем границы до шага 0.05
-        val step = 0.05
-        // Начинаем с 1.00 (минимальный логичный коэффициент)
-        val startRange = (Math.floor(1.0 / step) * step)  // = 1.00
-        val endRange = (Math.ceil(maxKf / step) * step)    // округляем вверх
-        
-        val kfRangeStatsList = mutableListOf<KfRangeStats>()
-        
-        detailsBuilder.appendLine("=== ГРАДАЦИЯ ПО STARTKF (шаг 0.05) ===")
-        detailsBuilder.appendLine("Всего матчей с коэффициентами: ${validKfs.size}")
-        detailsBuilder.appendLine()
-        
-        var currentMin = startRange
-        while (currentMin < endRange) {
-            val currentMax = currentMin + step
-            
-            // Фильтруем матчи, попадающие в диапазон (currentMin <= startkf < currentMax)
-            // Последний диапазон включает верхнюю границу
-            val rangeMatches = if (currentMax >= endRange - step / 2) {
-                allMatches.filter { it.startkf >= currentMin && it.startkf <= currentMax }
-            } else {
-                allMatches.filter { it.startkf >= currentMin && it.startkf < currentMax }
+        for (match in allMatchesWithKf) {
+            val kf = match.startkf
+            for ((range, typeMap) in kfBucketsMap) {
+                val parts = range.split("-")
+                if (parts.size == 2) {
+                    val rangeStart = parts[0].toDoubleOrNull() ?: continue
+                    val rangeEnd = parts[1].toDoubleOrNull() ?: continue
+                    if (kf >= rangeStart && kf < rangeEnd) {
+                        val current = typeMap[match.type] ?: Pair(0, 0)
+                        typeMap[match.type] = Pair(
+                            current.first + (if (match.isWin) 1 else 0),
+                            current.second + 1
+                        )
+                        break
+                    }
+                }
             }
-            
-            val total = rangeMatches.size
-            val wins = rangeMatches.count { it.isWin }
+        }
+        
+        val kfBucketStatsList = kfBucketsMap.map { (range, typeMap) ->
+            val total = typeMap.values.sumOf { it.second }
+            val wins = typeMap.values.sumOf { it.first }
             val rate = if (total > 0) (wins.toDouble() / total) * 100 else 0.0
             
-            val rangeLabel = String.format(Locale.US, "%.2f-%.2f", currentMin, currentMax)
-            
-            if (total > 0) {
-                detailsBuilder.appendLine("$rangeLabel: $total матчей, $wins выигрышей, ${String.format(Locale.US, "%.1f", rate)}%")
-            }
-            
-            kfRangeStatsList.add(
-                KfRangeStats(
-                    rangeLabel = rangeLabel,
-                    minKf = currentMin,
-                    maxKf = currentMax,
-                    total = total,
-                    wins = wins,
-                    rate = rate
-                )
+            KfBucketStats(
+                kfRange = range,
+                total = total,
+                wins = wins,
+                rate = rate,
+                typeStats = typeMap.mapValues { (_, pair) ->
+                    TypeKfDetail(
+                        total = pair.second,
+                        wins = pair.first,
+                        rate = if (pair.second > 0) (pair.first.toDouble() / pair.second) * 100 else 0.0
+                    )
+                }
             )
-            
-            currentMin = currentMax
-        }
+        }.filter { it.total > 0 }
+         .sortedBy { it.kfRange.split("-")[0].toDouble() }
         
-        // Дополнительно: статистика по типам внутри каждого диапазона
-        detailsBuilder.appendLine()
-        detailsBuilder.appendLine("=== ДЕТАЛИЗАЦИЯ ПО ТИПАМ В ДИАПАЗОНАХ ===")
+        result["byKfBuckets"] = kfBucketStatsList
         
-        // Группируем по диапазонам и типам
-        val rangeTypeMap = mutableMapOf<String, MutableMap<Int, Pair<Int, Int>>>()
-        
-        for (match in allMatches.filter { it.startkf > 0 }) {
-            val rangeIndex = ((match.startkf - startRange) / step).toInt()
-            val rangeMin = startRange + rangeIndex * step
-            val rangeMax = rangeMin + step
-            val rangeLabel = String.format(Locale.US, "%.2f-%.2f", rangeMin, rangeMax)
-            
-            rangeTypeMap.getOrPut(rangeLabel) { mutableMapOf() }
-                .merge(match.type, Pair(if (match.isWin) 1 else 0, 1)) { old, new ->
-                    Pair(old.first + new.first, old.second + new.second)
-                }
-        }
-        
-        rangeTypeMap.entries.sortedBy { it.key }.forEach { (range, typeMap) ->
-            detailsBuilder.appendLine("$range:")
-            typeMap.entries.sortedBy { it.key }.forEach { (type, stats) ->
-                val (wins, total) = stats
-                val rate = if (total > 0) (wins.toDouble() / total) * 100 else 0.0
-                val typeName = when (type) {
-                    924 -> "1X"
-                    927 -> "Ф1(+1.5)"
-                    928 -> "Ф2(+1.5)"
-                    else -> "Тип $type"
-                }
-                detailsBuilder.appendLine("  $typeName: $total матчей, $wins выигрышей, ${String.format(Locale.US, "%.1f", rate)}%")
-            }
-        }
-        
-        return kfRangeStatsList
+        return result
     }
 }

@@ -337,6 +337,48 @@
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 
+            <!-- Гистограмма по градациям start_kf -->
+            <androidx.cardview.widget.CardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_margin="4dp"
+                android:layout_marginBottom="10dp"
+                app:cardBackgroundColor="#1E2329"
+                app:cardCornerRadius="12dp"
+                app:cardElevation="0dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Проходимость по стартовому КФ (шаг 0.05)"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        android:textColor="#848E9C"
+                        android:gravity="center"
+                        android:layout_marginBottom="8dp" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="🟡 1X | 🟢 Ф1(+1.5) | 🔵 Ф2(+1.5)"
+                        android:textSize="10sp"
+                        android:textColor="#5E6673"
+                        android:gravity="center"
+                        android:layout_marginBottom="12dp" />
+
+                    <com.github.mikephil.charting.charts.BarChart
+                        android:id="@+id/bar_chart_kf"
+                        android:layout_width="match_parent"
+                        android:layout_height="300dp" />
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
             <!-- Детальная таблица -->
             <androidx.cardview.widget.CardView
                 android:id="@+id/layout_detail_table"

@@ -19,6 +19,7 @@ import com.github.mikephil.charting.formatter.PercentFormatter
 import com.google.android.material.datepicker.MaterialDatePicker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import java.time.*
 import java.time.format.DateTimeFormatter
@@ -30,6 +31,7 @@ class DashboardActivity : AppCompatActivity() {
     private lateinit var barChartDay: BarChart
     private lateinit var barChartHour: BarChart
     private lateinit var barChartLeague: HorizontalBarChart
+    private lateinit var barChartKf: BarChart
     private lateinit var btnRefresh: Button
     private lateinit var btnBack: Button
     private lateinit var btnDateRange: Button
@@ -44,6 +46,7 @@ class DashboardActivity : AppCompatActivity() {
     private var selectedLeague: String? = null
     private var dateStart: LocalDate? = null
     private var dateEnd: LocalDate? = null
+    private var allKfBuckets = listOf<KfBucketStats>()
     
     companion object {
         private const val TAG = "DashboardActivity"
@@ -53,6 +56,8 @@ class DashboardActivity : AppCompatActivity() {
         private const val COLOR_TEXT_PRIMARY = "#EAECEF"
         private const val COLOR_TEXT_SECONDARY = "#848E9C"
         private const val COLOR_GRID = "#2B3139"
+        private const val COLOR_GOLD = "#F0B90B"
+        private const val COLOR_BLUE = "#2196F3"
     }
     
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -63,6 +68,7 @@ class DashboardActivity : AppCompatActivity() {
         barChartDay = findViewById(R.id.bar_chart_day)
         barChartHour = findViewById(R.id.bar_chart_hour)
         barChartLeague = findViewById(R.id.bar_chart_league)
+        barChartKf = findViewById(R.id.bar_chart_kf)
         btnRefresh = findViewById(R.id.btn_refresh)
         btnBack = findViewById(R.id.btn_back)
         btnDateRange = findViewById(R.id.btn_date_range)
@@ -114,13 +120,11 @@ class DashboardActivity : AppCompatActivity() {
     // ========== СТИЛИ ГРАФИКОВ ==========
     
     private fun initChartStyles() {
-        for (chart in listOf(pieChart, barChartDay, barChartHour, barChartLeague)) {
-            when (chart) {
-                is PieChart -> applyPieChartStyle(chart)
-                is BarChart -> applyBarChartStyle(chart)
-                is HorizontalBarChart -> applyHorizontalBarChartStyle(chart)
-            }
-        }
+        applyPieChartStyle(pieChart)
+        applyBarChartStyle(barChartDay)
+        applyBarChartStyle(barChartHour)
+        applyHorizontalBarChartStyle(barChartLeague)
+        applyKfBarChartStyle(barChartKf)
     }
     
     private fun applyPieChartStyle(chart: PieChart) {
@@ -174,6 +178,46 @@ class DashboardActivity : AppCompatActivity() {
         }
         chart.axisRight.isEnabled = false
         chart.legend.isEnabled = false
+    }
+    
+    private fun applyKfBarChartStyle(chart: BarChart) {
+        chart.setBackgroundColor(Color.parseColor(COLOR_CARD))
+        chart.setNoDataText("Нет данных")
+        chart.setNoDataTextColor(Color.parseColor(COLOR_TEXT_SECONDARY))
+        chart.description.isEnabled = false
+        chart.xAxis.apply {
+            position = XAxis.XAxisPosition.BOTTOM
+            textColor = Color.parseColor(COLOR_TEXT_SECONDARY)
+            textSize = 9f
+            setDrawGridLines(false)
+            setDrawAxisLine(true)
+            axisLineColor = Color.parseColor(COLOR_GRID)
+            axisLineWidth = 1f
+            granularity = 1f
+            labelRotationAngle = -45f
+        }
+        chart.axisLeft.apply {
+            textColor = Color.parseColor(COLOR_TEXT_SECONDARY)
+            textSize = 10f
+            axisMinimum = 0f
+            axisMaximum = 100f
+            setDrawGridLines(true)
+            gridColor = Color.parseColor(COLOR_GRID)
+            gridLineWidth = 0.5f
+            setDrawAxisLine(true)
+            axisLineColor = Color.parseColor(COLOR_GRID)
+        }
+        chart.axisRight.isEnabled = false
+        chart.legend.apply {
+            textColor = Color.parseColor(COLOR_TEXT_PRIMARY)
+            textSize = 10f
+            verticalAlignment = Legend.LegendVerticalAlignment.TOP
+            horizontalAlignment = Legend.LegendHorizontalAlignment.RIGHT
+            orientation = Legend.LegendOrientation.HORIZONTAL
+            setDrawInside(true)
+            yOffset = 10f
+        }
+        chart.setVisibleXRangeMaximum(8f)
     }
     
     private fun applyHorizontalBarChartStyle(chart: HorizontalBarChart) {
@@ -266,6 +310,7 @@ class DashboardActivity : AppCompatActivity() {
         val data = filteredExpressResults
         refreshChartsForFiltered(data)
         
+        // График по лигам
         val leagueMatches = data.flatMap { it.matches }
         val leagueMap = leagueMatches.groupBy { it.liganame }
         val leagueStatsList = leagueMap.map { (liga, matches) ->
@@ -279,6 +324,14 @@ class DashboardActivity : AppCompatActivity() {
         } else {
             barChartLeague.clear()
             barChartLeague.invalidate()
+        }
+        
+        // График по градациям kf
+        if (allKfBuckets.isNotEmpty()) {
+            setupKfBarChart(allKfBuckets)
+        } else {
+            barChartKf.clear()
+            barChartKf.invalidate()
         }
     }
     
@@ -323,6 +376,8 @@ class DashboardActivity : AppCompatActivity() {
                 applyFilters()
                 
                 allLeagueStats = (analytics["byLeague"] as? List<LeagueStats>) ?: emptyList()
+                allKfBuckets = (analytics["byKfBuckets"] as? List<KfBucketStats>) ?: emptyList()
+                
                 spinnerLeague.adapter = ArrayAdapter(
                     this@DashboardActivity,
                     android.R.layout.simple_spinner_item,
@@ -467,5 +522,75 @@ class DashboardActivity : AppCompatActivity() {
         barChartLeague.data = BarData(dataSet).apply { barWidth = 0.7f }
         barChartLeague.animateY(1000)
         barChartLeague.invalidate()
+    }
+    
+    private fun setupKfBarChart(kfBuckets: List<KfBucketStats>) {
+        if (kfBuckets.isEmpty()) {
+            barChartKf.clear()
+            barChartKf.invalidate()
+            return
+        }
+        
+        val labels = kfBuckets.map { it.kfRange }
+        
+        val type924Entries = mutableListOf<BarEntry>()
+        val type927Entries = mutableListOf<BarEntry>()
+        val type928Entries = mutableListOf<BarEntry>()
+        
+        kfBuckets.forEachIndexed { index, bucket ->
+            bucket.typeStats[924]?.let {
+                type924Entries.add(BarEntry(index.toFloat(), it.rate.toFloat()))
+            }
+            bucket.typeStats[927]?.let {
+                type927Entries.add(BarEntry(index.toFloat(), it.rate.toFloat()))
+            }
+            bucket.typeStats[928]?.let {
+                type928Entries.add(BarEntry(index.toFloat(), it.rate.toFloat()))
+            }
+        }
+        
+        val dataSet924 = BarDataSet(type924Entries, "1X (924)").apply {
+            color = Color.parseColor(COLOR_GOLD)
+            valueTextSize = 8f
+            valueTextColor = Color.parseColor(COLOR_TEXT_PRIMARY)
+            setDrawValues(false)
+        }
+        
+        val dataSet927 = BarDataSet(type927Entries, "Ф1+1.5 (927)").apply {
+            color = Color.parseColor(COLOR_GREEN)
+            valueTextSize = 8f
+            valueTextColor = Color.parseColor(COLOR_TEXT_PRIMARY)
+            setDrawValues(false)
+        }
+        
+        val dataSet928 = BarDataSet(type928Entries, "Ф2+1.5 (928)").apply {
+            color = Color.parseColor(COLOR_BLUE)
+            valueTextSize = 8f
+            valueTextColor = Color.parseColor(COLOR_TEXT_PRIMARY)
+            setDrawValues(false)
+        }
+        
+        val groupSpace = 0.08f
+        val barSpace = 0.02f
+        val barWidth = 0.28f
+        
+        val barData = BarData(dataSet924, dataSet927, dataSet928).apply {
+            barWidth = barWidth
+        }
+        
+        barChartKf.apply {
+            data = barData
+            groupBars(0f, groupSpace, barSpace)
+            
+            xAxis.apply {
+                valueFormatter = IndexAxisValueFormatter(labels)
+                labelCount = labels.size
+            }
+            
+            setVisibleXRangeMaximum(8f)
+            moveViewToX(0f)
+            animateY(1000)
+            invalidate()
+        }
     }
 }
