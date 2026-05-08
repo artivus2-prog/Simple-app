@@ -306,7 +306,7 @@ class MainActivity : AppCompatActivity() {
         val maxActive = settingsPrefs.getInt(KEY_MAX_ACTIVE_EXP, 5)
         
         val type924Settings = ApiClient.TypeSettings(
-            name = "1х/футбол/хоккей",
+            name = "1х/футбол",
             minBet = settingsPrefs.getFloat(KEY_TYPE_924_MIN, 1.15f).toDouble(),
             maxBet = settingsPrefs.getFloat(KEY_TYPE_924_MAX, 1.50f).toDouble(),
             monitorStart = settingsPrefs.getInt(KEY_TYPE_924_MONITOR_START, 80),
@@ -314,7 +314,7 @@ class MainActivity : AppCompatActivity() {
         )
         
         val type927Settings = ApiClient.TypeSettings(
-            name = "ф1(+1.5)/футбол/хоккей",
+            name = "ф1(+1.5)/футбол",
             minBet = settingsPrefs.getFloat(KEY_TYPE_927_MIN, 1.15f).toDouble(),
             maxBet = settingsPrefs.getFloat(KEY_TYPE_927_MAX, 1.50f).toDouble(),
             monitorStart = settingsPrefs.getInt(KEY_TYPE_927_MONITOR_START, 1),
@@ -322,7 +322,7 @@ class MainActivity : AppCompatActivity() {
         )
         
         val type928Settings = ApiClient.TypeSettings(
-            name = "ф2(+1.5)/футбол/хоккей",
+            name = "ф2(+1.5)/футбол",
             minBet = settingsPrefs.getFloat(KEY_TYPE_928_MIN, 1.15f).toDouble(),
             maxBet = settingsPrefs.getFloat(KEY_TYPE_928_MAX, 1.50f).toDouble(),
             monitorStart = settingsPrefs.getInt(KEY_TYPE_928_MONITOR_START, 1),
@@ -833,7 +833,7 @@ class MainActivity : AppCompatActivity() {
             val sh = match.sh
             val sa = match.sa
             
-            val hasScoreData = (sh > 0 || sa > 0) || (sh == 0 && sa == 0 && currentMinute > 0)
+            val hasScoreData = currentMinute > 0
             val scoreText: String = if (hasScoreData) {
                 if (currentMinute in 1..125) {
                     "$sh:$sa ($currentMinute')"
