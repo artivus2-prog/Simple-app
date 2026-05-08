@@ -304,48 +304,6 @@
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 
-            <!-- НОВАЯ ГИСТОГРАММА: Градация по startkf -->
-            <androidx.cardview.widget.CardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_margin="4dp"
-                android:layout_marginBottom="10dp"
-                app:cardBackgroundColor="#1E2329"
-                app:cardCornerRadius="12dp"
-                app:cardElevation="0dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="16dp">
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Проходимость по градации startkf"
-                        android:textSize="13sp"
-                        android:textStyle="bold"
-                        android:textColor="#848E9C"
-                        android:gravity="center"
-                        android:layout_marginBottom="4dp" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Шаг 0.05 | Нажмите на столбец для детализации"
-                        android:textSize="10sp"
-                        android:textColor="#5E6673"
-                        android:gravity="center"
-                        android:layout_marginBottom="8dp" />
-
-                    <com.github.mikephil.charting.charts.BarChart
-                        android:id="@+id/bar_chart_kf_range"
-                        android:layout_width="match_parent"
-                        android:layout_height="250dp" />
-                </LinearLayout>
-            </androidx.cardview.widget.CardView>
-
             <!-- Гистограмма по лигам -->
             <androidx.cardview.widget.CardView
                 android:layout_width="match_parent"

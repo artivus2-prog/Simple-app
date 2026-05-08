@@ -1,4 +1,4 @@
-﻿// DashboardActivity.kt — С ГРАФИКОМ ГРАДАЦИИ startkf
+﻿// DashboardActivity.kt
 package com.example.fonbetbot
 
 import android.graphics.Color
@@ -29,7 +29,6 @@ class DashboardActivity : AppCompatActivity() {
     private lateinit var pieChart: PieChart
     private lateinit var barChartDay: BarChart
     private lateinit var barChartHour: BarChart
-    private lateinit var barChartKfRange: BarChart  // НОВЫЙ ГРАФИК
     private lateinit var barChartLeague: HorizontalBarChart
     private lateinit var btnRefresh: Button
     private lateinit var btnBack: Button
@@ -40,7 +39,6 @@ class DashboardActivity : AppCompatActivity() {
     private lateinit var analyticsEngine: AnalyticsEngine
     
     private var allLeagueStats = listOf<LeagueStats>()
-    private var allKfRangeStats = listOf<KfRangeStats>()  // НОВАЯ ПЕРЕМЕННАЯ
     private var allExpressResults = listOf<ExpressResult>()
     private var filteredExpressResults = listOf<ExpressResult>()
     private var selectedLeague: String? = null
@@ -64,7 +62,6 @@ class DashboardActivity : AppCompatActivity() {
         pieChart = findViewById(R.id.pie_chart)
         barChartDay = findViewById(R.id.bar_chart_day)
         barChartHour = findViewById(R.id.bar_chart_hour)
-        barChartKfRange = findViewById(R.id.bar_chart_kf_range)  // НОВЫЙ ГРАФИК
         barChartLeague = findViewById(R.id.bar_chart_league)
         btnRefresh = findViewById(R.id.btn_refresh)
         btnBack = findViewById(R.id.btn_back)
@@ -117,7 +114,7 @@ class DashboardActivity : AppCompatActivity() {
     // ========== СТИЛИ ГРАФИКОВ ==========
     
     private fun initChartStyles() {
-        for (chart in listOf(pieChart, barChartDay, barChartHour, barChartKfRange, barChartLeague)) {
+        for (chart in listOf(pieChart, barChartDay, barChartHour, barChartLeague)) {
             when (chart) {
                 is PieChart -> applyPieChartStyle(chart)
                 is BarChart -> applyBarChartStyle(chart)
@@ -269,12 +266,6 @@ class DashboardActivity : AppCompatActivity() {
         val data = filteredExpressResults
         refreshChartsForFiltered(data)
         
-        // Обновляем данные для графика градации kf
-        val allMatches = data.flatMap { it.matches }
-        recalculateKfRangeStats(allMatches)
-        setupKfRangeBarChart()
-        
-        // Обновляем данные для графика лиг
         val leagueMatches = data.flatMap { it.matches }
         val leagueMap = leagueMatches.groupBy { it.liganame }
         val leagueStatsList = leagueMap.map { (liga, matches) ->
@@ -291,56 +282,6 @@ class DashboardActivity : AppCompatActivity() {
         }
     }
     
-    /**
-     * Пересчитывает статистику по градациям kf для отфильтрованных данных
-     */
-    private fun recalculateKfRangeStats(allMatches: List<MatchResult>) {
-        val validKfs = allMatches.filter { it.startkf > 0 }.map { it.startkf }
-        if (validKfs.isEmpty()) {
-            allKfRangeStats = emptyList()
-            return
-        }
-        
-        val maxKf = validKfs.maxOrNull() ?: 2.0
-        val step = 0.05
-        val startRange = 1.00
-        val endRange = Math.ceil(maxKf / step) * step
-        
-        val statsList = mutableListOf<KfRangeStats>()
-        var currentMin = startRange
-        
-        while (currentMin < endRange) {
-            val currentMax = currentMin + step
-            
-            val rangeMatches = if (currentMax >= endRange - step / 2) {
-                allMatches.filter { it.startkf >= currentMin && it.startkf <= currentMax }
-            } else {
-                allMatches.filter { it.startkf >= currentMin && it.startkf < currentMax }
-            }
-            
-            val total = rangeMatches.size
-            val wins = rangeMatches.count { it.isWin }
-            val rate = if (total > 0) (wins.toDouble() / total) * 100 else 0.0
-            
-            val rangeLabel = String.format(Locale.US, "%.2f-%.2f", currentMin, currentMax)
-            
-            statsList.add(
-                KfRangeStats(
-                    rangeLabel = rangeLabel,
-                    minKf = currentMin,
-                    maxKf = currentMax,
-                    total = total,
-                    wins = wins,
-                    rate = rate
-                )
-            )
-            
-            currentMin = currentMax
-        }
-        
-        allKfRangeStats = statsList
-    }
-    
     private fun refreshChartsForFiltered(filtered: List<ExpressResult>) {
         val total = filtered.size
         val wins = filtered.count { it.isWin }
@@ -348,7 +289,6 @@ class DashboardActivity : AppCompatActivity() {
         
         setupPieChart(AnalyticsSummary(total, wins, total - wins, rate, ""))
         
-        // Статистика по дням
         val byDay = LinkedHashMap<DayOfWeek, Pair<Int, Int>>()
         for (d in DayOfWeek.entries) {
             val ex = filtered.filter { it.dateTime.dayOfWeek == d }
@@ -356,7 +296,6 @@ class DashboardActivity : AppCompatActivity() {
         }
         setupDayBarChart(byDay)
         
-        // Статистика по часам
         val byHour = TreeMap<Int, Pair<Int, Int>>()
         for (h in 0..23) {
             val ex = filtered.filter { it.dateTime.hour == h }
@@ -381,7 +320,6 @@ class DashboardActivity : AppCompatActivity() {
                 val analytics = withContext(Dispatchers.IO) { analyticsEngine.calculateAnalytics() }
                 
                 allExpressResults = (analytics["allExpresses"] as? List<ExpressResult>) ?: emptyList()
-                allKfRangeStats = (analytics["byKfRange"] as? List<KfRangeStats>) ?: emptyList()
                 applyFilters()
                 
                 allLeagueStats = (analytics["byLeague"] as? List<LeagueStats>) ?: emptyList()
@@ -490,124 +428,6 @@ class DashboardActivity : AppCompatActivity() {
         barChartHour.data = BarData(dataSet).apply { barWidth = 0.7f }
         barChartHour.animateY(1000)
         barChartHour.invalidate()
-    }
-    
-    /**
-     * НОВЫЙ ГРАФИК: Градация по startkf
-     */
-    private fun setupKfRangeBarChart() {
-        if (allKfRangeStats.isEmpty()) {
-            barChartKfRange.clear()
-            barChartKfRange.setNoDataText("Нет данных по коэффициентам")
-            barChartKfRange.invalidate()
-            return
-        }
-        
-        // Фильтруем только диапазоны, где есть данные
-        val nonEmptyStats = allKfRangeStats.filter { it.total > 0 }
-        
-        if (nonEmptyStats.isEmpty()) {
-            barChartKfRange.clear()
-            barChartKfRange.setNoDataText("Нет данных по коэффициентам")
-            barChartKfRange.invalidate()
-            return
-        }
-        
-        val entries = mutableListOf<BarEntry>()
-        val labels = mutableListOf<String>()
-        val colors = mutableListOf<Int>()
-        
-        // Определяем максимальное количество матчей для нормализации цвета
-        val maxTotal = nonEmptyStats.maxOfOrNull { it.total } ?: 1
-        
-        nonEmptyStats.forEachIndexed { index, stat ->
-            entries.add(BarEntry(index.toFloat(), stat.rate.toFloat()))
-            
-            // Показываем компактную метку диапазона
-            val shortLabel = String.format(Locale.US, "%.2f", stat.minKf)
-            labels.add(shortLabel)
-            
-            // Цвет зависит от проходимости
-            val color = when {
-                stat.rate >= 60 -> Color.parseColor(COLOR_GREEN)  // Зелёный — хорошо
-                stat.rate >= 40 -> Color.parseColor("#F0B90B")    // Жёлтый — средне
-                stat.rate > 0 -> Color.parseColor(COLOR_RED)      // Красный — плохо
-                else -> Color.parseColor("#3A4048")                // Серый — нет данных
-            }
-            colors.add(color)
-        }
-        
-        val dataSet = BarDataSet(entries, "Проходимость %").apply {
-            this.colors = colors
-            valueTextSize = 9f
-            valueTextColor = Color.parseColor(COLOR_TEXT_PRIMARY)
-            setDrawValues(true)
-            valueFormatter = object : com.github.mikephil.charting.formatter.ValueFormatter() {
-                override fun getBarLabel(barEntry: BarEntry?): String {
-                    val rate = barEntry?.y ?: 0f
-                    return if (rate > 0) String.format(Locale.US, "%.0f%%", rate) else ""
-                }
-            }
-        }
-        
-        // Настройка оси X
-        barChartKfRange.xAxis.apply {
-            valueFormatter = IndexAxisValueFormatter(labels)
-            position = XAxis.XAxisPosition.BOTTOM
-            textColor = Color.parseColor(COLOR_TEXT_SECONDARY)
-            textSize = 10f
-            setDrawGridLines(false)
-            setDrawAxisLine(true)
-            axisLineColor = Color.parseColor(COLOR_GRID)
-            axisLineWidth = 1f
-            granularity = 1f
-            labelRotationAngle = -45f  // Поворачиваем метки для компактности
-        }
-        
-        // Настройка оси Y
-        barChartKfRange.axisLeft.apply {
-            textColor = Color.parseColor(COLOR_TEXT_SECONDARY)
-            textSize = 10f
-            axisMinimum = 0f
-            axisMaximum = 100f
-            setDrawGridLines(true)
-            gridColor = Color.parseColor(COLOR_GRID)
-            gridLineWidth = 0.5f
-            setDrawAxisLine(true)
-            axisLineColor = Color.parseColor(COLOR_GRID)
-        }
-        
-        barChartKfRange.axisRight.isEnabled = false
-        barChartKfRange.legend.isEnabled = false
-        barChartKfRange.description.isEnabled = false
-        
-        val barData = BarData(dataSet).apply {
-            barWidth = 0.7f
-        }
-        
-        barChartKfRange.data = barData
-        
-        // Делаем график прокручиваемым если много столбцов
-        if (nonEmptyStats.size > 10) {
-            barChartKfRange.setVisibleXRangeMaximum(10f)
-            barChartKfRange.moveViewToX(0f)
-        }
-        
-        barChartKfRange.animateY(1000)
-        barChartKfRange.invalidate()
-        
-        // Добавляем обработчик нажатия для показа детальной информации
-        barChartKfRange.setOnChartValueListener { entry, highlight ->
-            val index = entry.x.toInt()
-            if (index in nonEmptyStats.indices) {
-                val stat = nonEmptyStats[index]
-                val message = "${stat.rangeLabel}\n" +
-                        "Всего матчей: ${stat.total}\n" +
-                        "Выигрышей: ${stat.wins}\n" +
-                        "Проходимость: ${String.format(Locale.US, "%.1f", stat.rate)}%"
-                Toast.makeText(this, message, Toast.LENGTH_LONG).show()
-            }
-        }
     }
     
     private fun setupLeagueBarChart(ls: List<LeagueStats>) {
